@@ -1,0 +1,112 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root,
+[data-theme="light"] {
+  --atc-bg: #efeae0;
+  --atc-panel: #faf7f0;
+  --atc-surface: #ffffff;
+  --atc-surface-alt: #f4efe4;
+  --atc-border: #e2dac8;
+  --atc-border-strong: #cdc2ab;
+  --atc-text: #1c1917;
+  --atc-text-secondary: #44403c;
+  --atc-muted: #78716c;
+  --atc-accent: #eab308;
+  --atc-accent-bg: rgba(234, 179, 8, 0.18);
+  --atc-accent-soft: #fef9c3;
+  --atc-accent-border: #eab308;
+  --atc-accent-text: #854d0e;
+  --atc-cyan: #0369a1;
+  --atc-cyan-bg: rgba(2, 132, 199, 0.1);
+  --atc-cyan-border: rgba(2, 132, 199, 0.35);
+  --atc-emerald: #047857;
+  --atc-emerald-bg: rgba(5, 150, 105, 0.1);
+  --atc-emerald-border: rgba(5, 150, 105, 0.35);
+  --atc-red: #b91c1c;
+  --atc-red-bg: rgba(220, 38, 38, 0.09);
+  --atc-red-border: rgba(220, 38, 38, 0.32);
+  --atc-amber: #b45309;
+  --atc-amber-bg: rgba(217, 119, 6, 0.11);
+  --atc-amber-border: rgba(217, 119, 6, 0.35);
+  --atc-shadow: 0 1px 3px rgba(28, 25, 23, 0.06), 0 1px 2px rgba(28, 25, 23, 0.04);
+  --atc-scroll-track: #efeae0;
+  --atc-scroll-thumb: #cfc6b4;
+  --atc-scroll-thumb-hover: #b3a68e;
+}
+
+[data-theme="dark"] {
+  --atc-bg: #060b12;
+  --atc-panel: #08101c;
+  --atc-surface: #0d1828;
+  --atc-surface-alt: #0b1422;
+  --atc-border: #1a2c44;
+  --atc-border-strong: #274063;
+  --atc-text: #f1f5f9;
+  --atc-text-secondary: #cbd5e1;
+  --atc-muted: #64748b;
+  --atc-accent: #f59e0b;
+  --atc-accent-bg: rgba(245, 158, 11, 0.15);
+  --atc-accent-soft: rgba(245, 158, 11, 0.12);
+  --atc-accent-border: rgba(245, 158, 11, 0.55);
+  --atc-accent-text: #fcd34d;
+  --atc-cyan: #22d3ee;
+  --atc-cyan-bg: rgba(34, 211, 238, 0.11);
+  --atc-cyan-border: rgba(34, 211, 238, 0.35);
+  --atc-emerald: #34d399;
+  --atc-emerald-bg: rgba(16, 185, 129, 0.12);
+  --atc-emerald-border: rgba(16, 185, 129, 0.35);
+  --atc-red: #f87171;
+  --atc-red-bg: rgba(239, 68, 68, 0.13);
+  --atc-red-border: rgba(239, 68, 68, 0.38);
+  --atc-amber: #fbbf24;
+  --atc-amber-bg: rgba(245, 158, 11, 0.12);
+  --atc-amber-border: rgba(245, 158, 11, 0.38);
+  --atc-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  --atc-scroll-track: #070d16;
+  --atc-scroll-thumb: #1e3048;
+  --atc-scroll-thumb-hover: #2f4b70;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    background-color: var(--atc-bg);
+    color: var(--atc-text);
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
+
+/* Custom sleek theme-aware ATC scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--atc-scroll-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--atc-scroll-thumb);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--atc-scroll-thumb-hover);
+}
+
+.scanlines {
+  background-image: linear-gradient(
+    to bottom,
+    rgba(34, 211, 238, 0.015) 50%,
+    transparent 50%
+  );
+  background-size: 100% 4px;
+}

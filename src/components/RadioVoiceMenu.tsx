@@ -1,0 +1,193 @@
+import React, { useEffect, useState } from "react";
+import { Activity, BookOpen, ChevronDown, Mic, SlidersHorizontal, Volume2 } from "lucide-react";
+import { useAtcStore } from "../store/atcStore.ts";
+import { ICAO_PHONETIC_TABLE } from "../utils/natoPhonetics.ts";
+import { radioAudio, type RankedVoice } from "../utils/radioAudio.ts";
+import { Accordion } from "./Accordion.tsx";
+
+export const RadioVoiceMenu: React.FC = () => {
+  const sim = useAtcStore((s) => s.sim);
+  const voiceEnabled = useAtcStore((s) => s.voiceEnabled);
+  const toggleVoice = useAtcStore((s) => s.toggleVoice);
+
+  const [open, setOpen] = useState(false);
+  const [voices, setVoices] = useState<RankedVoice[]>(() => radioAudio.getAvailableVoices());
+  const [ctrlVoice, setCtrlVoice] = useState(radioAudio.preferredControllerVoiceURI);
+  const [pilotVoice, setPilotVoice] = useState(radioAudio.preferredPilotVoiceURI);
+  const [staticLevel, setStaticLevel] = useState(radioAudio.radioStaticLevel);
+
+  useEffect(() => {
+    const unsub = radioAudio.subscribe(() => {
+      setVoices([...radioAudio.getAvailableVoices()]);
+    });
+    setVoices([...radioAudio.getAvailableVoices()]);
+    return unsub;
+  }, []);
+
+  const activeCtrl = radioAudio.getEffectiveControllerVoice();
+  const hasOnlyLocalVoices =
+    voices.length > 0 && voices.every((v) => v.quality === "LOCAL");
+
+  return (
+    <div className="relative flex items-center shrink-0">
+      <div className="flex items-center rounded-md border overflow-hidden border-[var(--atc-border)] bg-[var(--atc-surface)] shadow-sm">
+        <button
+          onClick={toggleVoice}
+          title="Toggle ATC Radio Voice"
+          className={`px-2 py-1.5 text-[11px] font-mono flex items-center gap-1 whitespace-nowrap transition-colors ${
+            voiceEnabled
+              ? "bg-[var(--atc-accent-bg)] text-[var(--atc-accent-text)] font-bold"
+              : "text-[var(--atc-muted)] hover:text-[var(--atc-text)]"
+          }`}
+        >
+          <Activity className="w-3.5 h-3.5 shrink-0" />
+          <span className="hidden sm:inline">VOICE</span>
+        </button>
+        <button
+          onClick={() => {
+            setVoices([...radioAudio.getAvailableVoices()]);
+            setOpen((v) => !v);
+          }}
+          title="Radio Voice & VHF Static Settings"
+          className="px-1.5 py-1.5 border-l border-[var(--atc-border)] text-[var(--atc-muted)] hover:text-[var(--atc-text)] hover:bg-[var(--atc-surface-alt)]"
+        >
+          <ChevronDown className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-2 w-80 z-50 rounded-xl border border-[var(--atc-border)] bg-[var(--atc-surface)] shadow-2xl p-3 space-y-2.5 text-xs font-mono text-[var(--atc-text)]">
+          <div className="flex items-center justify-between border-b border-[var(--atc-border)] pb-2">
+            <div className="flex items-center gap-1.5 text-[var(--atc-text)] font-bold">
+              <SlidersHorizontal className="w-3.5 h-3.5 text-[var(--atc-accent)]" />
+              VHF RADIO & VOICE
+            </div>
+            <button
+              onClick={() => setOpen(false)}
+              className="text-[var(--atc-muted)] hover:text-[var(--atc-text)] text-[11px]"
+            >
+              CLOSE
+            </button>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[10px] text-[var(--atc-muted)] block">
+              CONTROLLER VOICE ({activeCtrl ? activeCtrl.quality : "NONE"})
+            </label>
+            <select
+              value={ctrlVoice}
+              onChange={(e) => {
+                radioAudio.preferredControllerVoiceURI = e.target.value;
+                setCtrlVoice(e.target.value);
+              }}
+              className="w-full bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] rounded px-2 py-1.5 text-[11px] text-[var(--atc-text)]"
+            >
+              <option value="AUTO">Auto-Select Best ATC Voice</option>
+              {voices.map((v) => (
+                <option key={v.voice.voiceURI} value={v.voice.voiceURI}>
+                  [{v.quality}] {v.voice.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[10px] text-[var(--atc-muted)] block">PILOT VOICES</label>
+            <select
+              value={pilotVoice}
+              onChange={(e) => {
+                radioAudio.preferredPilotVoiceURI = e.target.value;
+                setPilotVoice(e.target.value);
+              }}
+              className="w-full bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] rounded px-2 py-1.5 text-[11px] text-[var(--atc-text)]"
+            >
+              <option value="AUTO">Auto-Rotate Distinct Pilot Voices</option>
+              {voices.map((v) => (
+                <option key={v.voice.voiceURI} value={v.voice.voiceURI}>
+                  [{v.quality}] {v.voice.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-[10px] text-[var(--atc-muted)]">
+              <span className="flex items-center gap-1">
+                <Volume2 className="w-3 h-3" /> VHF STATIC & SQUELCH
+              </span>
+              <span className="text-[var(--atc-text)] font-bold">
+                {Math.round(staticLevel * 100)}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={staticLevel}
+              onChange={(e) => {
+                const val = Number(e.target.value);
+                radioAudio.radioStaticLevel = val;
+                setStaticLevel(val);
+              }}
+              className="w-full accent-amber-500"
+            />
+          </div>
+
+          <div className="px-2.5 py-1.5 rounded bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] text-[10px] flex items-center justify-between">
+            <span className="text-[var(--atc-muted)]">ACTIVE FREQ:</span>
+            <span className="text-[var(--atc-cyan)] font-bold">
+              {sim.config.activePlayerStation === "ALL"
+                ? "ALL (G + T + D)"
+                : `${sim.config.activePlayerStation} ONLY`}
+            </span>
+          </div>
+
+          {hasOnlyLocalVoices && (
+            <div className="p-2 rounded bg-[var(--atc-amber-bg)] border border-[var(--atc-amber-border)] text-[10px] text-[var(--atc-amber)] leading-relaxed">
+              Only offline OS voices detected ({voices[0]?.voice.name}). Edge/Chrome neural voices give even sharper ATC timbre.
+            </div>
+          )}
+
+          <button
+            onClick={() => {
+              if (!radioAudio.voiceEnabled) toggleVoice();
+              radioAudio.stopAllSpeech();
+              radioAudio.speakRadio(
+                "United 452, Asteria Tower, taxi via Alpha, runway 09L cleared for takeoff, direct ASTER1.",
+                "CONTROLLER",
+                "TOWER",
+                true
+              );
+              radioAudio.speakRadio(
+                "Cleared for takeoff runway 09L, direct ASTER1, United 452.",
+                "PILOT",
+                "UAL452",
+                true
+              );
+            }}
+            className="w-full py-1.5 rounded-md bg-[var(--atc-accent-bg)] hover:opacity-90 border border-[var(--atc-accent-border)] text-[var(--atc-accent-text)] font-bold flex items-center justify-center gap-1.5"
+          >
+            <Mic className="w-3.5 h-3.5" />
+            TEST ATC RADIO VOICE
+          </button>
+
+          <Accordion
+            title="ICAO Phonetic Alphabet (A–Z)"
+            icon={<BookOpen className="w-3 h-3" />}
+            defaultOpen={false}
+          >
+            <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 max-h-36 overflow-y-auto text-[10px]">
+              {ICAO_PHONETIC_TABLE.map((entry) => (
+                <div key={entry.letter} className="flex items-center justify-between">
+                  <span className="text-[var(--atc-cyan)] font-bold">{entry.letter}</span>
+                  <span className="text-[var(--atc-text)]">{entry.icao}</span>
+                </div>
+              ))}
+            </div>
+          </Accordion>
+        </div>
+      )}
+    </div>
+  );
+};
