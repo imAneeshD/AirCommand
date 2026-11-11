@@ -1121,14 +1121,15 @@ export function createSolarisAirport(): AirportLayout {
 
 export function createAirportById(airportId: AirportId): AirportLayout {
   switch (airportId) {
-    case "KAST":
-      return createAsteriaAirport();
     case "KMRD":
       return createMeridianAirport();
     case "KVEL":
       return createVeloceAirport();
     case "KSOL":
       return createSolarisAirport();
+    case "KAST":
+    default:
+      return createAsteriaAirport();
   }
 }
 
@@ -1154,6 +1155,19 @@ export const AIRPORT_CATALOG: AirportSummary[] = (["KAST", "KMRD", "KVEL", "KSOL
  * of assigned taxiways (e.g. ["A", "B"] goes Alpha -> Bravo, NEVER Alpha -> Charlie).
  * APRON edges are permitted only when departing from or arriving at a GATE/PUSHBACK_SPOT.
  */
+function buildOutgoingIndex(airport: AirportLayout): Map<string, TaxiEdge[]> {
+  const map = new Map<string, TaxiEdge[]>();
+  for (const e of airport.edges) {
+    let arr = map.get(e.from);
+    if (!arr) {
+      arr = [];
+      map.set(e.from, arr);
+    }
+    arr.push(e);
+  }
+  return map;
+}
+
 export function findRouteAlongTaxiways(
   airport: AirportLayout,
   startNodeId: string,
@@ -1170,35 +1184,42 @@ export function findRouteAlongTaxiways(
     return null;
   }
 
+  const adj = buildOutgoingIndex(airport);
+  const isConnectorTw = (tw: string) =>
+    tw === "APRON" || (Boolean(airport.isRealWorld) && tw === "LINK");
+
   interface SearchState {
     nodeId: string;
     phase: number;
-    path: string[];
+    parentIdx: number;
   }
-
-  const queue: SearchState[] = [{ nodeId: startNodeId, phase: -1, path: [startNodeId] }];
-  const visited = new Set<string>([`${startNodeId}|-1`]);
 
   const startNode = airport.nodes[startNodeId];
-  if (startNode.kind !== "GATE" && startNode.kind !== "PUSHBACK_SPOT") {
-    queue[0].phase = 0;
-    visited.add(`${startNodeId}|0`);
-  }
+  const initPhase = startNode.kind !== "GATE" && startNode.kind !== "PUSHBACK_SPOT" ? 0 : -1;
+  const queue: SearchState[] = [{ nodeId: startNodeId, phase: initPhase, parentIdx: -1 }];
+  const visited = new Set<string>([`${startNodeId}|${initPhase}`]);
 
-  while (queue.length > 0) {
-    const cur = queue.shift()!;
+  let head = 0;
+  while (head < queue.length) {
+    const curIdx = head++;
+    const cur = queue[curIdx];
     if (cur.nodeId === destinationNodeId && cur.phase >= 0) {
-      return cur.path;
+      const path: string[] = [];
+      let p = curIdx;
+      while (p >= 0) {
+        path.push(queue[p].nodeId);
+        p = queue[p].parentIdx;
+      }
+      path.reverse();
+      return path;
     }
 
-    const outgoing = airport.edges.filter((e) => e.from === cur.nodeId);
+    const outgoing = adj.get(cur.nodeId) ?? [];
     for (const edge of outgoing) {
-      if (cur.path.includes(edge.to)) continue;
-
       const nextPhases: number[] = [];
 
       if (cur.phase === -1) {
-        if (edge.taxiway === "APRON") {
+        if (isConnectorTw(edge.taxiway)) {
           nextPhases.push(-1);
         } else if (edge.taxiway === routeTaxiways[0]) {
           nextPhases.push(0);
@@ -1213,11 +1234,14 @@ export function findRouteAlongTaxiways(
         ) {
           nextPhases.push(cur.phase + 1);
         }
-        if (cur.phase === routeTaxiways.length - 1 && edge.taxiway === "APRON") {
+        if (airport.isRealWorld && isConnectorTw(edge.taxiway)) {
+          nextPhases.push(cur.phase);
+        }
+        if (cur.phase === routeTaxiways.length - 1 && isConnectorTw(edge.taxiway)) {
           nextPhases.push(routeTaxiways.length);
         }
       } else if (cur.phase === routeTaxiways.length) {
-        if (edge.taxiway === "APRON") {
+        if (isConnectorTw(edge.taxiway)) {
           nextPhases.push(routeTaxiways.length);
         }
       }
@@ -1229,7 +1253,7 @@ export function findRouteAlongTaxiways(
           queue.push({
             nodeId: edge.to,
             phase: np,
-            path: [...cur.path, edge.to],
+            parentIdx: curIdx,
           });
         }
       }
@@ -1240,13 +1264,14 @@ export function findRouteAlongTaxiways(
 }
 
 function getAdjacentTaxiway(airport: AirportLayout, nodeId: string): TaxiwayName | null {
+  const adj = buildOutgoingIndex(airport);
   const visited = new Set<string>([nodeId]);
   const q = [nodeId];
-  while (q.length > 0) {
-    const cur = q.shift()!;
-    for (const e of airport.edges) {
-      if (e.from !== cur) continue;
-      if (e.taxiway !== "APRON") return e.taxiway;
+  let head = 0;
+  while (head < q.length) {
+    const cur = q[head++];
+    for (const e of adj.get(cur) ?? []) {
+      if (e.taxiway !== "APRON" && e.taxiway !== "LINK") return e.taxiway;
       if (!visited.has(e.to)) {
         visited.add(e.to);
         q.push(e.to);
@@ -1260,12 +1285,12 @@ function extractTaxiwaySequence(airport: AirportLayout, nodeIds: string[]): Taxi
   const seq: TaxiwayName[] = [];
   for (let i = 0; i < nodeIds.length - 1; i++) {
     const edge = airport.edges.find((e) => e.from === nodeIds[i] && e.to === nodeIds[i + 1]);
-    if (!edge || edge.taxiway === "APRON") continue;
+    if (!edge || edge.taxiway === "APRON" || edge.taxiway === "LINK") continue;
     if (seq[seq.length - 1] !== edge.taxiway) {
       seq.push(edge.taxiway);
     }
   }
-  return seq;
+  return seq.length > 0 ? seq : ["LINK"];
 }
 
 function findShortestTaxiwayPath(
@@ -1275,35 +1300,53 @@ function findShortestTaxiwayPath(
   avoidRunwayEntryIds?: Set<string>
 ): string[] | null {
   if (!airport.nodes[startNodeId] || !airport.nodes[destNodeId]) return null;
-  interface Item {
-    nodeId: string;
-    path: string[];
-    crossings: number;
-  }
-  const q: Item[] = [{ nodeId: startNodeId, path: [startNodeId], crossings: 0 }];
-  const bestCrossings = new Map<string, number>([[startNodeId, 0]]);
+  if (startNodeId === destNodeId) return [startNodeId];
 
-  let bestSolution: Item | null = null;
-  while (q.length > 0) {
-    // Prefer fewest runway crossings, then shortest hops
-    q.sort((a, b) => a.crossings - b.crossings || a.path.length - b.path.length);
-    const cur = q.shift()!;
-    if (cur.nodeId === destNodeId) {
-      bestSolution = cur;
-      break;
+  const adj = buildOutgoingIndex(airport);
+  // 0-1 BFS / Dijkstra minimizing (runwayCrossings * 1_000_000 + hopCount) in O((V + E) log V)
+  const bestScore = new Map<string, number>([[startNodeId, 0]]);
+  const parent = new Map<string, string>();
+  const settled = new Set<string>();
+  const pq: Array<{ nodeId: string; score: number }> = [{ nodeId: startNodeId, score: 0 }];
+
+  while (pq.length > 0) {
+    let minIdx = 0;
+    for (let i = 1; i < pq.length; i++) {
+      if (pq[i].score < pq[minIdx].score) minIdx = i;
     }
-    for (const e of airport.edges) {
-      if (e.from !== cur.nodeId) continue;
-      if (cur.path.includes(e.to)) continue;
+    const cur = pq[minIdx];
+    pq[minIdx] = pq[pq.length - 1];
+    pq.pop();
+
+    if (settled.has(cur.nodeId)) continue;
+    settled.add(cur.nodeId);
+
+    if (cur.nodeId === destNodeId) {
+      const path: string[] = [];
+      let trace: string | undefined = destNodeId;
+      while (trace !== undefined) {
+        path.push(trace);
+        trace = parent.get(trace);
+      }
+      path.reverse();
+      return path;
+    }
+
+    const curCross = Math.floor(cur.score / 1_000_000);
+    const curHops = cur.score % 1_000_000;
+
+    for (const e of adj.get(cur.nodeId) ?? []) {
+      if (settled.has(e.to)) continue;
       if (avoidRunwayEntryIds?.has(e.to) && e.to !== destNodeId) continue;
-      const nextCrossings = cur.crossings + (e.runwayCrossing ? 1 : 0);
-      const prevBest = bestCrossings.get(e.to);
-      if (prevBest !== undefined && prevBest < nextCrossings) continue;
-      bestCrossings.set(e.to, nextCrossings);
-      q.push({ nodeId: e.to, path: [...cur.path, e.to], crossings: nextCrossings });
+      const nextScore = (curCross + (e.runwayCrossing ? 1 : 0)) * 1_000_000 + (curHops + 1);
+      const prevBest = bestScore.get(e.to);
+      if (prevBest !== undefined && prevBest <= nextScore) continue;
+      bestScore.set(e.to, nextScore);
+      parent.set(e.to, cur.nodeId);
+      pq.push({ nodeId: e.to, score: nextScore });
     }
   }
-  return bestSolution ? bestSolution.path : null;
+  return null;
 }
 
 export function getSuggestedTaxiRoutes(
@@ -1325,13 +1368,15 @@ export function getSuggestedTaxiRoutes(
     nodeIds: string[];
   }> = [];
   const seen = new Set<string>();
+  const seenLabels = new Set<string>();
 
   const pushOption = (label: string, taxiways: TaxiwayName[], destinationNodeId: string) => {
     const key = `${destinationNodeId}|${taxiways.join(",")}`;
-    if (seen.has(key) || taxiways.length === 0) return;
+    if (seen.has(key) || seenLabels.has(label) || taxiways.length === 0) return;
     const nodeIds = findRouteAlongTaxiways(airport, aircraftNodeId, destinationNodeId, taxiways);
     if (nodeIds && nodeIds.length > 0) {
       seen.add(key);
+      seenLabels.add(label);
       options.push({ label, taxiways, destinationNodeId, nodeIds });
     }
   };
@@ -1393,7 +1438,7 @@ export function getSuggestedTaxiRoutes(
   }
   candidateTargets.sort((a, b) => a.distStart - b.distStart);
 
-  for (const { hsId, conn } of candidateTargets) {
+  for (const { hsId, conn } of candidateTargets.slice(0, 6)) {
     if (startTw) {
       const twSeq: TaxiwayName[] = startTw === conn ? [conn] : [startTw, conn];
       pushOption(`RWY ${targetRunway} via ${twSeq.map(taxiwayFullName).join(", ")}`, twSeq, hsId);
@@ -1410,7 +1455,13 @@ export function getSuggestedTaxiRoutes(
 
 export function taxiwayFullName(tw: TaxiwayName): string {
   if (tw === "APRON") return "Apron";
-  return ICAO_LETTER_MAP[tw] ?? tw;
+  const upper = tw.trim().toUpperCase();
+  if (ICAO_LETTER_MAP[upper]) return ICAO_LETTER_MAP[upper];
+  const m = /^([A-Z])(\d{1,2})$/.exec(upper);
+  if (m && ICAO_LETTER_MAP[m[1]]) {
+    return `${ICAO_LETTER_MAP[m[1]]} ${spellDigitsIcao(m[2], true)}`;
+  }
+  return upper;
 }
 
 export function runwaySpokenName(rwy: RunwayId): string {

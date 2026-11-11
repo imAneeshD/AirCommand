@@ -29,12 +29,14 @@ Both manual player instructions and autonomous AI controllers route every comman
 ## Features
 
 - **Strict ATC Rules & Emergency Handling**: Enforces pushback separation, assigned taxiway route adherence, mandatory hold-short stops, explicit runway crossings, line up & wait, pre-roll cancel takeoff vs. rolling rejected takeoff (`STOPPED_ON_RUNWAY` + ARFF tow), readback errors, Squawk `7600` NORDO (Tower Light Gun), and `GO_AROUND` procedures.
-- **Multi-Airport Operations with Persistent Selection**:
-  - `KAST` — Asteria International (staggered diagonal parallel runways `09L/27R` & `09R/27L`, angled rapid-exit taxiways, curved bypass loops, Y-terminal concourses)
-  - `KMRD` — Meridian Bay Coastal (`27R / 27L`)
-  - `KVEL` — Veloce Alpine (`09`)
-  - `KSOL` — Solaris Mega-Hub (`08L / 08R`)
-  - Saved automatically to browser `localStorage` along with theme preference.
+- **Multi-Airport Discovery & Real-World Infrastructure (Phase 2)**:
+  - Interactive **MapLibre GL** Global Airport Discovery Map (`src/components/GlobalAirportMap.tsx`) with clustering, zoom-gated labels, category filters (`INTERNATIONAL`, `DOMESTIC`, `REGIONAL`, `CARGO`, `MILITARY`, `GA`), nearby discovery, and India-first search prioritization (`VIDP`, `VABB`, `VOBL`, `VOMM`, `VOHS`, `VECC`, `VOCI`, `VOGA`/`VOGO`, `VAAH`) plus global hubs and legacy Phase 1 training fields (`KAST`, `KMRD`, `KVEL`, `KSOL`).
+  - Real OurAirports runway metadata, frequencies, and navaids combined with OpenStreetMap Overpass GeoJSON infrastructure (`server/services/AirportImportService.ts`), data quality badges (`Verified`, `Imported`, `Manually edited`, `Incomplete`, `Needs review`), and an interactive **Airport Geometry Editor** (`src/components/AirportGeometryEditor.tsx`).
+- **Read-Only Live ADS-B Observation Mode**:
+  - Backend cached ADS-B ingestion (`server/services/ADSBProviderService.ts`) with OpenSky Network provider abstraction, 12s sector caching, HTTP 429 cooldown backoff, >45s stale detection, aircraft track trails, and strictly read-only radar inspection (`src/components/LiveTrafficView.tsx`).
+- **3-Player Authoritative Multiplayer & Offline Support**:
+  - Node.js HTTP + WebSocket room service (`server/index.ts`, `server/services/MultiplayerRoomService.ts`) supporting `GROUND`, `TOWER`, and `DEPARTURE` role locking, duplicate command ID deduplication, explicit handoffs & coordination chat, disconnect AI takeover & reconnect restoration, and post-session team/role scoring reports (`src/components/PostSessionModal.tsx`).
+  - IndexedDB offline cache (`src/utils/offlineDb.ts`) preserving airports, edited GeoJSON layouts, and preferences cleanly offline while guarding ADS-B and multiplayer online requirements.
 - **Role Switching & Strict Frequency Audio Isolation**:
   - Switch seamlessly between **Ground (`G`)**, **Tower (`T`)**, **Departure/Approach (`D`)**, or **All Auto (`N`)** (default mode automating all three stations).
   - Switching into a single role automates the remaining controllers and filters VHF radio audio strictly to that station's frequency.
@@ -59,7 +61,8 @@ Both manual player instructions and autonomous AI controllers route every comman
 
 ```bash
 npm install      # Install dependencies
-npm run dev      # Start Vite development server (http://localhost:3000)
+npm run server   # Start Node HTTP + WebSocket backend (http://localhost:3001)
+npm run dev      # Start Vite frontend with /api and /ws proxy (http://localhost:3000)
 npm test         # Run Node test suites (tests/*.test.ts)
 npm run build    # Type-check with tsc and build production bundle into dist/
 ```
@@ -67,6 +70,20 @@ npm run build    # Type-check with tsc and build production bundle into dist/
 ## Project Structure
 
 ```text
+server/
+├── db/
+│   ├── DatabaseService.ts
+│   └── schema.sql
+├── services/
+│   ├── ADSBProviderService.ts
+│   ├── AirportGeometryService.ts
+│   ├── AirportImportService.ts
+│   ├── AirportService.ts
+│   ├── CommunicationService.ts
+│   ├── HandoffService.ts
+│   ├── MultiplayerRoomService.ts
+│   └── ScoringService.ts
+└── index.ts
 src/
 ├── App.tsx
 ├── index.css
@@ -74,9 +91,14 @@ src/
 ├── components/
 │   ├── Accordion.tsx
 │   ├── AircraftSideProfile.tsx
+│   ├── AirportGeometryEditor.tsx
 │   ├── AirportLandingScreen.tsx
 │   ├── ClearanceControlDeck.tsx
 │   ├── FlightStripRack.tsx
+│   ├── GlobalAirportMap.tsx
+│   ├── LiveTrafficView.tsx
+│   ├── MultiplayerLobby.tsx
+│   ├── PostSessionModal.tsx
 │   ├── RadarScopeCanvas.tsx
 │   ├── RadioCommsLog.tsx
 │   ├── RadioVoiceMenu.tsx
@@ -84,7 +106,8 @@ src/
 │   └── VerificationModal.tsx
 ├── data/
 │   ├── aircraftCatalog.ts
-│   └── asteriaAirport.ts
+│   ├── asteriaAirport.ts
+│   └── worldAirportsSeed.json
 ├── engine/
 │   ├── aircraftEngine.ts
 │   ├── autonomousControllers.ts
@@ -94,18 +117,24 @@ src/
 │   ├── simulation.ts
 │   ├── validationEngine.ts
 │   └── verificationSuite.ts
+├── services/
+│   └── apiClient.ts
 ├── store/
 │   └── atcStore.ts
 ├── types/
 │   └── atc.ts
 └── utils/
+    ├── geo.ts
     ├── natoPhonetics.ts
+    ├── offlineDb.ts
+    ├── osmToAirport.ts
     ├── radioAudio.ts
     └── storage.ts
 tests/
 ├── aircraftDetails.test.ts
 ├── airports.test.ts
 ├── atcMandatory.test.ts
+├── phase2.test.ts
 ├── radioSpeech.test.ts
 └── roleSwitching.test.ts
 ```

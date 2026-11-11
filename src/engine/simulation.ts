@@ -5,7 +5,9 @@ import {
 } from "../data/asteriaAirport.ts";
 import type {
   Aircraft,
+  AircraftPhaseLabel,
   AirportId,
+  AirportLayout,
   ControllerRole,
   FlightKind,
   PlayerRoleMode,
@@ -29,6 +31,15 @@ const AIRLINES: Array<{ code: string; spoken: string; name: string; types: strin
   { code: "FDX", spoken: "FedEx", name: "FedEx Express", types: ["B763", "MD11"] },
 ];
 
+const INDIA_AND_INTL_AIRLINES: Array<{ code: string; spoken: string; name: string; types: string[] }> = [
+  { code: "IGO", spoken: "iFly", name: "IndiGo Airlines", types: ["A320", "A321"] },
+  { code: "AIC", spoken: "Air India", name: "Air India", types: ["A320", "B772", "B738"] },
+  { code: "VTI", spoken: "Vistara", name: "Vistara", types: ["A320", "A321", "B739"] },
+  { code: "SEJ", spoken: "SpiceJet", name: "SpiceJet", types: ["B737", "B38M"] },
+  { code: "UAE", spoken: "Emirates", name: "Emirates", types: ["B772", "B763"] },
+  { code: "BAW", spoken: "Speedbird", name: "British Airways", types: ["A320", "B772"] },
+];
+
 const DEPARTURE_FIXES = ["ASTER1", "DELTA", "ECHO"];
 
 function createDefaultConfig(activeStation: PlayerRoleMode = "ALL"): SimulationConfig {
@@ -49,18 +60,75 @@ function createDefaultConfig(activeStation: PlayerRoleMode = "ALL"): SimulationC
   };
 }
 
+export function getAircraftPhaseLabel(ac: Aircraft): AircraftPhaseLabel {
+  if (ac.operationMode === "EMERGENCY_OPERATION" && ac.flightKind === "ARRIVAL") {
+    if (ac.state === "GO_AROUND" || ac.state === "MISSED_APPROACH") return "Go-around";
+    if (ac.state === "CRUISE_OUTBOUND") return "Diversion";
+  }
+  switch (ac.state) {
+    case "AT_GATE":
+      return "Parked";
+    case "PUSHBACK_APPROVED":
+    case "PUSHING_BACK":
+    case "PUSHBACK_COMPLETE":
+      return "Pushback";
+    case "TAXIING":
+    case "CROSSING_RUNWAY":
+      return ac.flightKind === "ARRIVAL" ? "Taxi-in" : "Taxi-out";
+    case "HOLDING_SHORT":
+    case "HOLD_POSITION":
+    case "TAKEOFF_CANCELLED":
+      return ac.flightKind === "ARRIVAL" ? "Parking" : "Holding short";
+    case "LINE_UP_WAIT":
+    case "TAKEOFF_CLEARED":
+      return "Line-up";
+    case "TAKEOFF_ROLL":
+    case "REJECTED_TAKEOFF":
+    case "BRAKING":
+    case "STOPPED_ON_RUNWAY":
+    case "ROTATE":
+      return "Takeoff";
+    case "CLIMB":
+      return ac.altitude < 3500 ? "Initial climb" : "Departure";
+    case "CRUISE_OUTBOUND":
+      return "Cruise";
+    case "APPROACH":
+      return ac.verticalSpeed < -200 ? "Descent" : "Approach";
+    case "FINAL":
+    case "CLEARED_TO_LAND":
+      return "Approach";
+    case "LANDING":
+    case "TOUCHDOWN":
+    case "ROLLOUT":
+      return "Landing";
+    case "VACATING_RUNWAY":
+    case "COMPLETED_ARRIVAL":
+      return ac.state === "COMPLETED_ARRIVAL" ? "Parking" : "Taxi-in";
+    case "GO_AROUND":
+    case "MISSED_APPROACH":
+      return "Go-around";
+    case "COMPLETED_DEPARTURE":
+      return "Cruise";
+  }
+}
+
 export function createBaseSimulation(
   scenarioId: ScenarioId = "NORMAL_OPS",
   activeStation: PlayerRoleMode = "ALL",
-  airportId: AirportId = "KAST"
+  airportId: AirportId = "KAST",
+  customAirport?: AirportLayout
 ): SimulationState {
-  const airport = createAirportById(airportId);
+  const airport = customAirport ?? createAirportById(airportId);
   const config = createDefaultConfig(activeStation);
   if (scenarioId === "CROSSINGS_AND_READBACK") {
     config.readbackErrorProbability = 0.2;
   } else if (scenarioId === "SANDBOX") {
     config.autoSpawnTraffic = false;
     config.readbackErrorProbability = 0;
+  } else if (scenarioId === "HEAVY" || scenarioId === "RUSH_HOUR") {
+    config.readbackErrorProbability = 0.08;
+  } else if (scenarioId === "LIGHT") {
+    config.readbackErrorProbability = 0.02;
   }
 
   return {
@@ -110,6 +178,17 @@ export function createDepartureAircraft(
   const id = opts.id ?? opts.callsign;
   const acType = opts.aircraftType ?? "B738";
   const meta = deriveFlightMetadata(opts.callsign, "DEPARTURE", state.airport, acType);
+  const pbNode = state.airport.nodes[`PB_${opts.gateId}`];
+  const gateFacingHeading = pbNode
+    ? (() => {
+        const deg =
+          ((Math.atan2(gateNode.x - pbNode.x, gateNode.y - pbNode.y) * 180) / Math.PI + 360) % 360;
+        return deg === 0 ? 360 : Math.round(deg);
+      })()
+    : gateNode.isNorthSide
+    ? 0
+    : 180;
+
   const ac: Aircraft = {
     id,
     callsign: opts.callsign,
@@ -128,7 +207,7 @@ export function createDepartureAircraft(
     nordoMode: state.config.nordoMode,
     x: gateNode.x,
     y: gateNode.y,
-    heading: gateNode.isNorthSide ? 0 : 180,
+    heading: gateFacingHeading,
     altitude: state.airport.elevationFt,
     speed: 0,
     verticalSpeed: 0,
@@ -244,9 +323,10 @@ export function createArrivalAircraft(
 export function createScenarioSimulation(
   scenarioId: ScenarioId = "NORMAL_OPS",
   activeStation: PlayerRoleMode = "ALL",
-  airportId: AirportId = "KAST"
+  airportId: AirportId = "KAST",
+  customAirport?: AirportLayout
 ): SimulationState {
-  const state = createBaseSimulation(scenarioId, activeStation, airportId);
+  const state = createBaseSimulation(scenarioId, activeStation, airportId, customAirport);
   const ap = state.airport;
   const elev = ap.elevationFt;
   const baseAlt = Math.round(elev / 500) * 500;
@@ -260,7 +340,7 @@ export function createScenarioSimulation(
   const g3 = ap.gateIds[0];
   const g4 = ap.gateIds[1] ?? ap.gateIds[0];
 
-  if (scenarioId === "NORMAL_OPS") {
+  if (scenarioId === "NORMAL_OPS" || scenarioId === "MEDIUM" || scenarioId === "MIXED" || scenarioId === "LIGHT") {
     const ual = createDepartureAircraft(state, {
       callsign: "UAL452",
       spokenCallsign: "United 452",
@@ -367,7 +447,7 @@ export function createScenarioSimulation(
       assignedApproach: rwyDep,
     });
     state.selectedAircraftId = ual.id;
-  } else if (scenarioId === "EMERGENCY_AND_NORDO") {
+  } else if (scenarioId === "EMERGENCY_AND_NORDO" || scenarioId === "EMERGENCY") {
     const ual = createDepartureAircraft(state, {
       callsign: "UAL452",
       spokenCallsign: "United 452",
@@ -425,7 +505,11 @@ export function createScenarioSimulation(
       category: "EMERGENCY",
       text: "INCIDENT BRIEF: SWA712 is NORDO (Squawk 7600 — use Tower Light Gun). FDX901 declared Engine Failure (Squawk 7700).",
     });
-  } else if (scenarioId === "RUSH_HOUR") {
+  } else if (
+    scenarioId === "RUSH_HOUR" ||
+    scenarioId === "HEAVY" ||
+    scenarioId === "DEPARTURE_HEAVY"
+  ) {
     const rushGates = ap.gateIds.slice(0, Math.min(5, ap.gateIds.length));
     rushGates.forEach((g, idx) => {
       const al = AIRLINES[idx % AIRLINES.length];
@@ -471,6 +555,40 @@ export function createScenarioSimulation(
       assignedApproach: rwyArr,
     });
     state.selectedAircraftId = state.aircraftOrder[0] ?? null;
+  } else if (scenarioId === "ARRIVAL_HEAVY") {
+    const ual = createDepartureAircraft(state, {
+      callsign: "AIC502",
+      spokenCallsign: "Air India 502",
+      airline: "Air India",
+      aircraftType: "A320",
+      gateId: g0,
+      targetRunway: rwyDep,
+      requiresPushback: true,
+    });
+    const finOffsets = [-4.2, -7.8, -11.5];
+    finOffsets.forEach((offset, idx) => {
+      const rwyId = idx % 2 === 0 ? rwyDep : rwyArr;
+      const spec = ap.runways[rwyId];
+      const pt = runwayPoint(spec, offset, idx === 2 ? 1.8 : 0);
+      const num = 310 + idx * 45;
+      createArrivalAircraft(state, {
+        callsign: `IGO${num}`,
+        spokenCallsign: `iFly ${num}`,
+        airline: "IndiGo Airlines",
+        aircraftType: idx === 1 ? "A321" : "A320",
+        x: pt.x,
+        y: pt.y,
+        heading: spec.heading,
+        altitude: elev + 1400 + idx * 1100,
+        speed: 155 + idx * 18,
+        targetRunway: rwyId,
+        gateId: ap.gateIds[idx % ap.gateIds.length],
+        state: idx === 0 ? "FINAL" : "APPROACH",
+        controller: idx === 0 ? "TOWER" : "DEPARTURE",
+        assignedApproach: idx === 0 ? rwyId : null,
+      });
+    });
+    state.selectedAircraftId = state.aircraftOrder[1] ?? ual.id;
   } else {
     // SANDBOX
     const ual = createDepartureAircraft(state, {
@@ -607,12 +725,27 @@ export function spawnRandomTraffic(
     const a = state.aircraft[id];
     return a && a.state !== "COMPLETED_ARRIVAL" && a.state !== "COMPLETED_DEPARTURE";
   }).length;
-  if (activeCount >= 11) return null;
+  const maxTraffic =
+    state.scenarioId === "LIGHT" ? 5 : state.scenarioId === "HEAVY" || state.scenarioId === "RUSH_HOUR" ? 13 : 11;
+  if (activeCount >= maxTraffic) return null;
 
   const chooseKind: FlightKind =
-    kind ?? (state.nextIdCounter % 2 === 0 ? "DEPARTURE" : "ARRIVAL");
+    kind ??
+    (state.scenarioId === "ARRIVAL_HEAVY"
+      ? state.nextIdCounter % 4 === 0
+        ? "DEPARTURE"
+        : "ARRIVAL"
+      : state.scenarioId === "DEPARTURE_HEAVY"
+      ? state.nextIdCounter % 4 === 0
+        ? "ARRIVAL"
+        : "DEPARTURE"
+      : state.nextIdCounter % 2 === 0
+      ? "DEPARTURE"
+      : "ARRIVAL");
 
-  const airline = AIRLINES[state.nextIdCounter % AIRLINES.length];
+  const useIndiaFleet = state.airport.icao.startsWith("V") || state.airport.country === "India";
+  const pool = useIndiaFleet ? [...INDIA_AND_INTL_AIRLINES, ...AIRLINES.slice(0, 2)] : AIRLINES;
+  const airline = pool[state.nextIdCounter % pool.length];
   const flightNum = 100 + ((state.nextIdCounter * 43) % 890);
   const callsign = `${airline.code}${flightNum}`;
   if (state.aircraft[callsign]) return null;
@@ -783,7 +916,12 @@ export function stepSimulation(
     checkSeparationAndConflicts(state);
 
     // 6. Auto-spawn periodic traffic if enabled
-    const spawnPeriod = state.scenarioId === "RUSH_HOUR" ? 14 : 24;
+    const spawnPeriod =
+      state.scenarioId === "RUSH_HOUR" || state.scenarioId === "HEAVY"
+        ? 13
+        : state.scenarioId === "LIGHT"
+        ? 34
+        : 22;
     if (
       state.config.autoSpawnTraffic &&
       state.time - state.lastTrafficSpawnAt >= spawnPeriod

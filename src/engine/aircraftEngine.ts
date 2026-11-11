@@ -56,16 +56,19 @@ function selectExitHoldShortNode(
   if (!rwy || rwy.exitNodeIds.length === 0) return null;
 
   const along = alongRunwayNm(rwy, ac.x, ac.y);
-  let chosenExitId = rwy.exitNodeIds[rwy.exitNodeIds.length - 1];
-  for (const eid of rwy.exitNodeIds) {
-    const node = state.airport.nodes[eid];
-    if (!node) continue;
-    const eAlong = alongRunwayNm(rwy, node.x, node.y);
-    if (eAlong >= along - 0.05) {
-      chosenExitId = eid;
-      break;
-    }
-  }
+  const exitCandidates = rwy.exitNodeIds
+    .map((eid) => {
+      const node = state.airport.nodes[eid];
+      return node ? { eid, eAlong: alongRunwayNm(rwy, node.x, node.y) } : null;
+    })
+    .filter((item): item is { eid: string; eAlong: number } => Boolean(item))
+    .sort((a, b) => a.eAlong - b.eAlong);
+
+  if (exitCandidates.length === 0) return null;
+  const aheadExit =
+    exitCandidates.find((c) => c.eAlong >= along + 0.04) ??
+    exitCandidates[exitCandidates.length - 1];
+  const chosenExitId = aheadExit.eid;
 
   const gateNode = ac.gateId ? state.airport.nodes[`GATE_${ac.gateId}`] : undefined;
   const candidateHs: Array<{ id: string; distToGate: number }> = [];
@@ -253,7 +256,8 @@ export function updateAircraftStates(state: SimulationState): void {
           ac.state = "HOLD_POSITION";
           break;
         }
-        if (ac.speed >= 135) {
+        const vr = ac.wakeCategory === "HEAVY" ? 150 : 140;
+        if (ac.speed >= vr) {
           ac.state = "ROTATE";
           ac.stateEnteredAt = state.time;
         }
@@ -261,7 +265,8 @@ export function updateAircraftStates(state: SimulationState): void {
       }
 
       case "ROTATE": {
-        if (ac.altitude >= elev + 60) {
+        const v2 = ac.wakeCategory === "HEAVY" ? 162 : 154;
+        if (ac.altitude >= elev + 120 && ac.speed >= v2) {
           ac.state = "CLIMB";
           ac.stateEnteredAt = state.time;
           completeClearancesOfType(ac, "TAXI");
@@ -430,16 +435,37 @@ export function updateAircraftStates(state: SimulationState): void {
           break;
         }
         const rwy = state.airport.runways[ac.assignedApproach ?? ac.targetRunway];
-        if (rwy && alongRunwayNm(rwy, ac.x, ac.y) >= 0.12 && ac.altitude <= elev + 18) {
+        if (!rwy) break;
+        const along = alongRunwayNm(rwy, ac.x, ac.y);
+        const tdzAlong = Math.min(0.22, rwy.lengthNm * 0.14);
+        if (along >= tdzAlong * 0.7 && along <= rwy.lengthNm * 0.55 && ac.altitude <= elev + 22) {
           ac.altitude = elev;
           ac.verticalSpeed = 0;
           ac.state = "TOUCHDOWN";
           ac.stateEnteredAt = state.time;
+        } else if (along > rwy.lengthNm * 0.45 && ac.altitude > elev + 65) {
+          // Missed approach protection if crossing past touchdown zone still high on glideslope
+          ac.state = "GO_AROUND";
+          ac.stateEnteredAt = state.time;
+          ac.assignedAltitude = baseAlt + 3000;
+          ac.assignedHeading = rwy.heading;
+          ac.assignedSpeed = 190;
+          state.metrics.goAroundsExecuted += 1;
+          addRadioMessage(state, {
+            sender: ac.callsign,
+            recipient: controllerCallsign(ac.controller, state.airport),
+            controller: ac.controller,
+            aircraftId: ac.id,
+            category: "EMERGENCY",
+            text: `${controllerCallsign(ac.controller, state.airport)}, ${ac.spokenCallsign}, high and unstable over runway, going around!`,
+          });
         }
         break;
       }
 
       case "TOUCHDOWN": {
+        ac.altitude = elev;
+        ac.verticalSpeed = 0;
         ac.state = "ROLLOUT";
         ac.stateEnteredAt = state.time;
         break;
@@ -455,7 +481,10 @@ export function updateAircraftStates(state: SimulationState): void {
         if (!rwyExitNode) break;
         const along = alongRunwayNm(rwy, ac.x, ac.y);
         const exitAlong = alongRunwayNm(rwy, rwyExitNode.x, rwyExitNode.y);
-        if (ac.speed <= 32 && along >= exitAlong - 0.04) {
+        if (
+          ac.speed <= 32 &&
+          (along >= exitAlong - 0.04 || along >= rwy.lengthNm - 0.06)
+        ) {
           ac.vacatingExitNodeId = exitSel.holdShortNodeId;
           ac.state = "VACATING_RUNWAY";
           ac.stateEnteredAt = state.time;

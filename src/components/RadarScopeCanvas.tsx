@@ -4,6 +4,10 @@ import { runwayPoint } from "../data/asteriaAirport.ts";
 import { isRunwayOccupied } from "../engine/validationEngine.ts";
 import { useAtcStore, type CameraState } from "../store/atcStore.ts";
 import type { Aircraft, AirportLayout, RunwaySpec, SimulationState, TaxiwayName } from "../types/atc.ts";
+import { drawGeoreferencedTilesToCanvas } from "../utils/canvasTileLayer.ts";
+import { getAglAltitudeFt, isSurfaceAircraft } from "../utils/telemetry.ts";
+
+type ScopeBasemapLayer = "hybrid" | "satellite" | "chart";
 
 interface ScreenPt {
   x: number;
@@ -55,7 +59,9 @@ function screenToWorldCoords(
   return { x: cam.centerX + dx, y: cam.centerY - dy };
 }
 
-function shortStateTag(ac: Aircraft): string {
+function shortStateTag(ac: Aircraft, elevationFt: number): string {
+  const agl = getAglAltitudeFt(ac, elevationFt);
+  const spd = Math.round(ac.speed);
   switch (ac.state) {
     case "AT_GATE":
       return `GATE ${ac.gateId ?? ""}`;
@@ -65,7 +71,7 @@ function shortStateTag(ac: Aircraft): string {
     case "PUSHBACK_COMPLETE":
       return "PB DONE";
     case "TAXIING":
-      return `TAXI ${Math.round(ac.speed)}kt`;
+      return `TAXI ${spd}kt`;
     case "HOLDING_SHORT":
       return ac.holdingAtRunway ? `HS ${ac.holdingAtRunway}` : "HOLDING";
     case "CROSSING_RUNWAY":
@@ -79,29 +85,32 @@ function shortStateTag(ac: Aircraft): string {
     case "TAKEOFF_CANCELLED":
       return "T/O CNCL";
     case "TAKEOFF_ROLL":
-      return `ROLL ${Math.round(ac.speed)}kt`;
+      return `ROLL ${spd}kt`;
     case "REJECTED_TAKEOFF":
     case "BRAKING":
-      return "RTO BRAKE";
+      return `BRK ${spd}kt`;
     case "STOPPED_ON_RUNWAY":
       return "STOP RWY!";
     case "ROTATE":
-      return "ROTATE";
+      return `ROT ${agl}ft ${spd}kt`;
     case "CLEARED_TO_LAND":
-      return `CLR LND ${ac.assignedApproach ?? ac.targetRunway}`;
+      return `CLR ${agl}ft ${spd}kt`;
     case "LANDING":
-      return "LANDING";
+      return `LND ${agl}ft ${spd}kt`;
     case "TOUCHDOWN":
     case "ROLLOUT":
-      return "ROLLOUT";
+      return `ROLL ${spd}kt`;
     case "VACATING_RUNWAY":
-      return "VACATING";
+      return `VAC ${spd}kt`;
     case "GO_AROUND":
     case "MISSED_APPROACH":
-      return "GO AROUND";
+      return `GA ${agl}ft`;
     default: {
-      const altHundreds = String(Math.round(ac.altitude / 100)).padStart(3, "0");
-      return `${altHundreds} ${Math.round(ac.speed)}kt`;
+      const altTag =
+        agl < 1500
+          ? `${agl}ft`
+          : String(Math.round(ac.altitude / 100)).padStart(3, "0");
+      return `${altTag} ${spd}kt`;
     }
   }
 }
@@ -294,6 +303,7 @@ export const RadarScopeCanvas: React.FC = () => {
   }>({ active: false, startX: 0, startY: 0, origCenterX: 0, origCenterY: 0, moved: false });
 
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [scopeLayer, setScopeLayer] = useState<ScopeBasemapLayer>("hybrid");
 
   const sim = useAtcStore((s) => s.sim);
   const tickVersion = useAtcStore((s) => s.tickVersion);
@@ -327,9 +337,9 @@ export const RadarScopeCanvas: React.FC = () => {
 
     ctx.save();
     ctx.scale(dpr, dpr);
-    drawScope(ctx, width, height, sim, camera, hoverPreviewRoute, hoveredId, theme);
+    drawScope(ctx, width, height, sim, camera, hoverPreviewRoute, hoveredId, theme, scopeLayer);
     ctx.restore();
-  }, [sim, tickVersion, camera, hoverPreviewRoute, hoveredId, theme]);
+  }, [sim, tickVersion, camera, hoverPreviewRoute, hoveredId, theme, scopeLayer]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -527,6 +537,31 @@ export const RadarScopeCanvas: React.FC = () => {
             <PlaneLanding className="w-3 h-3" />+ ARR
           </button>
         </div>
+
+        {sim.airport.isRealWorld && sim.airport.lat !== undefined && sim.airport.lon !== undefined && (
+          <div className="flex items-center bg-[var(--atc-surface)]/95 border border-[var(--atc-border)] shadow-[var(--atc-shadow)] rounded-md p-0.5 backdrop-blur-sm">
+            {(
+              [
+                { id: "hybrid", label: "HYBRID" },
+                { id: "satellite", label: "SAT" },
+                { id: "chart", label: "CHART" },
+              ] as const
+            ).map((m) => (
+              <button
+                key={m.id}
+                onClick={() => setScopeLayer(m.id)}
+                title="Switch real-world airport underlay (Satellite + OSM Hybrid / Full Satellite / Vector Chart)"
+                className={`px-2 py-1 rounded text-[10px] font-mono font-bold transition-colors ${
+                  scopeLayer === m.id
+                    ? "bg-[var(--atc-accent-soft)] text-[var(--atc-accent-text)] border border-[var(--atc-accent-border)]"
+                    : "text-[var(--atc-muted)] hover:text-[var(--atc-text)]"
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Top-Right Micro Legend (placed left of Compass Rose) */}
@@ -635,8 +670,10 @@ function drawRealisticRunway(
   toScreen: (wx: number, wy: number) => [number, number],
   pixelsPerNm: number,
   rotRad: number,
-  isLight: boolean
+  isLight: boolean,
+  scopeLayer: ScopeBasemapLayer = "hybrid"
 ): void {
+  const isSatOnly = scopeLayer === "satellite";
   const midPt = runwayPoint(rwy, rwy.lengthNm / 2, 0);
   const [midX, midY] = toScreen(midPt.x, midPt.y);
   const rwW = rwy.lengthNm * pixelsPerNm;
@@ -655,15 +692,19 @@ function drawRealisticRunway(
   ctx.translate(midX, midY);
   ctx.rotate(screenAngle);
 
-  // Subtle drop shadow beneath runway slab in Light mode
-  if (isLight) {
+  // Subtle drop shadow beneath runway slab in Light mode (skip in satellite mode)
+  if (isLight && !isSatOnly) {
     ctx.fillStyle = "rgba(30, 41, 59, 0.12)";
     ctx.fillRect(-rwW / 2 - 4, -rwH / 2 + 2, rwW + 8, rwH);
   }
 
   // Overrun / Blast Pads beyond both thresholds
   const padW = Math.min(20, Math.max(7, rwW * 0.045));
-  ctx.fillStyle = isLight ? "#3a4351" : "#111b2a";
+  ctx.fillStyle = isSatOnly
+    ? "rgba(17, 27, 42, 0.42)"
+    : isLight
+    ? "#3a4351"
+    : "#111b2a";
   ctx.fillRect(-rwW / 2 - padW, -rwH / 2, padW, rwH);
   ctx.fillRect(rwW / 2, -rwH / 2, padW, rwH);
 
@@ -682,8 +723,12 @@ function drawRealisticRunway(
     }
   }
 
-  // Main Runway Asphalt
-  ctx.fillStyle = isLight ? "#2a3340" : "#0b121d";
+  // Main Runway Asphalt (translucent over real aerial tiles in Satellite mode)
+  ctx.fillStyle = isSatOnly
+    ? "rgba(15, 23, 42, 0.45)"
+    : isLight
+    ? "#2a3340"
+    : "#0b121d";
   ctx.fillRect(-rwW / 2, -rwH / 2, rwW, rwH);
 
   // Outer status highlight border
@@ -829,16 +874,43 @@ function drawScope(
   cam: CameraState,
   hoverPreviewRoute: string[] | null,
   hoveredId: string | null,
-  theme: "light" | "dark"
+  theme: "light" | "dark",
+  scopeLayer: ScopeBasemapLayer = "hybrid"
 ): void {
   const isLight = theme === "light";
   const rotRad = getRotRad(sim.airport);
   const toScreen = (wx: number, wy: number): [number, number] =>
     worldToScreen(wx, wy, w, h, cam, rotRad);
 
-  // 1. Background
+  // 1. Background (Real Georeferenced Satellite Aerial Underlay for Real Airports when Hybrid/Sat active)
   ctx.fillStyle = isLight ? "#efeae0" : "#050b13";
   ctx.fillRect(0, 0, w, h);
+
+  if (
+    sim.airport.isRealWorld &&
+    sim.airport.lat !== undefined &&
+    sim.airport.lon !== undefined &&
+    scopeLayer !== "chart"
+  ) {
+    drawGeoreferencedTilesToCanvas({
+      ctx,
+      width: w,
+      height: h,
+      airportLat: sim.airport.lat,
+      airportLon: sim.airport.lon,
+      centerX: cam.centerX,
+      centerY: cam.centerY,
+      pixelsPerNm: cam.pixelsPerNm,
+      rotRad,
+      variant: "satellite",
+      opacity: scopeLayer === "satellite" ? 0.96 : isLight ? 0.42 : 0.45,
+      onTileReady: () => useAtcStore.setState((s) => ({ tickVersion: s.tickVersion + 1 })),
+    });
+    if (scopeLayer === "hybrid") {
+      ctx.fillStyle = isLight ? "rgba(239, 234, 224, 0.36)" : "rgba(5, 11, 19, 0.48)";
+      ctx.fillRect(0, 0, w, h);
+    }
+  }
 
   // Subtle chart grid & range rings
   const [cx0, cy0] = toScreen(0, 0);
@@ -867,8 +939,10 @@ function drawScope(
     ctx.fillText(`${ringNm} NM`, cx0 + 4, cy0 - rPx + 12);
   }
 
-  // Organic Topographic Terrain & Natural Perimeter Contours
-  drawTopographicTerrain(ctx, toScreen, cam.pixelsPerNm, isLight);
+  // Organic Topographic Terrain & Natural Perimeter Contours (skip for real airports with real satellite/OSM terrain)
+  if (!sim.airport.isRealWorld) {
+    drawTopographicTerrain(ctx, toScreen, cam.pixelsPerNm, isLight);
+  }
 
   // ILS Localizer extended approach corridors
   for (const rwyId of sim.airport.runwayIds) {
@@ -934,6 +1008,9 @@ function drawScope(
 
   // 2. Organic Airport Apron Concrete Slabs & Curved Taxiway Network
   if (cam.pixelsPerNm >= 32) {
+    const isSatOnly = sim.airport.isRealWorld && scopeLayer === "satellite";
+    const isHybrid = sim.airport.isRealWorld && scopeLayer === "hybrid";
+
     // Organic Multi-Vertex Apron Pads (hugging terminals/gates rather than a giant full-field square)
     if (sim.airport.apronPolygons && sim.airport.apronPolygons.length > 0) {
       for (const poly of sim.airport.apronPolygons) {
@@ -942,8 +1019,20 @@ function drawScope(
           return { x, y };
         });
         traceRoundedPolylinePath(ctx, pts, Math.max(8, cam.pixelsPerNm * 0.04), true);
-        ctx.fillStyle = isLight ? "#e4ded0" : "rgba(18, 29, 45, 0.85)";
-        ctx.strokeStyle = isLight ? "#cdc4b0" : "rgba(38, 58, 84, 0.7)";
+        ctx.fillStyle = isSatOnly
+          ? "rgba(255, 250, 235, 0.12)"
+          : isHybrid
+          ? isLight
+            ? "rgba(228, 222, 208, 0.72)"
+            : "rgba(18, 29, 45, 0.72)"
+          : isLight
+          ? "#e4ded0"
+          : "rgba(18, 29, 45, 0.85)";
+        ctx.strokeStyle = isSatOnly
+          ? "rgba(245, 158, 11, 0.35)"
+          : isLight
+          ? "#cdc4b0"
+          : "rgba(38, 58, 84, 0.7)";
         ctx.lineWidth = 1;
         ctx.fill();
         ctx.stroke();
@@ -966,16 +1055,29 @@ function drawScope(
           10,
           true
         );
-        ctx.fillStyle = isLight ? "#e4ded0" : "rgba(18, 29, 45, 0.8)";
-        ctx.strokeStyle = isLight ? "#cdc4b0" : "rgba(38, 58, 84, 0.65)";
+        ctx.fillStyle = isSatOnly
+          ? "rgba(255, 250, 235, 0.12)"
+          : isHybrid
+          ? isLight
+            ? "rgba(228, 222, 208, 0.7)"
+            : "rgba(18, 29, 45, 0.7)"
+          : isLight
+          ? "#e4ded0"
+          : "rgba(18, 29, 45, 0.8)";
+        ctx.strokeStyle = isSatOnly
+          ? "rgba(245, 158, 11, 0.35)"
+          : isLight
+          ? "#cdc4b0"
+          : "rgba(38, 58, 84, 0.65)";
         ctx.fill();
         ctx.stroke();
       }
     }
 
     // Curved Continuous Taxiways (Layer 1: Outer Shoulder, Layer 2: Pavement, Layer 3: Continuous Golden Centerlines)
-    const twWidthPx = Math.max(3, Math.min(20, 0.024 * cam.pixelsPerNm));
-    const cornerRadiusPx = Math.max(5, twWidthPx * 1.25);
+    const widthScale = sim.airport.isRealWorld ? 0.017 : 0.024;
+    const twWidthPx = Math.max(2.5, Math.min(18, widthScale * cam.pixelsPerNm));
+    const cornerRadiusPx = Math.max(4, twWidthPx * 1.15);
     const chains = resolveTaxiwayChains(sim.airport);
 
     const chainPts = chains
@@ -994,22 +1096,36 @@ function drawScope(
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
-    // Layer 1: Taxiway Outer Shoulder Edge
+    // Layer 1: Taxiway Outer Shoulder Edge (subtle over satellite tiles)
     for (const ch of chainPts) {
       traceRoundedPolylinePath(ctx, ch.pts, cornerRadiusPx, false);
-      ctx.strokeStyle = isLight
+      ctx.strokeStyle = isSatOnly
+        ? "rgba(15, 23, 42, 0.28)"
+        : isLight
         ? ch.taxiway === "APRON"
           ? "#cbc3b0"
           : "#bcb39e"
         : "#0e1726";
-      ctx.lineWidth = ch.taxiway === "APRON" ? twWidthPx * 0.72 + 1.5 : twWidthPx + 2.4;
+      ctx.lineWidth = ch.taxiway === "APRON" ? twWidthPx * 0.72 + 1.5 : twWidthPx + 2.2;
       ctx.stroke();
     }
 
     // Layer 2: Taxiway Inner Asphalt / Concrete
     for (const ch of chainPts) {
       traceRoundedPolylinePath(ctx, ch.pts, cornerRadiusPx, false);
-      ctx.strokeStyle = isLight
+      ctx.strokeStyle = isSatOnly
+        ? ch.taxiway === "APRON"
+          ? "rgba(30, 41, 59, 0.22)"
+          : "rgba(30, 41, 59, 0.32)"
+        : isHybrid
+        ? isLight
+          ? ch.taxiway === "APRON"
+            ? "rgba(222, 215, 199, 0.85)"
+            : "rgba(213, 206, 190, 0.88)"
+          : ch.taxiway === "APRON"
+          ? "rgba(24, 35, 52, 0.82)"
+          : "rgba(30, 44, 64, 0.86)"
+        : isLight
         ? ch.taxiway === "APRON"
           ? "#ded7c7"
           : "#d5cebe"
@@ -1023,7 +1139,11 @@ function drawScope(
     // Layer 3: Continuous Golden Taxiway Centerlines across all intersections
     for (const ch of chainPts) {
       traceRoundedPolylinePath(ctx, ch.pts, cornerRadiusPx, false);
-      ctx.strokeStyle = isLight
+      ctx.strokeStyle = isSatOnly
+        ? ch.dashed || ch.taxiway === "APRON"
+          ? "rgba(250, 204, 21, 0.55)"
+          : "rgba(250, 204, 21, 0.9)"
+        : isLight
         ? ch.dashed || ch.taxiway === "APRON"
           ? "rgba(217, 119, 6, 0.45)"
           : "#eab308"
@@ -1036,17 +1156,22 @@ function drawScope(
       ctx.setLineDash([]);
     }
 
-    // Taxiway Badge Pills
-    if (cam.pixelsPerNm >= 135) {
+    // Taxiway Badge Pills (deduplicate tight overlapping badges on dense real hubs)
+    if (cam.pixelsPerNm >= (sim.airport.isRealWorld ? 82 : 135)) {
+      const placedLabels: Array<{ x: number; y: number }> = [];
       for (const lbl of sim.airport.taxiwayLabels) {
         const [lx, ly] = toScreen(lbl.x, lbl.y);
-        ctx.fillStyle = isLight ? "#fffdf0" : "#0b131f";
-        ctx.strokeStyle = isLight ? "#d97706" : "#f59e0b";
+        if (lx < -30 || lx > w + 30 || ly < -30 || ly > h + 30) continue;
+        if (placedLabels.some((p) => Math.hypot(p.x - lx, p.y - ly) < 34)) continue;
+        placedLabels.push({ x: lx, y: ly });
+        const boxW = Math.max(16, lbl.label.length * 6.2 + 6);
+        ctx.fillStyle = isLight && !isSatOnly ? "#fffdf0" : "rgba(11, 19, 31, 0.92)";
+        ctx.strokeStyle = isLight && !isSatOnly ? "#d97706" : "#f59e0b";
         ctx.lineWidth = 1.1;
-        drawRoundedRect(ctx, lx - 8, ly - 8, 16, 16, 4);
+        drawRoundedRect(ctx, lx - boxW / 2, ly - 8, boxW, 16, 4);
         ctx.fill();
         ctx.stroke();
-        ctx.fillStyle = isLight ? "#78350f" : "#fbbf24";
+        ctx.fillStyle = isLight && !isSatOnly ? "#78350f" : "#fbbf24";
         ctx.font = "800 9px 'JetBrains Mono', monospace";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
@@ -1060,13 +1185,17 @@ function drawScope(
     for (const rwyId of sim.airport.runwayIds) {
       const rwy = sim.airport.runways[rwyId];
       if (!rwy) continue;
-      drawRealisticRunway(ctx, sim, rwy, toScreen, cam.pixelsPerNm, rotRad, isLight);
+      drawRealisticRunway(ctx, sim, rwy, toScreen, cam.pixelsPerNm, rotRad, isLight, scopeLayer);
     }
 
     // Architectural Terminals, Jetbridges, Hangars & ATC Tower
-    if (cam.pixelsPerNm >= 100) {
+    if (cam.pixelsPerNm >= (sim.airport.isRealWorld ? 50 : 100)) {
       if (sim.airport.terminalBuildings && sim.airport.terminalBuildings.length > 0) {
-        for (const bld of sim.airport.terminalBuildings) {
+        const placedBldLabels: Array<{ x: number; y: number }> = [];
+        const sortedBuildings = [...sim.airport.terminalBuildings].sort((a, b) =>
+          a.kind === b.kind ? 0 : a.kind === "TERMINAL" ? -1 : 1
+        );
+        for (const bld of sortedBuildings) {
           // Jetbridges
           if (bld.jetbridges && cam.pixelsPerNm >= 145) {
             ctx.strokeStyle = isLight ? "#78716c" : "#64748b";
@@ -1087,40 +1216,48 @@ function drawScope(
             return { x, y };
           });
 
-          // Building Drop Shadow
-          traceRoundedPolylinePath(
-            ctx,
-            bPts.map((p) => ({ x: p.x + 4, y: p.y + 5 })),
-            4,
-            true
-          );
-          ctx.fillStyle = isLight ? "rgba(28, 25, 23, 0.16)" : "rgba(0, 0, 0, 0.45)";
-          ctx.fill();
+          // Building Drop Shadow (omit in pure satellite overlay)
+          if (!isSatOnly) {
+            traceRoundedPolylinePath(
+              ctx,
+              bPts.map((p) => ({ x: p.x + 3, y: p.y + 4 })),
+              4,
+              true
+            );
+            ctx.fillStyle = isLight ? "rgba(28, 25, 23, 0.14)" : "rgba(0, 0, 0, 0.35)";
+            ctx.fill();
+          }
 
           // Main Roof Mass
           traceRoundedPolylinePath(ctx, bPts, 4, true);
-          ctx.fillStyle =
-            bld.kind === "TERMINAL"
-              ? isLight
-                ? "#cbc4b4"
-                : "#1b293d"
-              : isLight
-              ? "#c5beae"
-              : "#152233";
-          ctx.strokeStyle = isLight ? "#9c937f" : "#3b4f6b";
+          ctx.fillStyle = isSatOnly
+            ? bld.kind === "TERMINAL"
+              ? "rgba(56, 189, 248, 0.18)"
+              : "rgba(148, 163, 184, 0.16)"
+            : bld.kind === "TERMINAL"
+            ? isLight
+              ? "#cbc4b4"
+              : "#1b293d"
+            : isLight
+            ? "#c5beae"
+            : "#152233";
+          ctx.strokeStyle = isSatOnly ? "#38bdf8" : isLight ? "#9c937f" : "#3b4f6b";
           ctx.lineWidth = 1.1;
           ctx.fill();
           ctx.stroke();
 
-          if (bld.label && bld.labelX !== undefined && bld.labelY !== undefined && cam.pixelsPerNm >= 165) {
+          if (bld.label && bld.labelX !== undefined && bld.labelY !== undefined && cam.pixelsPerNm >= (sim.airport.isRealWorld ? 90 : 165)) {
             const [lx, ly] = toScreen(bld.labelX, bld.labelY);
-            ctx.fillStyle = isLight ? "#44403c" : "#94a3b8";
-            ctx.font = "700 9px 'JetBrains Mono', monospace";
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
-            ctx.fillText(bld.label, lx, ly);
-            ctx.textAlign = "left";
-            ctx.textBaseline = "alphabetic";
+            if (!placedBldLabels.some((p) => Math.hypot(p.x - lx, p.y - ly) < 70)) {
+              placedBldLabels.push({ x: lx, y: ly });
+              ctx.fillStyle = isSatOnly ? "#e0f2fe" : isLight ? "#44403c" : "#94a3b8";
+              ctx.font = "700 9px 'JetBrains Mono', monospace";
+              ctx.textAlign = "center";
+              ctx.textBaseline = "middle";
+              ctx.fillText(bld.label, lx, ly);
+              ctx.textAlign = "left";
+              ctx.textBaseline = "alphabetic";
+            }
           }
         }
       } else {
@@ -1303,7 +1440,7 @@ function drawScope(
     if (ax < -80 || ax > w + 80 || ay < -80 || ay > h + 80) continue;
 
     // Radar Trail
-    if (ac.trail.length > 1 && ac.altitude > sim.airport.elevationFt + 40) {
+    if (ac.trail.length > 1 && !isSurfaceAircraft(ac, sim.airport.elevationFt)) {
       for (let i = 0; i < ac.trail.length; i++) {
         const [tx, ty] = toScreen(ac.trail[i].x, ac.trail[i].y);
         const alpha = ((i + 1) / ac.trail.length) * (isLight ? 0.55 : 0.45);
@@ -1448,7 +1585,7 @@ function drawScope(
       : "";
 
     const line1 = `${ac.callsign}${badge}`;
-    const line2 = shortStateTag(ac);
+    const line2 = shortStateTag(ac, sim.airport.elevationFt);
     const boxW = Math.max(line1.length, line2.length) * 6.4 + 12;
 
     if (isLight) {

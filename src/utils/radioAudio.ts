@@ -34,20 +34,20 @@ export function formatAtcSpeech(rawText: string): string {
 
   // Standard abbreviations
   text = text.replace(/\bRWY\b/gi, "runway");
-  text = text.replace(/\bKAST\b/g, "Kilo Alpha Sierra Tango");
-  text = text.replace(/\bKMRD\b/g, "Kilo Mike Romeo Delta");
-  text = text.replace(/\bKVEL\b/g, "Kilo Victor Echo Lima");
-  text = text.replace(/\bKSOL\b/g, "Kilo Sierra Oscar Lima");
+  text = text.replace(/\b([KVELWOPZRH][A-Z]{3})\b/g, (icao) => {
+    const knownIcaoWords = new Set(["HOLD", "LEFT", "LINE", "WAIT", "TAXI", "STOP", "SLOW", "PUSH", "GATE", "WITH", "NONE", "MODE", "TEST", "ZERO", "FIVE", "FOUR", "NINE"]);
+    return knownIcaoWords.has(icao) ? icao : spellLettersIcao(icao);
+  });
 
-  // Runway identifiers (08L/08R, 09L/09R, 26L/26R, 27L/27R)
-  text = text.replace(/\b08L\b/gi, "zero eight left");
-  text = text.replace(/\b08R\b/gi, "zero eight right");
-  text = text.replace(/\b09L\b/gi, "zero niner left");
-  text = text.replace(/\b09R\b/gi, "zero niner right");
-  text = text.replace(/\b26L\b/gi, "two six left");
-  text = text.replace(/\b26R\b/gi, "two six right");
-  text = text.replace(/\b27L\b/gi, "two seven left");
-  text = text.replace(/\b27R\b/gi, "two seven right");
+  // Runway identifiers with side (09L, 27R, 14C) or preceded by "runway" (e.g. runway 29, runway 09)
+  text = text.replace(/\b(0[1-9]|[12]\d|3[0-6])([LRC])\b/gi, (_m, nums: string, side: string) => {
+    const s = side.toUpperCase();
+    const sideWord = s === "L" ? " left" : s === "R" ? " right" : " center";
+    return `${spellDigitsIcao(nums)}${sideWord}`;
+  });
+  text = text.replace(/\brunway\s+(0[1-9]|[12]\d|3[0-6])\b/gi, (_m, nums: string) => {
+    return `runway ${spellDigitsIcao(nums)}`;
+  });
 
   // Spoken "nine" -> "niner"
   text = text.replace(/\bnine\b/gi, "niner");

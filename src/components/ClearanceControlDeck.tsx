@@ -17,18 +17,23 @@ import {
   Wrench,
 } from "lucide-react";
 import { getSuggestedTaxiRoutes } from "../data/asteriaAirport.ts";
+import { getAircraftPhaseLabel } from "../engine/simulation.ts";
 import {
   canAircraftExecuteAction,
   canAircraftMove,
 } from "../engine/validationEngine.ts";
 import { useAtcStore } from "../store/atcStore.ts";
 import type { ControllerRole, RunwayId } from "../types/atc.ts";
+import { formatAltitudeReadout } from "../utils/telemetry.ts";
 import { Accordion } from "./Accordion.tsx";
 
 export const ClearanceControlDeck: React.FC = () => {
   const sim = useAtcStore((s) => s.sim);
   useAtcStore((s) => s.tickVersion);
   const lastFeedback = useAtcStore((s) => s.lastFeedback);
+  const roomState = useAtcStore((s) => s.roomState);
+  const assignedRole = useAtcStore((s) => s.assignedRole);
+  const respondToHandoff = useAtcStore((s) => s.respondToHandoff);
 
   const issueClearance = useAtcStore((s) => s.issueClearance);
   const switchStation = useAtcStore((s) => s.switchStation);
@@ -69,6 +74,7 @@ export const ClearanceControlDeck: React.FC = () => {
   }
 
   const movable = canAircraftMove(ac, sim);
+  const altInfo = formatAltitudeReadout(ac, sim.airport.elevationFt);
   const nordoLocked = ac.commStatus === "RADIO_FAILURE";
   const errClearance = ac.readbackErrorClearanceId
     ? ac.clearances.find((c) => c.id === ac.readbackErrorClearanceId)
@@ -153,11 +159,11 @@ export const ClearanceControlDeck: React.FC = () => {
             ) : (
               <Lock className="w-3 h-3 shrink-0" />
             )}
-            <span className="truncate">{ac.state.replace(/_/g, " ")}</span>
+            <span className="truncate" title={ac.state}>{getAircraftPhaseLabel(ac)}</span>
           </span>
 
           <div className="flex items-center gap-2 text-[var(--atc-text-secondary)] font-semibold shrink-0">
-            <span>{Math.round(ac.altitude)}ft</span>
+            <span title={altInfo.detailed}>{altInfo.compact}</span>
             <span className="text-[var(--atc-border-strong)]">•</span>
             <span>{Math.round(ac.speed)}kt</span>
             <span className="text-[var(--atc-border-strong)]">•</span>
@@ -242,7 +248,48 @@ export const ClearanceControlDeck: React.FC = () => {
           </div>
         )}
 
-        {activeRole === "ALL" ? (
+        {roomState?.status === "ACTIVE" &&
+          assignedRole &&
+          roomState.handoffs
+            .filter((h) => h.status === "PENDING" && h.toController === assignedRole)
+            .slice(0, 2)
+            .map((h) => (
+              <div
+                key={h.id}
+                className="rounded-lg border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] p-2.5 text-[11px] font-mono space-y-1.5"
+              >
+                <div className="font-bold text-[var(--atc-cyan)]">
+                  INCOMING HANDOFF: {h.callsign} ({h.fromController} → {h.toController})
+                </div>
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={() => respondToHandoff(h.id, true)}
+                    className="flex-1 py-1 rounded bg-[var(--atc-emerald-bg)] border border-[var(--atc-emerald-border)] text-[var(--atc-emerald)] font-bold"
+                  >
+                    ACCEPT
+                  </button>
+                  <button
+                    onClick={() => respondToHandoff(h.id, false)}
+                    className="flex-1 py-1 rounded bg-[var(--atc-red-bg)] border border-[var(--atc-red-border)] text-[var(--atc-red)] font-bold"
+                  >
+                    REJECT
+                  </button>
+                </div>
+              </div>
+            ))}
+
+        {roomState?.status === "ACTIVE" && assignedRole && deckTab !== assignedRole ? (
+          <div className="rounded-lg border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] p-2.5 text-[11px] font-mono text-[var(--atc-amber)]">
+            Multiplayer Lock: You are controlling <strong>{assignedRole}</strong>. Switch deck tab back to{" "}
+            <button
+              onClick={() => setDeckTab(assignedRole)}
+              className="underline font-bold"
+            >
+              {assignedRole}
+            </button>{" "}
+            or ask {deckTab} controller in Coordination Chat.
+          </div>
+        ) : activeRole === "ALL" ? (
           <div className="rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface)] px-3 py-2 text-[11px] text-[var(--atc-text-secondary)]">
             <span className="font-bold text-[var(--atc-accent-text)]">ALL AUTO:</span> All stations automated & all voices active. You can still manually override any clearance below or switch to G / T / D.
           </div>
@@ -664,7 +711,13 @@ export const ClearanceControlDeck: React.FC = () => {
             <div className="space-y-2.5">
               <div className="rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] p-2 space-y-1.5">
                 <div className="flex items-center justify-between text-[10px] font-mono text-[var(--atc-text-secondary)]">
-                  <span className="font-bold">HEADING ({ac.assignedHeading ?? "---"})</span>
+                  <span className="font-bold">
+                    HEADING (
+                    {ac.assignedHeading !== null
+                      ? `${String(Math.round(ac.assignedHeading)).padStart(3, "0")}°`
+                      : "---"}
+                    )
+                  </span>
                   <div className="flex gap-1">
                     {(["LEFT", "NEAREST", "RIGHT"] as const).map((d) => (
                       <button
@@ -875,7 +928,7 @@ export const ClearanceControlDeck: React.FC = () => {
               <span className="text-[var(--atc-muted)]">Asgn Hdg</span>
               <span className="font-semibold text-[var(--atc-text)]">
                 {ac.assignedHeading !== null
-                  ? `${String(ac.assignedHeading).padStart(3, "0")}°`
+                  ? `${String(Math.round(ac.assignedHeading)).padStart(3, "0")}°`
                   : "—"}
               </span>
             </div>

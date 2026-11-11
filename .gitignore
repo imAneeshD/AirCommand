@@ -12,6 +12,9 @@ forgotten-island/
 npm-debug.log*
 .env
 .env.*
+server/data/*.db
+server/data/*.db-*
+server/data/raw/
 
 # Editor / OS clutter
 .DS_Store

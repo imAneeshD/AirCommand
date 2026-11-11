@@ -1,4 +1,4 @@
-export type AirportId = "KAST" | "KMRD" | "KVEL" | "KSOL";
+export type AirportId = string;
 
 export type ControllerRole = "GROUND" | "TOWER" | "DEPARTURE";
 
@@ -6,7 +6,7 @@ export type PlayerRoleMode = ControllerRole | "ALL";
 
 export type RunwayId = string;
 
-export type TaxiwayName = "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "J" | "APRON";
+export type TaxiwayName = string;
 
 export type AircraftState =
   | "AT_GATE"
@@ -326,6 +326,19 @@ export interface AirportLayout {
   terminalBuildings?: AirportTerminalBuilding[];
   taxiwayChains?: AirportTaxiwayChain[];
   controlTower?: { x: number; y: number };
+  // Phase 2 Real-World Geodetic & Infrastructure Fields
+  lat?: number;
+  lon?: number;
+  iata?: string;
+  country?: string;
+  timezone?: string;
+  category?: AirportCategory;
+  dataQuality?: AirportDataQuality;
+  isRealWorld?: boolean;
+  frequencies?: AirportFrequency[];
+  navaids?: AirportNavaid[];
+  rawRunways?: RawRunwayMetadata[];
+  geoJson?: AirportGeoJsonCollection;
 }
 
 export interface RadioMessage {
@@ -359,7 +372,226 @@ export type ScenarioId =
   | "RUSH_HOUR"
   | "CROSSINGS_AND_READBACK"
   | "EMERGENCY_AND_NORDO"
-  | "SANDBOX";
+  | "SANDBOX"
+  | "LIGHT"
+  | "MEDIUM"
+  | "HEAVY"
+  | "ARRIVAL_HEAVY"
+  | "DEPARTURE_HEAVY"
+  | "MIXED"
+  | "EMERGENCY";
+
+export type DifficultyLevel = "EASY" | "STANDARD" | "CHALLENGING" | "EXPERT";
+
+export type AirportCategory =
+  | "INTERNATIONAL"
+  | "DOMESTIC"
+  | "REGIONAL"
+  | "CARGO"
+  | "MILITARY"
+  | "GA";
+
+export type AirportDataQuality =
+  | "Verified"
+  | "Imported"
+  | "Manually edited"
+  | "Incomplete"
+  | "Needs review";
+
+export type AircraftPhaseLabel =
+  | "Parked"
+  | "Pushback"
+  | "Taxi-out"
+  | "Holding short"
+  | "Line-up"
+  | "Takeoff"
+  | "Initial climb"
+  | "Departure"
+  | "Cruise"
+  | "Descent"
+  | "Approach"
+  | "Landing"
+  | "Taxi-in"
+  | "Parking"
+  | "Go-around"
+  | "Diversion";
+
+export interface RawRunwayMetadata {
+  id: string;
+  leIdent: string;
+  heIdent: string;
+  lengthFt: number;
+  widthFt: number;
+  surface: string;
+  lighted: boolean;
+  closed: boolean;
+  leLat?: number;
+  leLon?: number;
+  leHeadingDegT?: number;
+  heLat?: number;
+  heLon?: number;
+  heHeadingDegT?: number;
+}
+
+export interface AirportFrequency {
+  id: string;
+  type: string;
+  description: string;
+  frequencyMhz: number;
+}
+
+export interface AirportNavaid {
+  ident: string;
+  name: string;
+  type: string;
+  frequencyKhz: number;
+  lat: number;
+  lon: number;
+}
+
+export interface AirportGeoJsonFeature {
+  type: "Feature";
+  id?: string;
+  properties: Record<string, unknown>;
+  geometry: {
+    type: "Point" | "LineString" | "Polygon";
+    coordinates: unknown;
+  };
+}
+
+export interface AirportGeoJsonCollection {
+  type: "FeatureCollection";
+  features: AirportGeoJsonFeature[];
+}
+
+export interface AirportRecord {
+  icao: string;
+  iata: string | null;
+  name: string;
+  city: string;
+  country: string;
+  isoCountry: string;
+  category: AirportCategory;
+  lat: number;
+  lon: number;
+  elevationFt: number;
+  timezone: string;
+  dataQuality: AirportDataQuality;
+  source: string;
+  hasOsmGeometry?: boolean;
+  runwayCount?: number;
+  runways: RawRunwayMetadata[];
+  frequencies: AirportFrequency[];
+  navaids: AirportNavaid[];
+  geoJson?: AirportGeoJsonCollection | null;
+  updatedAt?: string;
+}
+
+export interface LiveAdsbTrack {
+  readonly: true;
+  icao24: string;
+  callsign: string | null;
+  registration: string | null;
+  aircraftType: string | null;
+  originCountry: string | null;
+  lat: number;
+  lon: number;
+  baroAltFt: number | null;
+  geoAltFt: number | null;
+  groundSpeedKts: number | null;
+  trackDeg: number | null;
+  verticalRateFpm: number | null;
+  onGround: boolean;
+  lastUpdatedMs: number;
+  stale: boolean;
+  trail: Array<{ lat: number; lon: number; altFt: number | null; ts: number }>;
+}
+
+export interface LiveTrafficSnapshot {
+  provider: string;
+  fetchedAtMs: number;
+  cached: boolean;
+  rateLimited: boolean;
+  staleThresholdMs: number;
+  error: string | null;
+  tracks: LiveAdsbTrack[];
+}
+
+export interface ControllerHandoff {
+  id: string;
+  aircraftId: string;
+  callsign: string;
+  fromController: ControllerRole;
+  toController: ControllerRole;
+  issuedAt: number;
+  respondedAt?: number;
+  status: "PENDING" | "ACCEPTED" | "REJECTED";
+  note?: string;
+}
+
+export interface ControllerChatMessage {
+  id: string;
+  senderPlayerId: string;
+  senderName: string;
+  senderRole: ControllerRole | "SYSTEM";
+  timestamp: number;
+  text: string;
+}
+
+export interface RoomPlayerSlot {
+  role: ControllerRole;
+  playerId: string | null;
+  playerName: string | null;
+  connected: boolean;
+  ready: boolean;
+  aiTakeover: boolean;
+  lastSeenMs: number;
+}
+
+export interface RoleScoreMetrics {
+  role: ControllerRole;
+  playerName: string | null;
+  clearancesIssued: number;
+  accurateClearances: number;
+  handoffsCompleted: number;
+  handoffsMissed: number;
+  avgResponseTimeSec: number;
+  penalties: number;
+  score: number;
+}
+
+export interface SessionPerformanceReport {
+  roomCode: string;
+  airportIcao: string;
+  airportName: string;
+  scenarioId: ScenarioId;
+  difficulty: DifficultyLevel;
+  durationSeconds: number;
+  teamScore: number;
+  safetyScore: number;
+  departuresCompleted: number;
+  arrivalsCompleted: number;
+  incursions: number;
+  separationViolations: number;
+  incorrectClearances: number;
+  avgHandlingTimeSec: number;
+  roleScores: Record<ControllerRole, RoleScoreMetrics>;
+}
+
+export interface MultiplayerRoomState {
+  roomCode: string;
+  hostPlayerId: string;
+  airportIcao: string;
+  airportName: string;
+  scenarioId: ScenarioId;
+  difficulty: DifficultyLevel;
+  status: "LOBBY" | "ACTIVE" | "COMPLETED";
+  slots: Record<ControllerRole, RoomPlayerSlot>;
+  handoffs: ControllerHandoff[];
+  chat: ControllerChatMessage[];
+  report?: SessionPerformanceReport | null;
+  createdAtMs: number;
+}
 
 export interface SimulationConfig {
   activePlayerStation: PlayerRoleMode;
@@ -399,6 +631,12 @@ export interface SimulationState {
   nextIdCounter: number;
   lastAutonomousRunAt: number;
   lastTrafficSpawnAt: number;
+  liveSnapshotMeta?: {
+    airportIcao: string;
+    fetchedAtMs: number;
+    convertedCount: number;
+    source: string;
+  };
 }
 
 export interface ClearanceCommandInput {

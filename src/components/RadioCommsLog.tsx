@@ -1,19 +1,24 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
+  ArrowLeftRight,
   ArrowRight,
+  Check,
   ChevronDown,
   Fuel,
   Gauge,
   Plane,
   Radio,
+  Send,
   Users,
+  X,
 } from "lucide-react";
 import { getResolvedAircraftDetails } from "../data/aircraftCatalog.ts";
 import { useAtcStore } from "../store/atcStore.ts";
+import { computeAircraftPitchDeg, formatAltitudeReadout } from "../utils/telemetry.ts";
 import { AircraftSideProfile } from "./AircraftSideProfile.tsx";
 
-type BottomTab = "LOGS" | "AIRCRAFT";
+type BottomTab = "LOGS" | "AIRCRAFT" | "COORD";
 type LogFilter = "ALL" | "STATION" | "ALERTS";
 
 function formatLogTime(sec: number): string {
@@ -27,10 +32,15 @@ export const RadioCommsLog: React.FC = () => {
   useAtcStore((s) => s.tickVersion);
   const theme = useAtcStore((s) => s.theme);
   const selectAircraft = useAtcStore((s) => s.selectAircraft);
+  const roomState = useAtcStore((s) => s.roomState);
+  const assignedRole = useAtcStore((s) => s.assignedRole);
+  const respondToHandoff = useAtcStore((s) => s.respondToHandoff);
+  const sendMultiplayerChat = useAtcStore((s) => s.sendMultiplayerChat);
   const listRef = useRef<HTMLDivElement | null>(null);
 
   const [activeTab, setActiveTab] = useState<BottomTab>("LOGS");
   const [collapsed, setCollapsed] = useState(false);
+  const [chatText, setChatText] = useState("");
   const [filter, setFilter] = useState<LogFilter>(
     sim.config.activePlayerStation === "ALL" ? "ALL" : "STATION"
   );
@@ -113,6 +123,27 @@ export const RadioCommsLog: React.FC = () => {
               </span>
             )}
           </button>
+
+          {/* Tab 3: Multiplayer Handoffs & Coordination */}
+          {roomState && (
+            <button
+              type="button"
+              onClick={() => switchTab("COORD")}
+              className={`px-2.5 py-1 rounded-md text-[11px] font-mono font-bold flex items-center gap-1.5 transition-all shrink-0 ${
+                activeTab === "COORD" && !collapsed
+                  ? "bg-[var(--atc-accent-bg)] text-[var(--atc-accent-text)] border border-[var(--atc-accent-border)]"
+                  : "text-[var(--atc-muted)] hover:text-[var(--atc-text)] hover:bg-[var(--atc-surface-alt)] border border-transparent"
+              }`}
+            >
+              <ArrowLeftRight className="w-3.5 h-3.5 text-[var(--atc-cyan)] shrink-0" />
+              <span>HANDOFFS & COORD</span>
+              {roomState.handoffs.filter((h) => h.status === "PENDING").length > 0 && (
+                <span className="px-1.5 py-0.5 rounded bg-[var(--atc-amber-bg)] border border-[var(--atc-amber-border)] text-[9px] text-[var(--atc-amber)] font-bold">
+                  {roomState.handoffs.filter((h) => h.status === "PENDING").length}
+                </span>
+              )}
+            </button>
+          )}
 
           {collapsed && latestMsg && (
             <span className="text-[10px] font-mono text-[var(--atc-muted)] truncate ml-2 hidden md:inline">
@@ -387,17 +418,120 @@ export const RadioCommsLog: React.FC = () => {
                     <Fuel className="w-3 h-3 text-[var(--atc-amber)]" />
                     <span className="font-semibold">Fuel {resolved.fuelRemainingPct}%</span>
                   </span>
-                  <span className="inline-flex items-center gap-1 text-[var(--atc-text-secondary)]">
+                  <span
+                    className="inline-flex items-center gap-1 text-[var(--atc-text-secondary)]"
+                    title={formatAltitudeReadout(selectedAc, sim.airport.elevationFt).detailed}
+                  >
                     <Gauge className="w-3 h-3 text-[var(--atc-emerald)]" />
                     <span className="font-semibold">
-                      {Math.round(selectedAc.altitude)}ft • {Math.round(selectedAc.speed)}kt •{" "}
-                      {String(Math.round(selectedAc.heading)).padStart(3, "0")}°
+                      {formatAltitudeReadout(selectedAc, sim.airport.elevationFt).compact} •{" "}
+                      {Math.round(selectedAc.speed)}kt •{" "}
+                      {String(Math.round(selectedAc.heading)).padStart(3, "0")}° •{" "}
+                      {(() => {
+                        const p = computeAircraftPitchDeg(selectedAc, sim.airport.elevationFt);
+                        return `${p > 0 ? `+${p}` : p}°`;
+                      })()}
                     </span>
                   </span>
                 </div>
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* TAB BODY 3: MULTIPLAYER HANDOFFS & CONTROLLER CHAT */}
+      {!collapsed && activeTab === "COORD" && roomState && (
+        <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3 px-3 py-2 bg-[var(--atc-panel)] min-h-0 overflow-hidden font-mono text-[11px]">
+          <div className="flex flex-col min-h-0 border border-[var(--atc-border)] rounded-lg bg-[var(--atc-surface)] p-2">
+            <div className="text-[10px] font-bold uppercase text-[var(--atc-muted)] mb-1">
+              Controller Handoff Queue ({roomState.handoffs.length})
+            </div>
+            <div className="flex-1 overflow-y-auto space-y-1">
+              {roomState.handoffs.length === 0 ? (
+                <div className="text-[var(--atc-muted)] text-[10px] py-2">
+                  No active controller handoffs. Use HANDOFF buttons in the Control Deck.
+                </div>
+              ) : (
+                [...roomState.handoffs].reverse().map((h) => (
+                  <div
+                    key={h.id}
+                    className="px-2 py-1 rounded border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] flex items-center justify-between gap-2"
+                  >
+                    <div className="truncate">
+                      <span className="font-bold">{h.callsign}</span> {h.fromController} → {h.toController}{" "}
+                      <span
+                        className={`text-[9px] px-1 rounded ${
+                          h.status === "ACCEPTED"
+                            ? "text-[var(--atc-emerald)]"
+                            : h.status === "REJECTED"
+                            ? "text-[var(--atc-red)]"
+                            : "text-[var(--atc-amber)]"
+                        }`}
+                      >
+                        [{h.status}]
+                      </span>
+                    </div>
+                    {h.status === "PENDING" && assignedRole === h.toController && (
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          onClick={() => respondToHandoff(h.id, true)}
+                          className="p-1 rounded bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] border border-[var(--atc-emerald-border)]"
+                          title="Accept Handoff"
+                        >
+                          <Check className="w-3 h-3" />
+                        </button>
+                        <button
+                          onClick={() => respondToHandoff(h.id, false)}
+                          className="p-1 rounded bg-[var(--atc-red-bg)] text-[var(--atc-red)] border border-[var(--atc-red-border)]"
+                          title="Reject Handoff"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-col min-h-0 border border-[var(--atc-border)] rounded-lg bg-[var(--atc-surface)] p-2">
+            <div className="text-[10px] font-bold uppercase text-[var(--atc-muted)] mb-1">
+              Sector Coordination Chat ({roomState.roomCode})
+            </div>
+            <div className="flex-1 overflow-y-auto space-y-1">
+              {roomState.chat.slice(-20).map((m) => (
+                <div key={m.id} className="text-[10px] leading-tight">
+                  <span className="font-bold text-[var(--atc-cyan)]">[{m.senderRole} · {m.senderName}]: </span>
+                  <span>{m.text}</span>
+                </div>
+              ))}
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!chatText.trim()) return;
+                sendMultiplayerChat(chatText);
+                setChatText("");
+              }}
+              className="mt-1.5 flex gap-1"
+            >
+              <input
+                type="text"
+                value={chatText}
+                onChange={(e) => setChatText(e.target.value)}
+                placeholder="Coord message..."
+                className="flex-1 px-2 py-1 text-[11px] rounded border border-[var(--atc-border)] bg-[var(--atc-panel)]"
+              />
+              <button
+                type="submit"
+                className="px-2 py-1 rounded bg-[var(--atc-cyan-bg)] text-[var(--atc-cyan)] border border-[var(--atc-cyan-border)]"
+              >
+                <Send className="w-3 h-3" />
+              </button>
+            </form>
+          </div>
         </div>
       )}
     </section>

@@ -1,6 +1,11 @@
 import React from "react";
 import type { AirframeStyle, AircraftTypeSpec, AirlineLivery } from "../data/aircraftCatalog.ts";
 import type { Aircraft } from "../types/atc.ts";
+import {
+  computeAircraftPitchDeg,
+  getAglAltitudeFt,
+  isSurfaceAircraft,
+} from "../utils/telemetry.ts";
 
 interface AircraftSideProfileProps {
   aircraft: Aircraft;
@@ -40,9 +45,11 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
   theme,
 }) => {
   const isLight = theme === "light";
-  const agl = Math.max(0, aircraft.altitude - elevationFt);
+  const agl = getAglAltitudeFt(aircraft, elevationFt);
   const gearDown = agl < 2200;
-  const onGround = agl < 40;
+  const onGround = isSurfaceAircraft(aircraft, elevationFt);
+  const pitchDeg = computeAircraftPitchDeg(aircraft, elevationFt);
+  const liftY = onGround ? 0 : Math.min(10, 4 + (Math.min(agl, 300) / 300) * 6);
   const isCargo = Boolean(livery.isCargo || spec.isCargoOnly);
   const isWide = spec.airframeStyle === "WIDE_BOEING" || spec.airframeStyle === "TRIJET_MD11";
   const isTrijet = spec.airframeStyle === "TRIJET_MD11";
@@ -146,6 +153,8 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
           />
         )}
 
+        {/* Airframe Group rotated smoothly by true aerodynamic pitch & climb lift */}
+        <g transform={`translate(0 ${(-liftY).toFixed(1)}) rotate(${(-pitchDeg).toFixed(1)} 188 64)`}>
         {/* Far Side Horizontal Stabilizer */}
         <path
           d={`M ${dims.tailX + 26} ${midY - 3} L ${dims.tailX - 6} ${midY - 9} L ${dims.tailX + 8} ${midY - 9} L ${dims.tailX + 36} ${midY - 2} Z`}
@@ -400,6 +409,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
           opacity="0.9"
         />
         <circle cx={dims.tailX - 10} cy={dims.tailTopY + 1} r="1.5" fill="#f8fafc" />
+        </g>
       </svg>
 
       {/* Overlay Top-Left / Bottom Chips on Image Card */}
@@ -409,6 +419,12 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
         </span>
         <span className="px-1.5 py-0.5 rounded bg-[var(--atc-surface)]/90 border border-[var(--atc-border)] text-[9px] font-mono text-[var(--atc-muted)]">
           {registration}
+        </span>
+      </div>
+
+      <div className="absolute bottom-1.5 left-2 flex items-center gap-1.5">
+        <span className="px-1.5 py-0.5 rounded bg-[var(--atc-surface)]/90 border border-[var(--atc-border)] text-[9px] font-mono font-semibold text-[var(--atc-text-secondary)] shadow-sm">
+          {agl}ft AGL • {pitchDeg > 0 ? `+${pitchDeg}` : pitchDeg}° • {Math.round(aircraft.verticalSpeed)} fpm
         </span>
       </div>
 

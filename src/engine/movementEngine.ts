@@ -92,11 +92,16 @@ export function updateAircraftMovement(
     if (!canAircraftMove(ac, state)) {
       ac.speed = 0;
       ac.verticalSpeed = 0;
+      if (ac.altitude <= elev + 12) {
+        ac.altitude = elev;
+      }
       continue;
     }
 
     switch (ac.state) {
       case "PUSHING_BACK": {
+        ac.altitude = elev;
+        ac.verticalSpeed = 0;
         const spotId = ac.pushbackSpotId ?? (ac.gateId ? `PB_${ac.gateId}` : undefined);
         const spot = spotId ? state.airport.nodes[spotId] : undefined;
         if (!spot) {
@@ -109,18 +114,31 @@ export function updateAircraftMovement(
         const dy = spot.y - ac.y;
         const dist = Math.hypot(dx, dy);
         const step = (ac.speed / 3600) * dt;
-        // Aircraft pushes tail-first, so keep nose pointing toward gate while backing out
+        // Turn nose smoothly toward outbound taxiway direction while pushing tail-first onto alley
+        const rwy = state.airport.runways[ac.targetRunway];
+        const pbTwEdge = state.airport.edges.find(
+          (e) => e.from === spot.id && !e.to.startsWith("GATE_")
+        );
+        const pbTwNode = pbTwEdge ? state.airport.nodes[pbTwEdge.to] : undefined;
+        const outboundHdg = pbTwNode
+          ? bearingDeg(spot.x, spot.y, pbTwNode.x, pbTwNode.y)
+          : rwy
+          ? normalizeHeading((rwy.heading + 180) % 360)
+          : spot.isNorthSide
+          ? 270
+          : 90;
+
         if (dist <= Math.max(step, 0.003)) {
           ac.x = spot.x;
           ac.y = spot.y;
           ac.currentNodeId = spot.id;
-          const rwy = state.airport.runways[ac.targetRunway];
-          ac.heading = rwy ? normalizeHeading((rwy.heading + 180) % 360) : spot.isNorthSide ? 270 : 90;
+          ac.heading = outboundHdg;
           ac.speed = 0;
           completeClearancesOfType(ac, "PUSHBACK");
           ac.state = "PUSHBACK_COMPLETE";
           ac.stateEnteredAt = state.time;
         } else {
+          ac.heading = turnTowardHeading(ac.heading, outboundHdg, 14 * dt, "NEAREST");
           ac.x += (dx / dist) * step;
           ac.y += (dy / dist) * step;
         }
@@ -128,6 +146,8 @@ export function updateAircraftMovement(
       }
 
       case "HOLD_POSITION": {
+        ac.altitude = elev;
+        ac.verticalSpeed = 0;
         // Smooth physical braking deceleration to 0 kts (Section 29)
         ac.speed = Math.max(0, ac.speed - 18 * dt);
         const step = (ac.speed / 3600) * dt;
@@ -139,6 +159,8 @@ export function updateAircraftMovement(
 
       case "TAXIING":
       case "CROSSING_RUNWAY": {
+        ac.altitude = elev;
+        ac.verticalSpeed = 0;
         if (isTrafficAheadOnPath(ac, state, 0.055)) {
           ac.speed = Math.max(0, ac.speed - 24 * dt);
           break;
@@ -228,8 +250,15 @@ export function updateAircraftMovement(
               ac.holdingAtRunway = ac.targetRunway;
               ac.holdingShortReason = "DEPARTURE_RUNWAY";
               ac.stateEnteredAt = state.time;
-              // Face toward the runway entry
-              const entryId = `RWY_${ac.targetRunway}_${nextNode.id.split("_")[2]}`;
+              // Face toward the connected runway entry node
+              const adjRwyEdge = state.airport.edges.find(
+                (e) =>
+                  e.from === nextNode.id &&
+                  state.airport.nodes[e.to]?.runwayId === ac.targetRunway
+              );
+              const entryId = adjRwyEdge
+                ? adjRwyEdge.to
+                : `RWY_${ac.targetRunway}_${nextNode.id.split("_")[2]}`;
               const entryNode = state.airport.nodes[entryId];
               if (entryNode) {
                 ac.heading = bearingDeg(ac.x, ac.y, entryNode.x, entryNode.y);
@@ -266,23 +295,29 @@ export function updateAircraftMovement(
 
       case "LINE_UP_WAIT":
       case "TAKEOFF_CLEARED": {
+        ac.altitude = elev;
+        ac.verticalSpeed = 0;
         const rwy = state.airport.runways[ac.targetRunway];
         if (!rwy) break;
         const curAlong = alongRunwayNm(rwy, ac.x, ac.y);
-        const lineupAlong = Math.max(0.03, Math.min(rwy.lengthNm - 0.5, curAlong));
+        const curCross = Math.abs(crossTrackRunwayNm(rwy, ac.x, ac.y));
+        const leadDist = curCross > 0.008 ? Math.min(0.035, curCross * 0.6) : 0;
+        const lineupAlong = Math.max(0.03, Math.min(rwy.lengthNm - 0.5, curAlong + leadDist));
         const targetPt = runwayPoint(rwy, lineupAlong, 0);
-        const dist = Math.hypot(targetPt.x - ac.x, targetPt.y - ac.y);
 
-        if (dist > 0.004) {
+        if (curCross > 0.004) {
           ac.speed = 16;
           moveTowardPoint(ac, targetPt.x, targetPt.y, ac.speed, dt);
         } else {
-          ac.x = targetPt.x;
-          ac.y = targetPt.y;
-          ac.heading = turnTowardHeading(ac.heading, rwy.heading, 90 * dt, "NEAREST");
+          const centerPt = runwayPoint(rwy, Math.max(0.03, Math.min(rwy.lengthNm - 0.5, curAlong)), 0);
+          ac.x = centerPt.x;
+          ac.y = centerPt.y;
+          ac.heading = turnTowardHeading(ac.heading, rwy.heading, 110 * dt, "NEAREST");
           if (headingDiffDeg(ac.heading, rwy.heading) < 4) {
             ac.heading = rwy.heading;
             ac.speed = 0;
+          } else {
+            ac.speed = Math.max(0, ac.speed - 24 * dt);
           }
         }
         break;
@@ -290,8 +325,12 @@ export function updateAircraftMovement(
 
       case "TAKEOFF_ROLL": {
         const rwy = state.airport.runways[ac.targetRunway];
+        if (!rwy) break;
         ac.heading = rwy.heading;
-        ac.speed = Math.min(165, ac.speed + 14 * dt);
+        ac.altitude = elev;
+        ac.verticalSpeed = 0;
+        const accel = ac.wakeCategory === "HEAVY" ? 9.8 : 10.8;
+        ac.speed = Math.min(168, ac.speed + accel * dt);
         const step = (ac.speed / 3600) * dt;
         const rad = (ac.heading * Math.PI) / 180;
         ac.x += Math.sin(rad) * step;
@@ -301,6 +340,8 @@ export function updateAircraftMovement(
 
       case "REJECTED_TAKEOFF":
       case "BRAKING": {
+        ac.altitude = elev;
+        ac.verticalSpeed = 0;
         ac.speed = Math.max(0, ac.speed - 25 * dt);
         const step = (ac.speed / 3600) * dt;
         const rad = (ac.heading * Math.PI) / 180;
@@ -310,9 +351,17 @@ export function updateAircraftMovement(
       }
 
       case "ROTATE": {
-        ac.speed = Math.min(ac.assignedSpeed ?? 210, ac.speed + 10 * dt);
-        ac.verticalSpeed = 1800;
-        ac.altitude += (ac.verticalSpeed / 60) * dt;
+        const rotElapsed = Math.max(0, state.time - ac.stateEnteredAt);
+        const v2 = ac.assignedSpeed ?? (ac.wakeCategory === "HEAVY" ? 166 : 158);
+        ac.speed = Math.min(v2, ac.speed + 6.5 * dt);
+        if (rotElapsed < 0.85) {
+          // Initial nose-up rotation on main wheels prior to positive liftoff
+          ac.altitude = elev;
+          ac.verticalSpeed = 0;
+        } else {
+          ac.verticalSpeed = Math.min(1550, ac.verticalSpeed + 950 * dt);
+          ac.altitude += (ac.verticalSpeed / 60) * dt;
+        }
         const step = (ac.speed / 3600) * dt;
         const rad = (ac.heading * Math.PI) / 180;
         ac.x += Math.sin(rad) * step;
@@ -335,35 +384,42 @@ export function updateAircraftMovement(
       case "ROLLOUT": {
         const rwy = state.airport.runways[ac.assignedApproach ?? ac.targetRunway];
         if (!rwy) break;
-        ac.heading = rwy.heading;
+        ac.heading = turnTowardHeading(ac.heading, rwy.heading, 45 * dt, "NEAREST");
         ac.altitude = elev;
         ac.verticalSpeed = 0;
         const along = alongRunwayNm(rwy, ac.x, ac.y);
-        let targetExitAlong = rwy.lengthNm;
-        for (const eid of rwy.exitNodeIds) {
-          const node = state.airport.nodes[eid];
-          if (!node) continue;
-          const ea = alongRunwayNm(rwy, node.x, node.y);
-          if (ea >= along - 0.05) {
-            targetExitAlong = ea;
-            break;
-          }
+        const cross = crossTrackRunwayNm(rwy, ac.x, ac.y);
+        let targetExitAlong = rwy.lengthNm - 0.05;
+        const forwardExits = rwy.exitNodeIds
+          .map((eid) => state.airport.nodes[eid])
+          .filter((n): n is NonNullable<typeof n> => Boolean(n))
+          .map((n) => alongRunwayNm(rwy, n.x, n.y))
+          .filter((ea) => ea >= along + 0.02)
+          .sort((a, b) => a - b);
+        if (forwardExits.length > 0) {
+          targetExitAlong = forwardExits[0];
         }
+
         const distToExit = Math.max(0, targetExitAlong - along);
-        const targetRolloutSpd = distToExit < 0.22 ? 22 : 58;
+        const targetRolloutSpd = distToExit < 0.09 ? 24 : 62;
         if (ac.speed > targetRolloutSpd) {
-          ac.speed = Math.max(targetRolloutSpd, ac.speed - 9.5 * dt);
+          const brakeRate = ac.speed > 55 ? 15 : 11;
+          ac.speed = Math.max(targetRolloutSpd, ac.speed - brakeRate * dt);
         } else {
           ac.speed = targetRolloutSpd;
         }
         const step = (ac.speed / 3600) * dt;
-        const nextPt = runwayPoint(rwy, along + step, 0);
+        const nextAlong = Math.min(rwy.lengthNm - 0.04, along + step);
+        const smoothCross = Math.abs(cross) < 0.002 ? 0 : cross * Math.max(0, 1 - 3.5 * dt);
+        const nextPt = runwayPoint(rwy, nextAlong, smoothCross);
         ac.x = nextPt.x;
         ac.y = nextPt.y;
         break;
       }
 
       case "VACATING_RUNWAY": {
+        ac.altitude = elev;
+        ac.verticalSpeed = 0;
         const exitId = ac.vacatingExitNodeId;
         if (!exitId || !state.airport.nodes[exitId]) {
           ac.speed = 0;
@@ -377,6 +433,10 @@ export function updateAircraftMovement(
 
       default:
         ac.speed = 0;
+        ac.verticalSpeed = 0;
+        if (ac.altitude <= elev + 12) {
+          ac.altitude = elev;
+        }
         break;
     }
 
@@ -408,9 +468,9 @@ function integrateAirborneFlight(
   ) {
     // ILS Localizer tracking onto runway centerline along rwy.heading
     const crossErr = crossTrackRunwayNm(rwy, ac.x, ac.y);
-    const interceptAngle = Math.max(-25, Math.min(25, crossErr * 45));
+    const interceptAngle = Math.max(-28, Math.min(28, crossErr * 55));
     const desiredHdg = normalizeHeading(rwy.heading + interceptAngle);
-    ac.heading = turnTowardHeading(ac.heading, desiredHdg, 5 * dt, "NEAREST");
+    ac.heading = turnTowardHeading(ac.heading, desiredHdg, 8 * dt, "NEAREST");
   } else if (
     ac.assignedDirectFix &&
     canAircraftExecuteAction(ac, "DIRECT_FIX", state).allowed
@@ -442,72 +502,99 @@ function integrateAirborneFlight(
     }
   }
 
-  // 2. Vertical Guidance (Strictly clearance-gated)
+  // 2. Vertical Guidance (Unified 3-degree ILS Glideslope & Smooth Climb Profile)
   const along = alongRunwayNm(rwy, ac.x, ac.y);
+  const tdzAlong = rwy ? Math.min(0.22, rwy.lengthNm * 0.14) : 0.15;
+  const distToTdz = Math.max(0, tdzAlong - along);
+  const glideSlopeAlt = elev + distToTdz * 318; // 3-degree ILS (~318 ft/NM)
+  const agl = Math.max(0, ac.altitude - elev);
+
+  const smoothSetVs = (targetVs: number, maxStepPerSec = 700) => {
+    const dv = targetVs - ac.verticalSpeed;
+    const maxStep = maxStepPerSec * dt;
+    if (Math.abs(dv) <= maxStep) ac.verticalSpeed = targetVs;
+    else ac.verticalSpeed += Math.sign(dv) * maxStep;
+  };
+
   if (
     ac.state === "LANDING" ||
     (ac.state === "CLEARED_TO_LAND" && along >= -5.5)
   ) {
-    const distToTouchdown = Math.max(0, 0.15 - along);
-    const glideSlopeAlt = elev + distToTouchdown * 330;
-    const altDiff = glideSlopeAlt - ac.altitude;
-    if (Math.abs(altDiff) < 12) {
-      ac.altitude = glideSlopeAlt;
-      ac.verticalSpeed = -700;
+    if (ac.altitude < glideSlopeAlt - 25 && along < -0.35) {
+      // Hold altitude level to capture the 3° glidepath from below rather than diving early
+      smoothSetVs(0);
+    } else if (distToTdz <= 0.12 && agl <= 55) {
+      // Smooth landing flare down onto touchdown elevation
+      const flareVs = -Math.max(180, agl * 4.5);
+      smoothSetVs(flareVs, 950);
     } else {
-      const rate = Math.max(-1800, Math.min(600, altDiff * 4));
-      ac.verticalSpeed = rate;
-      ac.altitude = Math.max(elev, ac.altitude + (rate / 60) * dt);
+      const ideal3Deg = -318 * (Math.max(115, ac.speed) / 60);
+      const errCorrection = (glideSlopeAlt - ac.altitude) * 3.5;
+      const targetVs = Math.max(-1850, Math.min(100, ideal3Deg + errCorrection));
+      smoothSetVs(targetVs);
     }
+    ac.altitude = Math.max(elev, ac.altitude + (ac.verticalSpeed / 60) * dt);
   } else if (ac.state === "FINAL") {
     // Glideslope down to Decision Minimums (elev + 250 ft) — NEVER lower without LAND clearance!
-    const distToThreshold = Math.max(0, -along);
-    const minAlt = elev + 250;
-    const glideSlopeAlt = Math.max(minAlt, elev + distToThreshold * 315);
-    if (ac.altitude > glideSlopeAlt + 15) {
-      ac.verticalSpeed = -900;
-      ac.altitude = Math.max(glideSlopeAlt, ac.altitude + (ac.verticalSpeed / 60) * dt);
+    const targetFinalAlt = Math.max(elev + 250, glideSlopeAlt);
+    if (ac.altitude > targetFinalAlt + 15) {
+      const ideal3Deg = -318 * (Math.max(125, ac.speed) / 60);
+      const excess = ac.altitude - targetFinalAlt;
+      const targetVs = -Math.min(1750, Math.max(-ideal3Deg, excess * 3.2));
+      smoothSetVs(targetVs);
+      ac.altitude = Math.max(targetFinalAlt, ac.altitude + (ac.verticalSpeed / 60) * dt);
     } else {
-      ac.verticalSpeed = 0;
-    }
-  } else if (
-    ac.assignedAltitude !== null &&
-    canAircraftExecuteAction(ac, "CHANGE_ALTITUDE", state).allowed
-  ) {
-    const altDiff = ac.assignedAltitude - ac.altitude;
-    if (Math.abs(altDiff) <= 15) {
-      ac.altitude = ac.assignedAltitude;
-      ac.verticalSpeed = 0;
-    } else {
-      const maxRate = ac.state === "GO_AROUND" ? 2400 : 1800;
-      const vs = Math.sign(altDiff) * Math.min(maxRate, Math.abs(altDiff) * 3);
-      ac.verticalSpeed = vs;
-      ac.altitude += (vs / 60) * dt;
+      smoothSetVs(0);
     }
   } else {
-    ac.verticalSpeed = 0;
+    const targetAlt =
+      ac.assignedAltitude !== null && canAircraftExecuteAction(ac, "CHANGE_ALTITUDE", state).allowed
+        ? ac.assignedAltitude
+        : ac.state === "CLIMB"
+        ? Math.round(elev / 500) * 500 + 3000
+        : null;
+
+    if (targetAlt !== null) {
+      const altDiff = targetAlt - ac.altitude;
+      if (Math.abs(altDiff) <= 15) {
+        ac.altitude = targetAlt;
+        smoothSetVs(0);
+      } else {
+        const maxRate = ac.state === "GO_AROUND" ? 2400 : ac.state === "CLIMB" ? 2100 : 1800;
+        const targetVs = Math.sign(altDiff) * Math.min(maxRate, Math.max(300, Math.abs(altDiff) * 3.2));
+        smoothSetVs(targetVs, 650);
+        ac.altitude = Math.max(elev, ac.altitude + (ac.verticalSpeed / 60) * dt);
+      }
+    } else {
+      smoothSetVs(0);
+    }
   }
 
-  // 3. Speed Guidance
+  // 3. Speed Guidance (Synced with Flight Phase & Distance)
+  const vref = ac.wakeCategory === "HEAVY" ? 144 : 136;
   let desiredSpeed = ac.speed;
   if (ac.state === "LANDING") {
-    desiredSpeed = 135;
-  } else if (ac.state === "CLEARED_TO_LAND" && along >= -3.5) {
-    desiredSpeed = 145;
+    desiredSpeed = agl <= 55 ? vref - 4 : vref;
+  } else if (ac.state === "CLEARED_TO_LAND" && along >= -6.0) {
+    desiredSpeed = along > -2.2 ? vref + 4 : along > -4.2 ? 156 : 172;
   } else if (ac.state === "FINAL") {
-    desiredSpeed = ac.assignedSpeed ?? 155;
+    desiredSpeed = ac.assignedSpeed ?? (along > -2.5 ? vref + 8 : 162);
   } else if (
     ac.assignedSpeed !== null &&
     canAircraftExecuteAction(ac, "CHANGE_SPEED", state).allowed
   ) {
     desiredSpeed = ac.assignedSpeed;
+  } else if (ac.state === "CLIMB" || ac.state === "CRUISE_OUTBOUND") {
+    // Natural jet climb acceleration schedule when no explicit speed restriction assigned
+    desiredSpeed = agl < 1200 ? 178 : agl < 3000 ? 215 : 250;
   }
 
   const spdDiff = desiredSpeed - ac.speed;
-  if (Math.abs(spdDiff) <= 0.5) {
+  const maxSpdStep = 7.5 * dt;
+  if (Math.abs(spdDiff) <= maxSpdStep) {
     ac.speed = desiredSpeed;
   } else {
-    ac.speed += Math.sign(spdDiff) * Math.min(Math.abs(spdDiff), 8 * dt);
+    ac.speed += Math.sign(spdDiff) * maxSpdStep;
   }
 
   // 4. Integrate horizontal position

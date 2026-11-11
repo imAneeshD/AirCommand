@@ -1,7 +1,11 @@
 import React, { useEffect } from "react";
-import { AirportLandingScreen } from "./components/AirportLandingScreen.tsx";
+import { AirportGeometryEditor } from "./components/AirportGeometryEditor.tsx";
 import { ClearanceControlDeck } from "./components/ClearanceControlDeck.tsx";
 import { FlightStripRack } from "./components/FlightStripRack.tsx";
+import { GlobalAirportMap } from "./components/GlobalAirportMap.tsx";
+import { LiveTrafficView } from "./components/LiveTrafficView.tsx";
+import { MultiplayerLobby } from "./components/MultiplayerLobby.tsx";
+import { PostSessionModal } from "./components/PostSessionModal.tsx";
 import { RadarScopeCanvas } from "./components/RadarScopeCanvas.tsx";
 import { RadioCommsLog } from "./components/RadioCommsLog.tsx";
 import { TopBar } from "./components/TopBar.tsx";
@@ -9,20 +13,43 @@ import { VerificationModal } from "./components/VerificationModal.tsx";
 import { useAtcStore } from "./store/atcStore.ts";
 
 export function App() {
-  const showAirportSelector = useAtcStore((s) => s.showAirportSelector);
+  const appMode = useAtcStore((s) => s.appMode);
+  const roomState = useAtcStore((s) => s.roomState);
   const theme = useAtcStore((s) => s.theme);
   const tick = useAtcStore((s) => s.tick);
   const togglePause = useAtcStore((s) => s.togglePause);
   const switchStation = useAtcStore((s) => s.switchStation);
+  const setOnline = useAtcStore((s) => s.setOnline);
+  const hydrateSavedRealAirport = useAtcStore((s) => s.hydrateSavedRealAirport);
+  const syncPendingOfflineEdits = useAtcStore((s) => s.syncPendingOfflineEdits);
 
-  // Sync data-theme attribute onto <html> so scrollbars and overlays follow Light/Dark mode
+  // Sync data-theme attribute onto <html>
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
 
-  // Simulation Animation Loop (paused while on Airport Landing Screen)
+  // Hydrate saved real-world airport & track online/offline state
   useEffect(() => {
-    if (showAirportSelector) return;
+    void hydrateSavedRealAirport();
+    const handleOnline = () => {
+      setOnline(true);
+      void syncPendingOfflineEdits();
+    };
+    const handleOffline = () => setOnline(false);
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, [hydrateSavedRealAirport, setOnline, syncPendingOfflineEdits]);
+
+  // Simulation Animation Loop (solo only; multiplayer runs authoritatively on server at 5 Hz)
+  useEffect(() => {
+    if (appMode !== "SIMULATION") return;
+    if (roomState && roomState.status === "ACTIVE") return;
+
     let rafId = 0;
     let lastTs = performance.now();
     let accum = 0;
@@ -40,11 +67,11 @@ export function App() {
 
     rafId = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(rafId);
-  }, [tick, showAirportSelector]);
+  }, [tick, appMode, roomState?.status]);
 
   // Global ATC Hotkeys
   useEffect(() => {
-    if (showAirportSelector) return;
+    if (appMode !== "SIMULATION") return;
     const onKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
@@ -71,32 +98,29 @@ export function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [togglePause, switchStation, showAirportSelector]);
-
-  if (showAirportSelector) {
-    return (
-      <div data-theme={theme} className="min-h-screen bg-[var(--atc-bg)] text-[var(--atc-text)] transition-colors">
-        <AirportLandingScreen />
-        <VerificationModal />
-      </div>
-    );
-  }
+  }, [togglePause, switchStation, appMode]);
 
   return (
-    <div
-      data-theme={theme}
-      className="h-screen w-screen flex flex-col bg-[var(--atc-bg)] text-[var(--atc-text)] overflow-hidden transition-colors"
-    >
-      <TopBar />
+    <div data-theme={theme} className="h-screen w-screen bg-[var(--atc-bg)] text-[var(--atc-text)] transition-colors overflow-hidden">
+      {appMode === "GLOBAL_MAP" && <GlobalAirportMap />}
+      {appMode === "LIVE_OBSERVATION" && <LiveTrafficView />}
+      {appMode === "AIRPORT_EDITOR" && <AirportGeometryEditor />}
+      {appMode === "MULTIPLAYER_LOBBY" && <MultiplayerLobby />}
 
-      <div className="flex-1 flex min-h-0 overflow-hidden">
-        <FlightStripRack />
-        <RadarScopeCanvas />
-        <ClearanceControlDeck />
-      </div>
+      {appMode === "SIMULATION" && (
+        <div className="h-screen w-screen flex flex-col overflow-hidden">
+          <TopBar />
+          <div className="flex-1 flex min-h-0 overflow-hidden">
+            <FlightStripRack />
+            <RadarScopeCanvas />
+            <ClearanceControlDeck />
+          </div>
+          <RadioCommsLog />
+        </div>
+      )}
 
-      <RadioCommsLog />
       <VerificationModal />
+      <PostSessionModal />
     </div>
   );
 }

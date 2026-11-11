@@ -9,9 +9,11 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { getActiveClearances, getPendingReadbackClearances } from "../engine/clearanceEngine.ts";
+import { getAircraftPhaseLabel } from "../engine/simulation.ts";
 import { canAircraftMove } from "../engine/validationEngine.ts";
 import { useAtcStore } from "../store/atcStore.ts";
 import type { Aircraft, ControllerRole } from "../types/atc.ts";
+import { formatAltitudeReadout } from "../utils/telemetry.ts";
 import { Accordion } from "./Accordion.tsx";
 
 type StripFilter = "ALL" | "STATION" | "DEP" | "ARR";
@@ -219,16 +221,20 @@ export const FlightStripRack: React.FC = () => {
                       ? `${ac.gateId ?? "RAMP"} → ${ac.targetRunway}`
                       : `${ac.assignedApproach ?? ac.targetRunway} → ${ac.gateId ?? "GATE"}`}
                   </span>
-                  <span className="shrink-0">
-                    {Math.round(ac.altitude)}ft • {Math.round(ac.speed)}kt
+                  <span
+                    className="shrink-0"
+                    title={formatAltitudeReadout(ac, sim.airport.elevationFt).detailed}
+                  >
+                    {formatAltitudeReadout(ac, sim.airport.elevationFt).strip} • {Math.round(ac.speed)}kt
                   </span>
                 </div>
 
                 <div className="mt-1.5 flex items-center justify-between gap-1">
                   <span
                     className={`px-1.5 py-0.5 rounded border text-[9px] font-mono font-semibold truncate ${stateBadgeStyle(ac)}`}
+                    title={ac.state}
                   >
-                    {ac.state.replace(/_/g, " ")}
+                    {getAircraftPhaseLabel(ac)}
                   </span>
 
                   <span

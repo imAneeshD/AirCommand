@@ -1,7 +1,9 @@
 import React, { useState } from "react";
 import {
   Bot,
-  MapPin,
+  Flag,
+  Globe2,
+  Lock,
   Moon,
   Pause,
   Play,
@@ -9,6 +11,7 @@ import {
   Settings2,
   ShieldCheck,
   Sun,
+  Users,
   Volume2,
   VolumeX,
 } from "lucide-react";
@@ -31,9 +34,16 @@ const STATIONS: Array<{
 
 const SCENARIOS: Array<{ id: ScenarioId; label: string }> = [
   { id: "NORMAL_OPS", label: "Normal Operations" },
+  { id: "LIGHT", label: "Light Traffic" },
+  { id: "MEDIUM", label: "Medium Traffic" },
+  { id: "HEAVY", label: "Heavy Traffic" },
+  { id: "RUSH_HOUR", label: "Peak Rush Hour" },
+  { id: "ARRIVAL_HEAVY", label: "Arrival Heavy" },
+  { id: "DEPARTURE_HEAVY", label: "Departure Heavy" },
+  { id: "MIXED", label: "Mixed Ops" },
+  { id: "EMERGENCY", label: "Emergency Ops" },
   { id: "CROSSINGS_AND_READBACK", label: "Crossings & Readback Errors" },
   { id: "EMERGENCY_AND_NORDO", label: "Emergency & NORDO 7600" },
-  { id: "RUSH_HOUR", label: "Peak Rush Hour" },
   { id: "SANDBOX", label: "Clean Sandbox" },
 ];
 
@@ -48,6 +58,11 @@ export const TopBar: React.FC = () => {
   useAtcStore((s) => s.tickVersion);
   const sfxEnabled = useAtcStore((s) => s.sfxEnabled);
   const theme = useAtcStore((s) => s.theme);
+  const roomState = useAtcStore((s) => s.roomState);
+  const assignedRole = useAtcStore((s) => s.assignedRole);
+  const isOnline = useAtcStore((s) => s.isOnline);
+  const setAppMode = useAtcStore((s) => s.setAppMode);
+  const endMultiplayerSession = useAtcStore((s) => s.endMultiplayerSession);
 
   const switchStation = useAtcStore((s) => s.switchStation);
   const toggleAutoAssist = useAtcStore((s) => s.toggleAutoAssist);
@@ -58,6 +73,8 @@ export const TopBar: React.FC = () => {
   const openAirportSelector = useAtcStore((s) => s.openAirportSelector);
   const toggleSfx = useAtcStore((s) => s.toggleSfx);
   const toggleTheme = useAtcStore((s) => s.toggleTheme);
+
+  const isMpActive = Boolean(roomState && roomState.status === "ACTIVE");
 
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -88,18 +105,40 @@ export const TopBar: React.FC = () => {
             <div className="text-xs font-extrabold tracking-wider text-[var(--atc-text)] uppercase">
               AirCommand
             </div>
-            <div className="text-[10px] font-mono text-[var(--atc-muted)]">
-              {sim.airport.icao} • {sim.airport.controllerPrefix} • {sim.airport.runwayIds.join("/")}
+            <div className="text-[10px] font-mono text-[var(--atc-muted)] flex items-center gap-1.5">
+              <span>
+                {sim.airport.icao} • {sim.airport.controllerPrefix} • {sim.airport.runwayIds.join("/")}
+              </span>
+              {sim.liveSnapshotMeta && (
+                <span
+                  title={`Imported ${sim.liveSnapshotMeta.convertedCount} real ADS-B flights (${sim.liveSnapshotMeta.source})`}
+                  className="px-1.5 py-0.2 rounded bg-[var(--atc-emerald-bg)] border border-[var(--atc-emerald-border)] text-[var(--atc-emerald)] text-[9px] font-bold"
+                >
+                  LIVE SEEDED ({sim.liveSnapshotMeta.convertedCount})
+                </span>
+              )}
             </div>
           </div>
           <button
             onClick={openAirportSelector}
-            title="Switch Airport (Landing Screen)"
+            title="Open Global Airport Map & Discovery"
             className="px-2 py-1 rounded-md border border-[var(--atc-border)] hover:border-[var(--atc-border-strong)] bg-[var(--atc-surface)] text-[10px] font-mono text-[var(--atc-text-secondary)] hover:text-[var(--atc-text)] flex items-center gap-1 whitespace-nowrap shadow-sm transition-colors"
           >
-            <MapPin className="w-3 h-3 text-[var(--atc-cyan)]" />
-            <span className="hidden 2xl:inline">AIRPORT</span>
+            <Globe2 className="w-3 h-3 text-[var(--atc-cyan)]" />
+            <span className="hidden 2xl:inline">GLOBAL MAP</span>
           </button>
+
+          {roomState && (
+            <button
+              onClick={() => setAppMode("MULTIPLAYER_LOBBY")}
+              title="Open Multiplayer Lobby & Room Status"
+              className="px-2 py-1 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] text-[10px] font-mono font-bold text-[var(--atc-cyan)] flex items-center gap-1 whitespace-nowrap"
+            >
+              <Users className="w-3 h-3" />
+              <span>{roomState.roomCode}</span>
+              {assignedRole && <span>· {assignedRole}</span>}
+            </button>
+          )}
         </div>
 
         {/* Minimal Segmented Role Switcher: G | T | D | ALL AUTO */}
@@ -107,19 +146,23 @@ export const TopBar: React.FC = () => {
           {STATIONS.map((st) => {
             const active = sim.config.activePlayerStation === st.role;
             const isAll = st.role === "ALL";
+            const mpLocked = isMpActive && assignedRole !== null && st.role !== assignedRole;
             const count = isAll
               ? pendingCounts.GROUND + pendingCounts.TOWER + pendingCounts.DEPARTURE
               : pendingCounts[st.role as ControllerRole];
             return (
               <button
                 key={st.role}
+                disabled={mpLocked}
                 onClick={() => switchStation(st.role)}
                 title={
-                  isAll
+                  mpLocked
+                    ? `Multiplayer role locked to ${assignedRole}`
+                    : isAll
                     ? "ALL AUTO: All 3 stations automated & hear all frequencies [Key: N / A / 4]"
                     : `Switch role to ${st.label} (${st.freq}) — hear only ${st.label}; other roles auto-managed [Key: ${st.code}]`
                 }
-                className={`px-2.5 py-1 rounded-md text-xs font-mono transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                className={`px-2.5 py-1 rounded-md text-xs font-mono transition-all flex items-center gap-1.5 whitespace-nowrap disabled:opacity-35 disabled:cursor-not-allowed ${
                   active
                     ? "bg-[var(--atc-surface)] text-[var(--atc-text)] border border-[var(--atc-accent-border)] shadow-sm font-bold"
                     : "text-[var(--atc-muted)] hover:text-[var(--atc-text)] border border-transparent"
@@ -297,27 +340,50 @@ export const TopBar: React.FC = () => {
         </div>
 
         {/* Verify Quick Button (compact) */}
-        <button
-          onClick={() => setShowVerificationModal(true)}
-          title="Run Mandatory ATC Rules Verification Suite"
-          className="px-2 py-1.5 rounded-md bg-[var(--atc-emerald-bg)] hover:opacity-90 border border-[var(--atc-emerald-border)] text-[var(--atc-emerald)] text-xs font-mono font-semibold flex items-center gap-1 whitespace-nowrap"
-        >
-          <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
-          <span className="hidden 2xl:inline">VERIFY</span>
-        </button>
+        {!isMpActive ? (
+          <>
+            <button
+              onClick={() => setAppMode("LIVE_OBSERVATION")}
+              disabled={!isOnline}
+              title="Open Read-Only Live ADS-B Radar"
+              className="hidden md:flex px-2 py-1.5 rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface)] text-[var(--atc-cyan)] text-xs font-mono font-semibold items-center gap-1 whitespace-nowrap disabled:opacity-40"
+            >
+              <Radio className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden 2xl:inline">LIVE ADS-B</span>
+            </button>
+            <button
+              onClick={() => setShowVerificationModal(true)}
+              title="Run Mandatory ATC Rules Verification Suite"
+              className="px-2 py-1.5 rounded-md bg-[var(--atc-emerald-bg)] hover:opacity-90 border border-[var(--atc-emerald-border)] text-[var(--atc-emerald)] text-xs font-mono font-semibold flex items-center gap-1 whitespace-nowrap"
+            >
+              <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden 2xl:inline">VERIFY</span>
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={endMultiplayerSession}
+            title="Finish Multiplayer Session & Generate Performance Report"
+            className="px-2.5 py-1.5 rounded-md bg-[var(--atc-red-bg)] border border-[var(--atc-red-border)] text-[var(--atc-red)] text-xs font-mono font-bold flex items-center gap-1 whitespace-nowrap"
+          >
+            <Flag className="w-3.5 h-3.5 shrink-0" />
+            <span>END SHIFT</span>
+          </button>
+        )}
 
         {/* Primary Play / Pause Control */}
         <button
+          disabled={isMpActive}
           onClick={togglePause}
-          title="Play / Pause [Space]"
-          className={`px-3 py-1.5 rounded-md border text-xs font-mono font-bold flex items-center gap-1.5 transition-colors ${
+          title={isMpActive ? "Multiplayer clock synchronized by server" : "Play / Pause [Space]"}
+          className={`px-3 py-1.5 rounded-md border text-xs font-mono font-bold flex items-center gap-1.5 transition-colors disabled:opacity-60 ${
             sim.paused
               ? "bg-[var(--atc-surface-alt)] border-[var(--atc-border-strong)] text-[var(--atc-text)]"
               : "bg-[var(--atc-accent)] border-[var(--atc-accent-border)] text-slate-950 shadow-sm"
           }`}
         >
-          {sim.paused ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
-          <span className="hidden sm:inline">{sim.paused ? "PAUSED" : "LIVE"}</span>
+          {isMpActive ? <Lock className="w-3.5 h-3.5" /> : sim.paused ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
+          <span className="hidden sm:inline">{isMpActive ? "SYNCED" : sim.paused ? "PAUSED" : "LIVE"}</span>
         </button>
       </div>
     </header>

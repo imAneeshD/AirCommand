@@ -61,6 +61,15 @@ export const AIRLINE_TELEPHONY: Record<string, string> = {
   SWA: "Southwest",
   JBU: "JetBlue",
   FDX: "FedEx",
+  AIC: "Air India",
+  IGO: "iFly",
+  VTI: "Vistara",
+  SEJ: "SpiceJet",
+  AKJ: "Akasa Air",
+  UAE: "Emirates",
+  BAW: "Speedbird",
+  SIA: "Singapore",
+  DLH: "Lufthansa",
 };
 
 export function spellDigitsIcao(digits: string, capitalize = false): string {

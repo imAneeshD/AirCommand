@@ -25,14 +25,19 @@ export function saveTheme(theme: ThemeMode): void {
   }
 }
 
-const VALID_AIRPORTS = new Set<AirportId>(["KAST", "KMRD", "KVEL", "KSOL"]);
+const LEGACY_AIRPORTS = new Set<AirportId>(["KAST", "KMRD", "KVEL", "KSOL"]);
+
+function isValidAirportId(raw: string | null): raw is AirportId {
+  if (!raw) return false;
+  return LEGACY_AIRPORTS.has(raw) || /^[A-Z0-9]{3,6}$/.test(raw);
+}
 
 export function loadSavedAirportId(): AirportId | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(AIRPORT_KEY);
-    if (raw && VALID_AIRPORTS.has(raw as AirportId)) {
-      return raw as AirportId;
+    if (isValidAirportId(raw)) {
+      return raw;
     }
     return null;
   } catch {
@@ -58,17 +63,26 @@ export function clearSavedAirportId(): void {
   }
 }
 
+const VALID_SCENARIOS = new Set<ScenarioId>([
+  "NORMAL_OPS",
+  "RUSH_HOUR",
+  "CROSSINGS_AND_READBACK",
+  "EMERGENCY_AND_NORDO",
+  "SANDBOX",
+  "LIGHT",
+  "MEDIUM",
+  "HEAVY",
+  "ARRIVAL_HEAVY",
+  "DEPARTURE_HEAVY",
+  "MIXED",
+  "EMERGENCY",
+]);
+
 export function loadSavedScenarioId(): ScenarioId {
   if (typeof window === "undefined") return "NORMAL_OPS";
   try {
-    const raw = window.localStorage.getItem(SCENARIO_KEY);
-    if (
-      raw === "NORMAL_OPS" ||
-      raw === "RUSH_HOUR" ||
-      raw === "CROSSINGS_AND_READBACK" ||
-      raw === "EMERGENCY_AND_NORDO" ||
-      raw === "SANDBOX"
-    ) {
+    const raw = window.localStorage.getItem(SCENARIO_KEY) as ScenarioId | null;
+    if (raw && VALID_SCENARIOS.has(raw)) {
       return raw;
     }
     return "NORMAL_OPS";
