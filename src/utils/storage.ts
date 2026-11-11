@@ -99,3 +99,46 @@ export function saveSelectedScenarioId(scenarioId: ScenarioId): void {
     // Ignore
   }
 }
+
+const VOICE_ENABLED_KEY = "aircommand_voice_enabled_v1";
+const SFX_ENABLED_KEY = "aircommand_sfx_enabled_v1";
+
+export function loadSavedVoiceEnabled(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    const raw = window.localStorage.getItem(VOICE_ENABLED_KEY);
+    if (raw === "false" || raw === "0") return false;
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+export function saveVoiceEnabled(enabled: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(VOICE_ENABLED_KEY, enabled ? "true" : "false");
+  } catch {
+    // Ignore
+  }
+}
+
+export function loadSavedSfxEnabled(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    const raw = window.localStorage.getItem(SFX_ENABLED_KEY);
+    if (raw === "false" || raw === "0") return false;
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+export function saveSfxEnabled(enabled: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(SFX_ENABLED_KEY, enabled ? "true" : "false");
+  } catch {
+    // Ignore
+  }
+}

@@ -22,6 +22,7 @@ import { apiClient } from "../services/apiClient.ts";
 import { useAtcStore } from "../store/atcStore.ts";
 import type { AirportRecord, LiveAdsbTrack, LiveTrafficSnapshot } from "../types/atc.ts";
 import { offlineDb } from "../utils/offlineDb.ts";
+import { LocalClockBadge } from "./LocalClockBadge.tsx";
 
 const QUICK_AIRSPACE_HUBS = [
   { icao: "VIDP", name: "Delhi (VIDP)", lat: 28.5556, lon: 77.0952 },
@@ -347,6 +348,7 @@ export const LiveTrafficView: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          <LocalClockBadge compact />
           {QUICK_AIRSPACE_HUBS.map((h) => (
             <button
               key={h.icao}

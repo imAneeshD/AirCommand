@@ -15,16 +15,17 @@ import {
 } from "lucide-react";
 import { getResolvedAircraftDetails } from "../data/aircraftCatalog.ts";
 import { useAtcStore } from "../store/atcStore.ts";
+import { formatWallClockAtSimOffset } from "../utils/dateTime.ts";
 import { computeAircraftPitchDeg, formatAltitudeReadout } from "../utils/telemetry.ts";
 import { AircraftSideProfile } from "./AircraftSideProfile.tsx";
 
 type BottomTab = "LOGS" | "AIRCRAFT" | "COORD";
 type LogFilter = "ALL" | "STATION" | "ALERTS";
 
-function formatLogTime(sec: number): string {
+function formatElapsedSimTime(sec: number): string {
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `T+${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
 export const RadioCommsLog: React.FC = () => {
@@ -37,6 +38,20 @@ export const RadioCommsLog: React.FC = () => {
   const respondToHandoff = useAtcStore((s) => s.respondToHandoff);
   const sendMultiplayerChat = useAtcStore((s) => s.sendMultiplayerChat);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const sessionAnchorRef = useRef<{ key: string; wallMs: number; simSec: number }>({
+    key: `${sim.airport.icao}|${sim.scenarioId}`,
+    wallMs: Date.now(),
+    simSec: sim.time,
+  });
+
+  const sessionKey = `${sim.airport.icao}|${sim.scenarioId}`;
+  if (sessionAnchorRef.current.key !== sessionKey || sim.time < sessionAnchorRef.current.simSec) {
+    sessionAnchorRef.current = {
+      key: sessionKey,
+      wallMs: Date.now(),
+      simSec: sim.time,
+    };
+  }
 
   const [activeTab, setActiveTab] = useState<BottomTab>("LOGS");
   const [collapsed, setCollapsed] = useState(false);
@@ -147,7 +162,13 @@ export const RadioCommsLog: React.FC = () => {
 
           {collapsed && latestMsg && (
             <span className="text-[10px] font-mono text-[var(--atc-muted)] truncate ml-2 hidden md:inline">
-              [{formatLogTime(latestMsg.timestamp)}] {latestMsg.sender}: "{latestMsg.text}"
+              [
+              {formatWallClockAtSimOffset(
+                sessionAnchorRef.current.wallMs,
+                sessionAnchorRef.current.simSec,
+                latestMsg.timestamp
+              )}
+              ] {latestMsg.sender}: "{latestMsg.text}"
             </span>
           )}
         </div>
@@ -227,8 +248,15 @@ export const RadioCommsLog: React.FC = () => {
                       : "px-1.5 py-0.5"
                   }`}
                 >
-                  <span className="text-[var(--atc-muted)] shrink-0 text-[10px]">
-                    {formatLogTime(m.timestamp)}
+                  <span
+                    className="text-[var(--atc-muted)] shrink-0 text-[10px] tabular-nums"
+                    title={formatElapsedSimTime(m.timestamp)}
+                  >
+                    {formatWallClockAtSimOffset(
+                      sessionAnchorRef.current.wallMs,
+                      sessionAnchorRef.current.simSec,
+                      m.timestamp
+                    )}
                   </span>
                   <span className="text-[var(--atc-text-secondary)] shrink-0 w-36 truncate font-medium">
                     {m.sender} → {m.recipient}:

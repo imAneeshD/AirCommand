@@ -18,6 +18,7 @@ import {
 import { useAtcStore } from "../store/atcStore.ts";
 import type { ControllerRole, PlayerRoleMode, ScenarioId } from "../types/atc.ts";
 import { Accordion } from "./Accordion.tsx";
+import { LocalClockBadge } from "./LocalClockBadge.tsx";
 import { RadioVoiceMenu } from "./RadioVoiceMenu.tsx";
 
 const STATIONS: Array<{
@@ -47,16 +48,11 @@ const SCENARIOS: Array<{ id: ScenarioId; label: string }> = [
   { id: "SANDBOX", label: "Clean Sandbox" },
 ];
 
-function formatSimClock(seconds: number): string {
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `T+${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
-}
-
 export const TopBar: React.FC = () => {
   const sim = useAtcStore((s) => s.sim);
   useAtcStore((s) => s.tickVersion);
   const sfxEnabled = useAtcStore((s) => s.sfxEnabled);
+  const voiceEnabled = useAtcStore((s) => s.voiceEnabled);
   const theme = useAtcStore((s) => s.theme);
   const roomState = useAtcStore((s) => s.roomState);
   const assignedRole = useAtcStore((s) => s.assignedRole);
@@ -72,6 +68,7 @@ export const TopBar: React.FC = () => {
   const setShowVerificationModal = useAtcStore((s) => s.setShowVerificationModal);
   const openAirportSelector = useAtcStore((s) => s.openAirportSelector);
   const toggleSfx = useAtcStore((s) => s.toggleSfx);
+  const toggleVoice = useAtcStore((s) => s.toggleVoice);
   const toggleTheme = useAtcStore((s) => s.toggleTheme);
 
   const isMpActive = Boolean(roomState && roomState.status === "ACTIVE");
@@ -94,10 +91,10 @@ export const TopBar: React.FC = () => {
   }
 
   return (
-    <header className="min-h-[52px] bg-[var(--atc-panel)] border-b border-[var(--atc-border)] px-3 py-1.5 flex items-center justify-between gap-3 shrink-0 transition-colors">
+    <header className="min-h-[52px] bg-[var(--atc-panel)] border-b border-[var(--atc-border)] px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 shrink-0 transition-colors">
       {/* Left: Brand & Switch Airport */}
-      <div className="flex items-center gap-3 min-w-0">
-        <div className="flex items-center gap-2.5 shrink-0">
+      <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
           <div className="w-8 h-8 rounded-lg bg-[var(--atc-accent-bg)] border border-[var(--atc-accent-border)] flex items-center justify-center text-[var(--atc-accent-text)] shrink-0">
             <Radio className="w-4 h-4" />
           </div>
@@ -105,8 +102,8 @@ export const TopBar: React.FC = () => {
             <div className="text-xs font-extrabold tracking-wider text-[var(--atc-text)] uppercase">
               AirCommand
             </div>
-            <div className="text-[10px] font-mono text-[var(--atc-muted)] flex items-center gap-1.5">
-              <span>
+            <div className="text-[10px] font-mono text-[var(--atc-muted)] flex items-center gap-1.5 max-w-[165px] 2xl:max-w-none truncate">
+              <span className="truncate">
                 {sim.airport.icao} • {sim.airport.controllerPrefix} • {sim.airport.runwayIds.join("/")}
               </span>
               {sim.liveSnapshotMeta && (
@@ -177,7 +174,7 @@ export const TopBar: React.FC = () => {
                 >
                   {st.code}
                 </span>
-                <span className="hidden xl:inline">{st.label}</span>
+                <span className="hidden 2xl:inline">{st.label}</span>
                 {count > 0 && (
                   <span className="px-1 min-w-[16px] text-center rounded-full bg-amber-500 text-slate-950 text-[10px] font-bold">
                     {count}
@@ -189,11 +186,9 @@ export const TopBar: React.FC = () => {
         </div>
       </div>
 
-      {/* Center: Clean Sim Clock & Speed */}
-      <div className="flex items-center gap-2">
-        <div className="px-2.5 py-1 rounded-md bg-[var(--atc-surface)] border border-[var(--atc-border)] font-mono text-xs font-bold text-[var(--atc-text)] shadow-sm">
-          {formatSimClock(sim.time)}
-        </div>
+      {/* Center: Live User Local Date & Time + Sim Clock & Speed */}
+      <div className="flex items-center gap-2 shrink-0">
+        <LocalClockBadge simTimeSec={sim.time} />
 
         <div className="flex items-center bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] rounded-md p-0.5">
           {([1, 2, 4] as const).map((spd) => (
@@ -311,6 +306,21 @@ export const TopBar: React.FC = () => {
                       ? "ON"
                       : "MANUAL"}
                   </span>
+                </button>
+
+                <button
+                  onClick={toggleVoice}
+                  className={`w-full px-2.5 py-1.5 rounded border text-[11px] flex items-center justify-between ${
+                    voiceEnabled
+                      ? "border-[var(--atc-border)] bg-[var(--atc-surface-alt)] text-[var(--atc-text)]"
+                      : "border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] text-[var(--atc-red)]"
+                  }`}
+                >
+                  <span className="flex items-center gap-1.5 font-semibold">
+                    {voiceEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+                    Voice Output (TTS)
+                  </span>
+                  <span className="font-bold">{voiceEnabled ? "ON" : "MUTED"}</span>
                 </button>
 
                 <button

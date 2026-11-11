@@ -13,8 +13,10 @@ import {
   stepSimulation,
 } from "../src/engine/simulation.ts";
 import type { AirportGeoJsonCollection, LiveAdsbTrack } from "../src/types/atc.ts";
+import { formatUserDateTime, formatWallClockAtSimOffset } from "../src/utils/dateTime.ts";
 import { convertLiveTracksToSimulation } from "../src/utils/liveToSim.ts";
 import { convertAirportBundleToLayout } from "../src/utils/osmToAirport.ts";
+import { loadSavedVoiceEnabled, saveVoiceEnabled } from "../src/utils/storage.ts";
 import { computeAircraftPitchDeg, formatAltitudeReadout } from "../src/utils/telemetry.ts";
 import { DatabaseService } from "../server/db/DatabaseService.ts";
 import { ADSBProviderService, type ADSBProvider } from "../server/services/ADSBProviderService.ts";
@@ -639,4 +641,35 @@ test("Ground AGL readout, takeoff climb acceleration/pitch, and 3-deg glideslope
   } finally {
     env.cleanup();
   }
+});
+
+test("Voice mute persistence and user local date/time formatting work accurately", () => {
+  const store = new Map<string, string>();
+  const prevWindow = (globalThis as { window?: unknown }).window;
+  (globalThis as { window?: unknown }).window = {
+    localStorage: {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    },
+  };
+
+  try {
+    assert.equal(loadSavedVoiceEnabled(), true);
+    saveVoiceEnabled(false);
+    assert.equal(loadSavedVoiceEnabled(), false);
+    saveVoiceEnabled(true);
+    assert.equal(loadSavedVoiceEnabled(), true);
+  } finally {
+    (globalThis as { window?: unknown }).window = prevWindow;
+  }
+
+  const fixed = new Date(2026, 10, 11, 23, 14, 4);
+  const dt = formatUserDateTime(fixed);
+  assert.match(dt.timeText, /^23:14:04$/);
+  assert.match(dt.dateText, /2026/);
+  assert.match(dt.shortDateText, /11/);
+
+  const wallAt30 = formatWallClockAtSimOffset(fixed.getTime(), 0, 30);
+  assert.match(wallAt30, /^23:14:34$/);
 });

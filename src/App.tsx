@@ -18,6 +18,7 @@ export function App() {
   const theme = useAtcStore((s) => s.theme);
   const tick = useAtcStore((s) => s.tick);
   const togglePause = useAtcStore((s) => s.togglePause);
+  const toggleVoice = useAtcStore((s) => s.toggleVoice);
   const switchStation = useAtcStore((s) => s.switchStation);
   const setOnline = useAtcStore((s) => s.setOnline);
   const hydrateSavedRealAirport = useAtcStore((s) => s.hydrateSavedRealAirport);
@@ -94,11 +95,13 @@ export function App() {
         e.key === "0"
       ) {
         switchStation("ALL");
+      } else if (e.key === "m" || e.key === "M") {
+        toggleVoice();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [togglePause, switchStation, appMode]);
+  }, [togglePause, toggleVoice, switchStation, appMode]);
 
   return (
     <div data-theme={theme} className="h-screen w-screen bg-[var(--atc-bg)] text-[var(--atc-text)] transition-colors overflow-hidden">

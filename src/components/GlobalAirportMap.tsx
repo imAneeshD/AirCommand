@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { apiClient } from "../services/apiClient.ts";
 import { useAtcStore } from "../store/atcStore.ts";
+import { LocalClockBadge } from "./LocalClockBadge.tsx";
 import type {
   AirportCategory,
   AirportId,
@@ -643,6 +644,7 @@ export const GlobalAirportMap: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap justify-end">
+          <LocalClockBadge compact />
           {/* Online / Offline status */}
           <span
             className={`inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-full border ${

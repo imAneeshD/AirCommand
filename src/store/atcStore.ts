@@ -37,10 +37,14 @@ import {
   clearSavedAirportId,
   loadSavedAirportId,
   loadSavedScenarioId,
+  loadSavedSfxEnabled,
   loadSavedTheme,
+  loadSavedVoiceEnabled,
   saveSelectedAirportId,
   saveSelectedScenarioId,
+  saveSfxEnabled,
   saveTheme,
+  saveVoiceEnabled,
   type ThemeMode,
 } from "../utils/storage.ts";
 
@@ -214,6 +218,7 @@ interface AtcStore {
   setShowVerificationModal: (open: boolean) => void;
   toggleSfx: () => void;
   toggleVoice: () => void;
+  setVoiceEnabled: (enabled: boolean) => void;
 }
 
 export function collectNewMessagesSince(
@@ -284,6 +289,10 @@ function getOrCreatePlayerName(): string {
 const initialSavedAirport = loadSavedAirportId();
 const initialSavedScenario = loadSavedScenarioId();
 const initialSavedTheme = loadSavedTheme();
+const initialSavedVoice = loadSavedVoiceEnabled();
+const initialSavedSfx = loadSavedSfxEnabled();
+radioAudio.voiceEnabled = initialSavedVoice;
+radioAudio.sfxEnabled = initialSavedSfx;
 const LEGACY_IDS = new Set(["KAST", "KMRD", "KVEL", "KSOL"]);
 
 let wsClientSingleton: MultiplayerWsClient | null = null;
@@ -505,8 +514,8 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
   hoverPreviewRoute: null,
   lastFeedback: null,
   showVerificationModal: false,
-  sfxEnabled: true,
-  voiceEnabled: true,
+  sfxEnabled: initialSavedSfx,
+  voiceEnabled: initialSavedVoice,
   theme: initialSavedTheme,
 
   selectedAirportRecord: null,
@@ -1254,15 +1263,26 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
 
   toggleSfx: () =>
     set((s) => {
-      radioAudio.sfxEnabled = !s.sfxEnabled;
-      return { sfxEnabled: !s.sfxEnabled };
+      const next = !s.sfxEnabled;
+      radioAudio.sfxEnabled = next;
+      saveSfxEnabled(next);
+      return { sfxEnabled: next };
     }),
 
   toggleVoice: () =>
     set((s) => {
       const next = !s.voiceEnabled;
       radioAudio.voiceEnabled = next;
+      saveVoiceEnabled(next);
       if (!next) radioAudio.stopAllSpeech();
       return { voiceEnabled: next };
+    }),
+
+  setVoiceEnabled: (enabled: boolean) =>
+    set(() => {
+      radioAudio.voiceEnabled = enabled;
+      saveVoiceEnabled(enabled);
+      if (!enabled) radioAudio.stopAllSpeech();
+      return { voiceEnabled: enabled };
     }),
 }));
