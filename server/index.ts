@@ -5,6 +5,7 @@ import { WebSocketServer } from "ws";
 import type { AirportDataQuality, AirportGeoJsonCollection, ClearanceCommandInput, ControllerRole, DifficultyLevel, ScenarioId } from "../src/types/atc.ts";
 import { DatabaseService } from "./db/DatabaseService.ts";
 import { ADSBProviderService } from "./services/ADSBProviderService.ts";
+import { AircraftPhotoService } from "./services/AircraftPhotoService.ts";
 import { AirportGeometryService } from "./services/AirportGeometryService.ts";
 import { AirportImportService } from "./services/AirportImportService.ts";
 import { AirportService } from "./services/AirportService.ts";
@@ -20,6 +21,7 @@ console.log(`[AirCommand Server] Catalog initialized: ${seedInfo.count} airports
 const airportService = new AirportService(db);
 const geomService = new AirportGeometryService(db, importer);
 const adsbService = new ADSBProviderService();
+const photoService = new AircraftPhotoService();
 const roomService = new MultiplayerRoomService(db, geomService);
 roomService.startClockLoop();
 
@@ -225,6 +227,21 @@ const server = http.createServer(async (req, res) => {
       }
       const snap = await adsbService.getLiveTraffic(lat, lon, radiusDeg);
       sendJson(res, 200, snap);
+      return;
+    }
+
+    if (pathname === "/api/aircraft/photo" && req.method === "GET") {
+      const airline = reqUrl.searchParams.get("airline") ?? "";
+      const model = reqUrl.searchParams.get("model") ?? "";
+      const typeCode = reqUrl.searchParams.get("type") ?? "";
+      const registration = reqUrl.searchParams.get("reg") ?? "";
+      const photo = await photoService.resolvePhoto({
+        airline,
+        model,
+        typeCode,
+        registration,
+      });
+      sendJson(res, 200, photo);
       return;
     }
 

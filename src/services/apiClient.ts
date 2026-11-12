@@ -29,6 +29,16 @@ export interface AirportDetailResponse {
   error: string | null;
 }
 
+export interface AircraftPhotoResponse {
+  found: boolean;
+  url?: string;
+  fullUrl?: string;
+  source?: string;
+  photographer?: string;
+  caption?: string;
+  matchedBy?: "airline_model" | "model_only";
+}
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
@@ -91,6 +101,20 @@ export const apiClient = {
       radiusDeg: String(radiusDeg),
     });
     return fetchJson(`/api/adsb/live?${sp.toString()}`);
+  },
+
+  async getAircraftPhoto(params: {
+    airline?: string;
+    model?: string;
+    typeCode?: string;
+    registration?: string;
+  }): Promise<AircraftPhotoResponse> {
+    const sp = new URLSearchParams();
+    if (params.airline) sp.set("airline", params.airline);
+    if (params.model) sp.set("model", params.model);
+    if (params.typeCode) sp.set("type", params.typeCode);
+    if (params.registration) sp.set("reg", params.registration);
+    return fetchJson(`/api/aircraft/photo?${sp.toString()}`);
   },
 
   async createRoom(payload: {

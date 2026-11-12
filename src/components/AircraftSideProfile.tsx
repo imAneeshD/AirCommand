@@ -14,6 +14,7 @@ interface AircraftSideProfileProps {
   registration: string;
   elevationFt: number;
   theme: "light" | "dark";
+  embedded?: boolean;
 }
 
 function getFuselageDimensions(style: AirframeStyle): {
@@ -43,6 +44,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
   registration,
   elevationFt,
   theme,
+  embedded = false,
 }) => {
   const isLight = theme === "light";
   const agl = getAglAltitudeFt(aircraft, elevationFt);
@@ -74,10 +76,17 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
   }
 
   return (
-    <div className="relative rounded-lg border border-[var(--atc-border)] overflow-hidden bg-[var(--atc-surface-alt)] shadow-sm">
+    <div
+      className={
+        embedded
+          ? "relative w-full h-full overflow-hidden bg-[var(--atc-surface-alt)]"
+          : "relative rounded-lg border border-[var(--atc-border)] overflow-hidden bg-[var(--atc-surface-alt)] shadow-sm"
+      }
+    >
       <svg
         viewBox="0 0 360 116"
-        className="w-full h-[112px] block"
+        preserveAspectRatio="xMidYMid slice"
+        className={embedded ? "w-full h-full block" : "w-full h-[112px] block"}
         role="img"
         aria-label={`${livery.airlineName} ${spec.model} aircraft profile`}
       >

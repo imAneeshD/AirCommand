@@ -31,6 +31,7 @@ import { loadSavedVoiceEnabled, saveVoiceEnabled } from "../src/utils/storage.ts
 import { computeAircraftPitchDeg, formatAltitudeReadout } from "../src/utils/telemetry.ts";
 import { DatabaseService } from "../server/db/DatabaseService.ts";
 import { ADSBProviderService, type ADSBProvider } from "../server/services/ADSBProviderService.ts";
+import { AircraftPhotoService } from "../server/services/AircraftPhotoService.ts";
 import { AirportGeometryService } from "../server/services/AirportGeometryService.ts";
 import { AirportImportService } from "../server/services/AirportImportService.ts";
 import { AirportService } from "../server/services/AirportService.ts";
@@ -1306,4 +1307,87 @@ test("DEP/APP guidance computes Go-Around return vectors & form suggestions and 
   assert.equal(depGuidance.mode, "DEPARTURE_CLIMB");
   assert.equal(depGuidance.recommendedSpeed, 210);
   assert.equal(depGuidance.recommendedDirectFix, sim.airport.departureFixIds[0]);
+});
+
+test("AircraftPhotoService resolves raster aircraft photos, filters SVGs, caches results, and falls back gracefully", async () => {
+  const seenUrls: string[] = [];
+  const mockFetch = (async (input: string | URL | Request) => {
+    const url = String(input);
+    seenUrls.push(url);
+    if (url.includes("United+Airlines") || url.includes("United%20Airlines")) {
+      return {
+        ok: true,
+        json: async () => ({
+          query: {
+            pages: {
+              "1": {
+                title: "File:United_Airlines_logo.svg",
+                imageinfo: [
+                  {
+                    thumburl: "https://upload.wikimedia.org/united_logo.svg",
+                    mime: "image/svg+xml",
+                    width: 800,
+                    height: 300,
+                  },
+                ],
+              },
+              "2": {
+                title: "File:United_Airlines_Boeing_737-824_N14240_SFO.jpg",
+                imageinfo: [
+                  {
+                    thumburl: "https://upload.wikimedia.org/ual_b738_thumb.jpg",
+                    url: "https://upload.wikimedia.org/ual_b738_full.jpg",
+                    mime: "image/jpeg",
+                    width: 760,
+                    height: 480,
+                    extmetadata: {
+                      Artist: { value: "<span>Aviation Spotter</span>" },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        }),
+      } as unknown as Response;
+    }
+    return {
+      ok: true,
+      json: async () => ({ query: { pages: {} } }),
+    } as unknown as Response;
+  }) as typeof fetch;
+
+  const svc = new AircraftPhotoService(mockFetch);
+
+  // 1. Filters out .svg logo and picks landscape JPEG photo with stripped photographer credit
+  const hit = await svc.resolvePhoto({
+    airline: "United Airlines",
+    model: "Boeing 737-800",
+    typeCode: "B738",
+  });
+  assert.equal(hit.found, true);
+  assert.equal(hit.url, "https://upload.wikimedia.org/ual_b738_thumb.jpg");
+  assert.equal(hit.photographer, "Aviation Spotter");
+  assert.equal(hit.matchedBy, "airline_model");
+  assert.equal(seenUrls.length, 1);
+
+  // 2. Cache hit avoids duplicate upstream calls
+  const cachedHit = await svc.resolvePhoto({
+    airline: "United Airlines",
+    model: "Boeing 737-800",
+    typeCode: "B738",
+  });
+  assert.equal(cachedHit.found, true);
+  assert.equal(seenUrls.length, 1);
+
+  // 3. Offline / failing upstream gracefully resolves { found: false } so UI shows SVG profile
+  const failingSvc = new AircraftPhotoService((async () => {
+    throw new Error("network down");
+  }) as unknown as typeof fetch);
+  const miss = await failingSvc.resolvePhoto({
+    airline: "Delta Air Lines",
+    model: "Boeing 737-900",
+    typeCode: "B739",
+  });
+  assert.equal(miss.found, false);
 });
