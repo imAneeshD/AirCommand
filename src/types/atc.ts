@@ -167,6 +167,7 @@ export interface Aircraft {
   destinationIcao?: string;
   destinationName?: string;
   registration?: string;
+  icao24?: string;
   cruiseFlightLevel?: string;
   soulsOnBoard?: string;
   fuelRemainingPct?: number;
@@ -506,6 +507,9 @@ export interface LiveAdsbTrack {
   callsign: string | null;
   registration: string | null;
   aircraftType: string | null;
+  manufacturer?: string | null;
+  model?: string | null;
+  operator?: string | null;
   originCountry: string | null;
   lat: number;
   lon: number;

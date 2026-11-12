@@ -34,6 +34,7 @@ import { ADSBProviderService, type ADSBProvider } from "../server/services/ADSBP
 import { AircraftPhotoService } from "../server/services/AircraftPhotoService.ts";
 import { AirportGeometryService } from "../server/services/AirportGeometryService.ts";
 import { AirportImportService } from "../server/services/AirportImportService.ts";
+import { OpenSkyMetadataService } from "../server/services/OpenSkyMetadataService.ts";
 import { AirportService } from "../server/services/AirportService.ts";
 import { MultiplayerRoomService } from "../server/services/MultiplayerRoomService.ts";
 
@@ -1390,4 +1391,120 @@ test("AircraftPhotoService resolves raster aircraft photos, filters SVGs, caches
     typeCode: "B739",
   });
   assert.equal(miss.found, false);
+});
+
+test("OpenSkyMetadataService enriches live ADS-B tracks, caches lookups, and Planespotters hex resolves exact tail photos", async () => {
+  let metaCalls = 0;
+  const metaSvc = new OpenSkyMetadataService((async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes("/metadata/aircraft/icao/86951c")) {
+      metaCalls += 1;
+      return {
+        ok: true,
+        json: async () => ({
+          icao24: "86951c",
+          registration: "JA873A",
+          manufacturerName: "Boeing",
+          model: "Boeing 787-8 Dreamliner",
+          typecode: "B788",
+          operator: "All Nippon Airways",
+          operatorIcao: "ANA",
+        }),
+      } as unknown as Response;
+    }
+    return { ok: false } as unknown as Response;
+  }) as typeof fetch);
+
+  const rawTracks: LiveAdsbTrack[] = [
+    {
+      readonly: true,
+      icao24: "86951c",
+      callsign: "ANA204",
+      registration: null,
+      aircraftType: null,
+      originCountry: "Japan",
+      lat: 28.62,
+      lon: 77.15,
+      baroAltFt: 5200,
+      geoAltFt: 5300,
+      groundSpeedKts: 215,
+      trackDeg: 270,
+      verticalRateFpm: -700,
+      onGround: false,
+      lastUpdatedMs: Date.now(),
+      stale: false,
+      trail: [],
+    },
+  ];
+
+  const enriched = await metaSvc.enrichTracks(rawTracks, 5);
+  assert.equal(enriched[0].registration, "JA873A");
+  assert.equal(enriched[0].aircraftType, "B788");
+  assert.equal(enriched[0].model, "Boeing 787-8 Dreamliner");
+  assert.equal(enriched[0].operator, "All Nippon Airways");
+  assert.equal(metaCalls, 1);
+
+  // Repeat lookup hits cache with zero extra calls
+  await metaSvc.enrichTracks(rawTracks, 5);
+  assert.equal(metaCalls, 1);
+
+  // AircraftPhotoService resolves exact physical tail via Planespotters hex API
+  const photoSvc = new AircraftPhotoService((async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes("planespotters.net/pub/photos/hex/86951c")) {
+      return {
+        ok: true,
+        json: async () => ({
+          photos: [
+            {
+              link: "https://www.planespotters.net/photo/12345",
+              photographer: "Tokyo Spotter",
+              thumbnail_large: { src: "https://cdn.planespotters.net/86951c_large.jpg" },
+            },
+          ],
+        }),
+      } as unknown as Response;
+    }
+    return { ok: false } as unknown as Response;
+  }) as typeof fetch);
+
+  const hexPhoto = await photoSvc.resolvePhoto({
+    icao24: "86951c",
+    airline: "All Nippon Airways",
+    model: "Boeing 787-8 Dreamliner",
+    registration: "JA873A",
+  });
+  assert.equal(hexPhoto.found, true);
+  assert.equal(hexPhoto.matchedBy, "icao24_hex");
+  assert.equal(hexPhoto.source, "Planespotters.net");
+  assert.equal(hexPhoto.url, "https://cdn.planespotters.net/86951c_large.jpg");
+
+  // Preserving icao24 & real registration into playable simulation
+  const { sim } = convertLiveTracksToSimulation({
+    airportRecord: {
+      icao: "VIDP",
+      iata: "DEL",
+      name: "Indira Gandhi International Airport",
+      city: "New Delhi",
+      country: "India",
+      isoCountry: "IN",
+      lat: 28.5562,
+      lon: 77.1,
+      elevationFt: 777,
+      timezone: "Asia/Kolkata",
+      category: "INTERNATIONAL",
+      dataQuality: "Verified",
+      source: "SeedCatalog",
+      runwayCount: 3,
+      runways: [],
+      frequencies: [],
+      navaids: [],
+    },
+    tracks: enriched,
+  });
+  const importedAc = sim.aircraft["ANA204"];
+  assert.ok(importedAc);
+  assert.equal(importedAc.icao24, "86951c");
+  assert.equal(importedAc.registration, "JA873A");
+  assert.equal(importedAc.airline, "All Nippon Airways");
 });

@@ -1,4 +1,5 @@
 import type { LiveAdsbTrack, LiveTrafficSnapshot } from "../../src/types/atc.ts";
+import { getOpenSkyHeaders, OpenSkyMetadataService } from "./OpenSkyMetadataService.ts";
 
 export interface ADSBProvider {
   readonly name: string;
@@ -24,8 +25,9 @@ export class OpenSkyProvider implements ADSBProvider {
     lomax: number;
   }): Promise<LiveAdsbTrack[]> {
     const url = `https://opensky-network.org/api/states/all?lamin=${bounds.lamin.toFixed(2)}&lomin=${bounds.lomin.toFixed(2)}&lamax=${bounds.lamax.toFixed(2)}&lomax=${bounds.lomax.toFixed(2)}`;
+    const headers = await getOpenSkyHeaders();
     const res = await fetch(url, {
-      headers: { "User-Agent": "AirCommand-ATC-Sim/2.0" },
+      headers,
       signal: AbortSignal.timeout(9000),
     });
 
@@ -113,6 +115,7 @@ interface CacheEntry {
 
 export class ADSBProviderService {
   private provider: ADSBProvider;
+  private metadataService: OpenSkyMetadataService;
   private cache = new Map<string, CacheEntry>();
   private inflight = new Map<string, Promise<LiveTrafficSnapshot>>();
   private trackTrails = new Map<string, Array<{ lat: number; lon: number; altFt: number | null; ts: number }>>();
@@ -120,8 +123,12 @@ export class ADSBProviderService {
   private cacheTtlMs = 12_000;
   private staleThresholdMs = 45_000;
 
-  constructor(provider: ADSBProvider = new OpenSkyProvider()) {
+  constructor(
+    provider: ADSBProvider = new OpenSkyProvider(),
+    metadataService: OpenSkyMetadataService = new OpenSkyMetadataService()
+  ) {
     this.provider = provider;
+    this.metadataService = metadataService;
   }
 
   private quantizeKey(lat: number, lon: number, radiusDeg: number): string {
@@ -184,7 +191,8 @@ export class ADSBProviderService {
           lomax: Math.min(180, lon + radiusDeg),
         };
         try {
-          const tracks = await this.provider.fetchRegion(bounds);
+          const rawTracks = await this.provider.fetchRegion(bounds);
+          const tracks = await this.metadataService.enrichTracks(rawTracks, 10);
           const fetchTs = Date.now();
 
           for (const t of tracks) {

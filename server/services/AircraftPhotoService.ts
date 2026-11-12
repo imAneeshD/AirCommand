@@ -1,4 +1,6 @@
 export interface AircraftPhotoQuery {
+  icao24?: string;
+  preferRegistration?: boolean;
   airline?: string;
   model?: string;
   typeCode?: string;
@@ -12,7 +14,7 @@ export interface AircraftPhotoResult {
   source?: string;
   photographer?: string;
   caption?: string;
-  matchedBy?: "airline_model" | "model_only";
+  matchedBy?: "icao24_hex" | "registration" | "airline_model" | "model_only";
 }
 
 interface CacheEntry {
@@ -160,6 +162,8 @@ export class AircraftPhotoService {
 
   private getCacheKey(q: AircraftPhotoQuery): string {
     return [
+      (q.icao24 ?? "").trim().toLowerCase(),
+      q.preferRegistration ? (q.registration ?? "").trim().toUpperCase() : "",
       (q.airline ?? "").trim().toLowerCase(),
       (q.model ?? "").trim().toLowerCase(),
       (q.typeCode ?? "").trim().toLowerCase(),
@@ -174,34 +178,51 @@ export class AircraftPhotoService {
       return cached.result;
     }
 
-    const searchPlan = buildSearchQueries(query);
-    if (searchPlan.length === 0) {
-      const miss: AircraftPhotoResult = { found: false };
-      this.cache.set(key, { expiresAt: now + CACHE_TTL_MS, result: miss });
-      return miss;
-    }
-
-    const airlineTokens = cleanAirlineName(query.airline ?? "")
-      .toLowerCase()
-      .split(/\s+/)
-      .filter((t) => t.length >= 3 && t !== "airlines" && t !== "airways" && t !== "air");
-    const modelTokens = normalizeAircraftModelFamily(query.model ?? query.typeCode ?? "")
-      .toLowerCase()
-      .split(/[\s-]+/)
-      .filter((t) => t.length >= 2);
-
     let resolved: AircraftPhotoResult = { found: false };
 
-    for (const step of searchPlan) {
-      const candidate = await this.searchWikimedia(
-        step.search,
-        step.matchedBy,
-        airlineTokens,
-        modelTokens
+    // 1. Exact airframe photo by ICAO24 transponder hex via Planespotters.net
+    const hex = (query.icao24 ?? "").trim().toLowerCase();
+    if (/^[a-f0-9]{6}$/.test(hex)) {
+      resolved = await this.searchPlanespotters(
+        `https://api.planespotters.net/pub/photos/hex/${encodeURIComponent(hex)}`,
+        "icao24_hex",
+        `ICAO ${hex.toUpperCase()}`
       );
-      if (candidate.found && candidate.url) {
-        resolved = candidate;
-        break;
+    }
+
+    // 2. Exact airframe photo by tail registration (only when explicitly requested for real tails)
+    const reg = (query.registration ?? "").trim().toUpperCase().replace(/[^A-Z0-9-]/g, "");
+    if (!resolved.found && query.preferRegistration && reg.length >= 4) {
+      resolved = await this.searchPlanespotters(
+        `https://api.planespotters.net/pub/photos/reg/${encodeURIComponent(reg)}`,
+        "registration",
+        `Reg ${reg}`
+      );
+    }
+
+    // 3. Fallback to Wikimedia Commons by airline + model -> model only
+    if (!resolved.found) {
+      const searchPlan = buildSearchQueries(query);
+      const airlineTokens = cleanAirlineName(query.airline ?? "")
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((t) => t.length >= 3 && t !== "airlines" && t !== "airways" && t !== "air");
+      const modelTokens = normalizeAircraftModelFamily(query.model ?? query.typeCode ?? "")
+        .toLowerCase()
+        .split(/[\s-]+/)
+        .filter((t) => t.length >= 2);
+
+      for (const step of searchPlan) {
+        const candidate = await this.searchWikimedia(
+          step.search,
+          step.matchedBy,
+          airlineTokens,
+          modelTokens
+        );
+        if (candidate.found && candidate.url) {
+          resolved = candidate;
+          break;
+        }
       }
     }
 
@@ -210,6 +231,46 @@ export class AircraftPhotoService {
       result: resolved,
     });
     return resolved;
+  }
+
+  private async searchPlanespotters(
+    endpoint: string,
+    matchedBy: "icao24_hex" | "registration",
+    captionPrefix: string
+  ): Promise<AircraftPhotoResult> {
+    try {
+      const res = await this.fetchFn(endpoint, {
+        headers: {
+          "User-Agent": "AirCommandATC/2.0",
+          Accept: "application/json",
+        },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      if (!res.ok) return { found: false };
+      const data = (await res.json()) as {
+        photos?: Array<{
+          id?: string;
+          link?: string;
+          photographer?: string;
+          thumbnail?: { src?: string };
+          thumbnail_large?: { src?: string };
+        }>;
+      };
+      const first = data.photos?.[0];
+      const url = first?.thumbnail_large?.src ?? first?.thumbnail?.src;
+      if (!url) return { found: false };
+      return {
+        found: true,
+        url,
+        fullUrl: first?.link ?? url,
+        source: "Planespotters.net",
+        photographer: first?.photographer?.trim() || "Planespotters",
+        caption: `${captionPrefix} • Planespotters.net`,
+        matchedBy,
+      };
+    } catch {
+      return { found: false };
+    }
   }
 
   private async searchWikimedia(

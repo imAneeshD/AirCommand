@@ -6,7 +6,8 @@ import type { Aircraft } from "../types/atc.ts";
 import { AircraftSideProfile } from "./AircraftSideProfile.tsx";
 
 interface AircraftPhotoFrameProps {
-  aircraft: Aircraft;
+  aircraft?: Aircraft;
+  icao24?: string;
   spec: AircraftTypeSpec;
   livery: AirlineLivery;
   registration: string;
@@ -18,13 +19,15 @@ const clientPhotoCache = new Map<string, AircraftPhotoResponse>();
 
 export const AircraftPhotoFrame: React.FC<AircraftPhotoFrameProps> = ({
   aircraft,
+  icao24,
   spec,
   livery,
   registration,
   elevationFt,
   theme,
 }) => {
-  const cacheKey = `${livery.airlineName}|${spec.model}|${spec.code}`;
+  const effectiveIcao24 = (icao24 ?? aircraft?.icao24 ?? "").trim().toLowerCase();
+  const cacheKey = `${effectiveIcao24}|${livery.airlineName}|${spec.model}|${spec.code}`;
   const [photo, setPhoto] = useState<AircraftPhotoResponse | null>(
     () => clientPhotoCache.get(cacheKey) ?? null
   );
@@ -47,6 +50,8 @@ export const AircraftPhotoFrame: React.FC<AircraftPhotoFrameProps> = ({
     let cancelled = false;
     apiClient
       .getAircraftPhoto({
+        icao24: effectiveIcao24 || undefined,
+        preferRegistration: Boolean(effectiveIcao24),
         airline: livery.airlineName,
         model: spec.model,
         typeCode: spec.code,
@@ -69,10 +74,53 @@ export const AircraftPhotoFrame: React.FC<AircraftPhotoFrameProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [cacheKey, livery.airlineName, spec.model, spec.code, registration]);
+  }, [cacheKey, effectiveIcao24, livery.airlineName, spec.model, spec.code, registration]);
 
   const hasCandidatePhoto = Boolean(photo?.found && photo.url && !imgError);
   const showRealPhoto = hasCandidatePhoto && viewMode === "PHOTO" && imgLoaded;
+
+  const fallbackAircraft: Aircraft = aircraft ?? {
+    id: effectiveIcao24 || registration || spec.code,
+    callsign: registration || spec.code,
+    spokenCallsign: spec.model,
+    airline: livery.airlineName,
+    aircraftType: spec.code,
+    wakeCategory: "MEDIUM",
+    flightKind: "ARRIVAL",
+    squawk: "1200",
+    state: "CRUISE_OUTBOUND",
+    controller: "DEPARTURE",
+    operationMode: "NORMAL_OPERATION",
+    emergencyType: "NONE",
+    commStatus: "NORMAL",
+    nordoMode: "LIGHT_GUN_SIGNALS",
+    x: 0,
+    y: 0,
+    heading: 90,
+    altitude: elevationFt + 4000,
+    speed: 250,
+    verticalSpeed: 0,
+    targetRunway: "09",
+    assignedRouteNodeIds: [],
+    assignedRouteTaxiways: [],
+    routeStepIndex: 0,
+    crossRunwayCleared: {},
+    requiresPushback: false,
+    assignedHeading: null,
+    assignedTurnDirection: "NEAREST",
+    assignedAltitude: null,
+    assignedSpeed: null,
+    assignedApproach: null,
+    assignedDirectFix: null,
+    clearances: [],
+    pendingRequest: null,
+    hasReadbackError: false,
+    armNextReadbackError: false,
+    spawnedAt: 0,
+    stateEnteredAt: 0,
+    lastTransmissionAt: 0,
+    trail: [],
+  };
 
   return (
     <div className="relative rounded-lg border border-[var(--atc-border)] overflow-hidden bg-[var(--atc-surface-alt)] shadow-sm h-[132px]">
@@ -83,7 +131,7 @@ export const AircraftPhotoFrame: React.FC<AircraftPhotoFrameProps> = ({
         }`}
       >
         <AircraftSideProfile
-          aircraft={aircraft}
+          aircraft={fallbackAircraft}
           spec={spec}
           livery={livery}
           registration={registration}
@@ -124,8 +172,14 @@ export const AircraftPhotoFrame: React.FC<AircraftPhotoFrameProps> = ({
             >
               <Camera className="w-2.5 h-2.5 text-sky-300 shrink-0" />
               <span className="truncate">
-                {photo.matchedBy === "airline_model" ? `${livery.iataCode} Livery` : spec.code} •{" "}
-                {photo.photographer ?? photo.source ?? "Wikimedia"}
+                {photo.matchedBy === "icao24_hex"
+                  ? `Tail ${registration || effectiveIcao24.toUpperCase()}`
+                  : photo.matchedBy === "registration"
+                  ? `Reg ${registration}`
+                  : photo.matchedBy === "airline_model"
+                  ? `${livery.iataCode} Livery`
+                  : spec.code}{" "}
+                • {photo.photographer ?? photo.source ?? "Wikimedia"}
               </span>
             </span>
           </div>

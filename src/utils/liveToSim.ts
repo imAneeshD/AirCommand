@@ -200,6 +200,7 @@ export function convertLiveTracksToSimulation(opts: {
     const { track, callsign, distNm } = item;
     const meta = parseLiveCallsignMeta(callsign);
     const acType = normalizeAircraftType(track.aircraftType, meta.defaultType);
+    const airlineName = track.operator?.trim() || meta.airline;
     const localPt = latLonToLocalNm(track.lat, track.lon, opts.airportRecord.lat, opts.airportRecord.lon);
 
     const altFtRaw = track.baroAltFt ?? elev + (track.onGround ? 0 : 6000);
@@ -210,11 +211,11 @@ export function convertLiveTracksToSimulation(opts: {
       groundCount += 1;
       const gateId = pickClosestUnusedGate(layout, localPt.x, localPt.y, usedGates, idx);
       const rwyId = layout.primaryDepartureRunway;
-      createDepartureAircraft(sim, {
+      const depAc = createDepartureAircraft(sim, {
         id: callsign,
         callsign,
         spokenCallsign: meta.spokenCallsign,
-        airline: meta.airline,
+        airline: airlineName,
         aircraftType: acType,
         gateId,
         targetRunway: rwyId,
@@ -222,6 +223,8 @@ export function convertLiveTracksToSimulation(opts: {
         departureFix: layout.departureFixIds[idx % layout.departureFixIds.length],
         controller: "GROUND",
       });
+      depAc.icao24 = track.icao24;
+      if (track.registration) depAc.registration = track.registration;
       return;
     }
 
@@ -257,13 +260,15 @@ export function convertLiveTracksToSimulation(opts: {
         id: callsign,
         callsign,
         spokenCallsign: meta.spokenCallsign,
-        airline: meta.airline,
+        airline: airlineName,
         aircraftType: acType,
         gateId,
         targetRunway: rwyId,
         requiresPushback: false,
         controller: "DEPARTURE",
       });
+      depAc.icao24 = track.icao24;
+      if (track.registration) depAc.registration = track.registration;
       depAc.state = "CLIMB";
       depAc.x = simX;
       depAc.y = simY;
@@ -316,7 +321,7 @@ export function convertLiveTracksToSimulation(opts: {
       id: callsign,
       callsign,
       spokenCallsign: meta.spokenCallsign,
-      airline: meta.airline,
+      airline: airlineName,
       aircraftType: acType,
       x: simX,
       y: simY,
@@ -329,6 +334,8 @@ export function convertLiveTracksToSimulation(opts: {
       controller: "DEPARTURE",
       assignedApproach: null,
     });
+    arrAc.icao24 = track.icao24;
+    if (track.registration) arrAc.registration = track.registration;
 
     arrAc.clearances.push(
       createClearanceObject(sim, {
