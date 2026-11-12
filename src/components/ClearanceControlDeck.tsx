@@ -27,6 +27,7 @@ import {
 } from "../engine/validationEngine.ts";
 import { useAtcStore } from "../store/atcStore.ts";
 import type { ControllerRole, RunwayId } from "../types/atc.ts";
+import { computeDepAppGuidance } from "../utils/depAppGuidance.ts";
 import { formatAltitudeReadout } from "../utils/telemetry.ts";
 import { Accordion } from "./Accordion.tsx";
 
@@ -54,6 +55,7 @@ export const ClearanceControlDeck: React.FC = () => {
 
   const [deckTab, setDeckTab] = useState<ControllerRole>(fallbackRole);
   const [selectedTaxiRunway, setSelectedTaxiRunway] = useState<RunwayId>("09L");
+  const [selectedApproachRunway, setSelectedApproachRunway] = useState<RunwayId>("09L");
   const [turnDir, setTurnDir] = useState<"NEAREST" | "LEFT" | "RIGHT">("NEAREST");
   const [customHeading, setCustomHeading] = useState("090");
 
@@ -61,8 +63,13 @@ export const ClearanceControlDeck: React.FC = () => {
     setDeckTab(ac?.controller ?? (activeRole === "ALL" ? "TOWER" : activeRole));
     if (ac) {
       setSelectedTaxiRunway(ac.targetRunway);
+      const rwyId = ac.assignedApproach ?? ac.targetRunway;
+      setSelectedApproachRunway(rwyId);
+      const g = computeDepAppGuidance(sim.airport, ac, rwyId);
+      setCustomHeading(String(g.recommendedHeading).padStart(3, "0"));
+      setTurnDir(g.recommendedTurnDirection);
     }
-  }, [ac?.id, ac?.controller, ac?.targetRunway, activeRole]);
+  }, [ac?.id, ac?.controller, ac?.state, ac?.targetRunway, ac?.assignedApproach, activeRole]);
 
   if (minimized) {
     const hasAlert = Boolean(
@@ -974,195 +981,390 @@ export const ClearanceControlDeck: React.FC = () => {
           )}
 
           {/* DEPARTURE / APPROACH COMMANDS */}
-          {deckTab === "DEPARTURE" && (
-            <div className="space-y-2.5">
-              <div className="rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] p-2 space-y-1.5">
-                <div className="flex items-center justify-between text-[10px] font-mono text-[var(--atc-text-secondary)]">
-                  <span className="font-bold">
-                    HEADING (
-                    {ac.assignedHeading !== null
-                      ? `${String(Math.round(ac.assignedHeading)).padStart(3, "0")}°`
-                      : "---"}
-                    )
-                  </span>
-                  <div className="flex gap-1">
-                    {(["LEFT", "NEAREST", "RIGHT"] as const).map((d) => (
+          {deckTab === "DEPARTURE" && (() => {
+            const depAppGuidance = computeDepAppGuidance(
+              sim.airport,
+              ac,
+              selectedApproachRunway
+            );
+            const recHdgStr = String(depAppGuidance.recommendedHeading).padStart(3, "0");
+            const recBaseAlt = Math.round(sim.airport.elevationFt / 500) * 500;
+            const altOptions = Array.from(
+              new Set([
+                recBaseAlt + 2500,
+                recBaseAlt + 3000,
+                recBaseAlt + 5000,
+                recBaseAlt + 7000,
+                recBaseAlt + 10000,
+              ])
+            ).sort((a, b) => a - b);
+            const speedOptions = [160, 180, 210, 250];
+            const isGoAroundOrPattern =
+              depAppGuidance.mode === "GO_AROUND_RECOVERY" ||
+              (ac.flightKind === "ARRIVAL" && depAppGuidance.needsPatternTurn);
+
+            const handleApplyGuidance = () => {
+              if (nordoLocked) return;
+              if (depAppGuidance.mode === "DEPARTURE_CLIMB") {
+                issueClearance({
+                  aircraftId: ac.id,
+                  controller: "DEPARTURE",
+                  type: "ALTITUDE",
+                  parameters: { altitude: depAppGuidance.recommendedAltitude },
+                });
+                issueClearance({
+                  aircraftId: ac.id,
+                  controller: "DEPARTURE",
+                  type: "SPEED",
+                  parameters: { speed: depAppGuidance.recommendedSpeed },
+                });
+                if (depAppGuidance.recommendedDirectFix) {
+                  issueClearance({
+                    aircraftId: ac.id,
+                    controller: "DEPARTURE",
+                    type: "DIRECT",
+                    parameters: { fixId: depAppGuidance.recommendedDirectFix },
+                  });
+                }
+                return;
+              }
+
+              // Go-Around / Arrival recovery back to runway
+              issueClearance({
+                aircraftId: ac.id,
+                controller: "DEPARTURE",
+                type: "ALTITUDE",
+                parameters: { altitude: depAppGuidance.recommendedAltitude },
+              });
+              issueClearance({
+                aircraftId: ac.id,
+                controller: "DEPARTURE",
+                type: "SPEED",
+                parameters: { speed: depAppGuidance.recommendedSpeed },
+              });
+              if (depAppGuidance.needsPatternTurn) {
+                issueClearance({
+                  aircraftId: ac.id,
+                  controller: "DEPARTURE",
+                  type: "HEADING",
+                  parameters: {
+                    heading: depAppGuidance.recommendedHeading,
+                    turnDirection: depAppGuidance.recommendedTurnDirection,
+                  },
+                });
+              } else {
+                if (depAppGuidance.recommendedDirectFix) {
+                  issueClearance({
+                    aircraftId: ac.id,
+                    controller: "DEPARTURE",
+                    type: "DIRECT",
+                    parameters: { fixId: depAppGuidance.recommendedDirectFix },
+                  });
+                }
+                issueClearance({
+                  aircraftId: ac.id,
+                  controller: "DEPARTURE",
+                  type: "APPROACH",
+                  parameters: { runway: depAppGuidance.recommendedRunway },
+                });
+              }
+            };
+
+            return (
+              <div className="space-y-2.5">
+                {/* Smart Suggested Values & Go-Around Pattern Recovery Card */}
+                <div
+                  className={`rounded-md border p-2.5 space-y-2 ${
+                    isGoAroundOrPattern
+                      ? "bg-[var(--atc-amber-bg)] border-[var(--atc-amber-border)]"
+                      : "bg-[var(--atc-cyan-bg)]/55 border-[var(--atc-cyan-border)]"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span
+                      className={`text-[10px] font-mono font-extrabold tracking-wide ${
+                        isGoAroundOrPattern
+                          ? "text-[var(--atc-amber)]"
+                          : "text-[var(--atc-cyan)]"
+                      }`}
+                    >
+                      {depAppGuidance.headline}
+                    </span>
+                    {ac.flightKind === "ARRIVAL" && (
+                      <div className="flex gap-1">
+                        {sim.airport.runwayIds.map((r) => (
+                          <button
+                            key={`rec-rwy-${r}`}
+                            type="button"
+                            onClick={() => setSelectedApproachRunway(r)}
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-mono border ${
+                              depAppGuidance.recommendedRunway === r
+                                ? "bg-[var(--atc-accent-bg)] border-[var(--atc-accent-border)] text-[var(--atc-accent-text)] font-bold"
+                                : "bg-[var(--atc-surface)] border-[var(--atc-border)] text-[var(--atc-muted)]"
+                            }`}
+                          >
+                            {r}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="text-[10px] font-mono text-[var(--atc-text)] leading-relaxed">
+                    {depAppGuidance.stepSummary}
+                  </div>
+
+                  {depAppGuidance.mode !== "GROUND_PREFLIGHT" && (
+                    <button
+                      type="button"
+                      disabled={nordoLocked}
+                      onClick={handleApplyGuidance}
+                      className={`w-full py-1.5 px-2 rounded-md border font-mono text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-35 ${
+                        isGoAroundOrPattern
+                          ? "bg-[var(--atc-accent)] border-[var(--atc-accent-border)] text-slate-950 hover:opacity-90"
+                          : "bg-[var(--atc-surface)] border-[var(--atc-cyan-border)] text-[var(--atc-cyan)] hover:bg-[var(--atc-surface-alt)]"
+                      }`}
+                    >
+                      <ArrowRight className="w-3.5 h-3.5" />
+                      {depAppGuidance.mode === "DEPARTURE_CLIMB"
+                        ? `APPLY CLIMB (${depAppGuidance.recommendedAltitude} FT · ${depAppGuidance.recommendedSpeed} KT)`
+                        : depAppGuidance.needsPatternTurn
+                        ? `VECTOR BACK TO RWY ${depAppGuidance.recommendedRunway} (HDG ${recHdgStr}°)`
+                        : `INTERCEPT ILS RWY ${depAppGuidance.recommendedRunway} (${depAppGuidance.recommendedAltitude} FT)`}
+                    </button>
+                  )}
+                </div>
+
+                <div className="rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] p-2 space-y-1.5">
+                  <div className="flex items-center justify-between text-[10px] font-mono text-[var(--atc-text-secondary)]">
+                    <span className="font-bold">
+                      HEADING (
+                      {ac.assignedHeading !== null
+                        ? `${String(Math.round(ac.assignedHeading)).padStart(3, "0")}°`
+                        : "---"}
+                      ) ·{" "}
+                      <span className="text-[var(--atc-accent-text)]">REC {recHdgStr}°</span>
+                    </span>
+                    <div className="flex gap-1">
+                      {(["LEFT", "NEAREST", "RIGHT"] as const).map((d) => (
+                        <button
+                          key={d}
+                          onClick={() => setTurnDir(d)}
+                          className={`px-1.5 py-0.5 rounded border ${
+                            turnDir === d
+                              ? "bg-[var(--atc-accent-bg)] border-[var(--atc-accent-border)] text-[var(--atc-accent-text)] font-bold"
+                              : "bg-[var(--atc-surface)] border-[var(--atc-border)] text-[var(--atc-muted)]"
+                          }`}
+                        >
+                          {d === "NEAREST" ? "DIR" : d[0]}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1">
+                    {[30, 60, 90, 120, 180, 240, 270, 330].map((hdg) => (
                       <button
-                        key={d}
-                        onClick={() => setTurnDir(d)}
-                        className={`px-1.5 py-0.5 rounded border ${
-                          turnDir === d
-                            ? "bg-[var(--atc-accent-bg)] border-[var(--atc-accent-border)] text-[var(--atc-accent-text)] font-bold"
-                            : "bg-[var(--atc-surface)] border-[var(--atc-border)] text-[var(--atc-muted)]"
-                        }`}
+                        key={hdg}
+                        disabled={nordoLocked}
+                        onClick={() =>
+                          issueClearance({
+                            aircraftId: ac.id,
+                            controller: "DEPARTURE",
+                            type: "HEADING",
+                            parameters: { heading: hdg, turnDirection: turnDir },
+                          })
+                        }
+                        className={`py-1 font-mono text-[11px] ${neutralBtn}`}
                       >
-                        {d === "NEAREST" ? "DIR" : d[0]}
+                        {String(hdg).padStart(3, "0")}°
                       </button>
                     ))}
                   </div>
-                </div>
-                <div className="grid grid-cols-4 gap-1">
-                  {[30, 60, 90, 120, 180, 240, 270, 330].map((hdg) => (
+                  <div className="flex gap-1">
+                    <input
+                      value={customHeading}
+                      onChange={(e) => setCustomHeading(e.target.value)}
+                      className="w-20 bg-[var(--atc-surface)] border border-[var(--atc-accent-border)] rounded px-2 py-1 text-xs font-mono text-[var(--atc-text)]"
+                      placeholder={recHdgStr}
+                    />
                     <button
-                      key={hdg}
                       disabled={nordoLocked}
                       onClick={() =>
                         issueClearance({
                           aircraftId: ac.id,
                           controller: "DEPARTURE",
                           type: "HEADING",
-                          parameters: { heading: hdg, turnDirection: turnDir },
+                          parameters: {
+                            heading: Number(customHeading) || depAppGuidance.recommendedHeading,
+                            turnDirection: turnDir,
+                          },
                         })
                       }
-                      className={`py-1 font-mono text-[11px] ${neutralBtn}`}
+                      className="flex-1 py-1 rounded bg-[var(--atc-accent-bg)] hover:opacity-90 border border-[var(--atc-accent-border)] text-[var(--atc-accent-text)] font-mono text-xs font-semibold disabled:opacity-35"
                     >
-                      {String(hdg).padStart(3, "0")}°
+                      ASSIGN HDG {customHeading.padStart(3, "0")}°
                     </button>
-                  ))}
+                  </div>
                 </div>
-                <div className="flex gap-1">
-                  <input
-                    value={customHeading}
-                    onChange={(e) => setCustomHeading(e.target.value)}
-                    className="w-20 bg-[var(--atc-surface)] border border-[var(--atc-border)] rounded px-2 py-1 text-xs font-mono text-[var(--atc-text)]"
-                    placeholder="090"
-                  />
-                  <button
-                    disabled={nordoLocked}
-                    onClick={() =>
-                      issueClearance({
-                        aircraftId: ac.id,
-                        controller: "DEPARTURE",
-                        type: "HEADING",
-                        parameters: {
-                          heading: Number(customHeading) || 90,
-                          turnDirection: turnDir,
-                        },
-                      })
-                    }
-                    className="flex-1 py-1 rounded bg-[var(--atc-accent-bg)] hover:opacity-90 border border-[var(--atc-accent-border)] text-[var(--atc-accent-text)] font-mono text-xs font-semibold disabled:opacity-35"
-                  >
-                    ASSIGN HDG
-                  </button>
-                </div>
-              </div>
 
-              <div className="rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] p-2 space-y-1.5">
-                <div className="text-[10px] font-mono font-bold text-[var(--atc-text-secondary)]">
-                  ALTITUDE (CLEARED: {ac.assignedAltitude ?? "---"} FT)
+                <div className="rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] p-2 space-y-1.5">
+                  <div className="flex items-center justify-between text-[10px] font-mono font-bold text-[var(--atc-text-secondary)]">
+                    <span>ALTITUDE (CLEARED: {ac.assignedAltitude ?? "---"} FT)</span>
+                    <span className="text-[var(--atc-accent-text)]">
+                      REC {(depAppGuidance.recommendedAltitude / 1000).toFixed(depAppGuidance.recommendedAltitude % 1000 === 0 ? 0 : 1)}k
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-5 gap-1">
+                    {altOptions.map((alt) => {
+                      const isRec = alt === depAppGuidance.recommendedAltitude;
+                      return (
+                        <button
+                          key={alt}
+                          disabled={nordoLocked}
+                          onClick={() =>
+                            issueClearance({
+                              aircraftId: ac.id,
+                              controller: "DEPARTURE",
+                              type: "ALTITUDE",
+                              parameters: { altitude: alt },
+                            })
+                          }
+                          title={isRec ? `Recommended altitude (${alt} ft)` : `${alt} ft`}
+                          className={`py-1 font-mono text-[10px] rounded border transition-colors disabled:opacity-40 ${
+                            isRec
+                              ? "bg-[var(--atc-accent-bg)] border-[var(--atc-accent-border)] text-[var(--atc-accent-text)] font-bold"
+                              : neutralBtn
+                          }`}
+                        >
+                          {(alt / 1000).toFixed(alt % 1000 === 0 ? 0 : 1)}k
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-                <div className="grid grid-cols-5 gap-1">
-                  {[2500, 3000, 5000, 7000, 10000].map((offset) => {
-                    const baseAlt = Math.round(sim.airport.elevationFt / 500) * 500;
-                    const alt = baseAlt + offset;
-                    return (
-                      <button
-                        key={alt}
-                        disabled={nordoLocked}
-                        onClick={() =>
-                          issueClearance({
-                            aircraftId: ac.id,
-                            controller: "DEPARTURE",
-                            type: "ALTITUDE",
-                            parameters: { altitude: alt },
-                          })
-                        }
-                        className={`py-1 font-mono text-[10px] ${neutralBtn}`}
-                      >
-                        {(alt / 1000).toFixed(alt % 1000 === 0 ? 0 : 1)}k
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
 
-              <div className="rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] p-2 space-y-1.5">
-                <div className="text-[10px] font-mono font-bold text-[var(--atc-text-secondary)]">
-                  SPEED (CLEARED: {ac.assignedSpeed ?? "---"} KTS)
+                <div className="rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] p-2 space-y-1.5">
+                  <div className="flex items-center justify-between text-[10px] font-mono font-bold text-[var(--atc-text-secondary)]">
+                    <span>SPEED (CLEARED: {ac.assignedSpeed ?? "---"} KTS)</span>
+                    <span className="text-[var(--atc-accent-text)]">
+                      REC {depAppGuidance.recommendedSpeed}kt
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1">
+                    {speedOptions.map((spd) => {
+                      const isRec = spd === depAppGuidance.recommendedSpeed;
+                      return (
+                        <button
+                          key={spd}
+                          disabled={nordoLocked}
+                          onClick={() =>
+                            issueClearance({
+                              aircraftId: ac.id,
+                              controller: "DEPARTURE",
+                              type: "SPEED",
+                              parameters: { speed: spd },
+                            })
+                          }
+                          title={isRec ? `Recommended speed (${spd} kt)` : `${spd} kt`}
+                          className={`py-1 font-mono text-[11px] rounded border transition-colors disabled:opacity-40 ${
+                            isRec
+                              ? "bg-[var(--atc-accent-bg)] border-[var(--atc-accent-border)] text-[var(--atc-accent-text)] font-bold"
+                              : neutralBtn
+                          }`}
+                        >
+                          {spd}kt
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-                <div className="grid grid-cols-4 gap-1">
-                  {[160, 180, 210, 250].map((spd) => (
-                    <button
-                      key={spd}
-                      disabled={nordoLocked}
-                      onClick={() =>
-                        issueClearance({
-                          aircraftId: ac.id,
-                          controller: "DEPARTURE",
-                          type: "SPEED",
-                          parameters: { speed: spd },
-                        })
-                      }
-                      className={`py-1 font-mono text-[11px] ${neutralBtn}`}
-                    >
-                      {spd}kt
-                    </button>
-                  ))}
-                </div>
-              </div>
 
-              <div className="rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] p-2 space-y-1.5">
-                <div className="text-[10px] font-mono font-bold text-[var(--atc-text-secondary)]">
-                  APPROACH & DIRECT FIXES
+                <div className="rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] p-2 space-y-1.5">
+                  <div className="flex items-center justify-between text-[10px] font-mono font-bold text-[var(--atc-text-secondary)]">
+                    <span>APPROACH & DIRECT FIXES</span>
+                    {depAppGuidance.recommendedDirectFix && (
+                      <span className="text-[var(--atc-accent-text)]">
+                        REC {depAppGuidance.recommendedDirectFix}
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {sim.airport.runwayIds.map((rwy) => {
+                      const isRecRwy =
+                        ac.flightKind === "ARRIVAL" &&
+                        rwy === depAppGuidance.recommendedRunway;
+                      return (
+                        <button
+                          key={`ils-${rwy}`}
+                          disabled={nordoLocked}
+                          onClick={() =>
+                            issueClearance({
+                              aircraftId: ac.id,
+                              controller: "DEPARTURE",
+                              type: "APPROACH",
+                              parameters: { runway: rwy },
+                            })
+                          }
+                          className={`py-1.5 rounded border font-mono text-[11px] font-semibold disabled:opacity-35 ${
+                            isRecRwy
+                              ? "bg-[var(--atc-emerald-bg)] border-[var(--atc-emerald)] ring-1 ring-[var(--atc-emerald)]/50 text-[var(--atc-emerald)] font-extrabold"
+                              : "bg-[var(--atc-emerald-bg)] hover:opacity-90 border-[var(--atc-emerald-border)] text-[var(--atc-emerald)]"
+                          }`}
+                        >
+                          ILS RWY {rwy}
+                          {isRecRwy ? " ★" : ""}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="grid grid-cols-4 gap-1">
+                    {Object.keys(sim.airport.fixes)
+                      .filter((id) => id !== "MISSED")
+                      .map((fixId) => {
+                        const isRecFix = fixId === depAppGuidance.recommendedDirectFix;
+                        return (
+                          <button
+                            key={fixId}
+                            disabled={nordoLocked}
+                            onClick={() =>
+                              issueClearance({
+                                aircraftId: ac.id,
+                                controller: "DEPARTURE",
+                                type: "DIRECT",
+                                parameters: { fixId },
+                              })
+                            }
+                            title={isRecFix ? `Recommended fix (${fixId})` : `Proceed direct ${fixId}`}
+                            className={`py-1 font-mono text-[10px] rounded border transition-colors disabled:opacity-40 ${
+                              isRecFix
+                                ? "bg-[var(--atc-accent-bg)] border-[var(--atc-accent-border)] text-[var(--atc-accent-text)] font-bold"
+                                : neutralBtn
+                            }`}
+                          >
+                            {fixId}
+                          </button>
+                        );
+                      })}
+                  </div>
                 </div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {sim.airport.runwayIds.map((rwy) => (
-                    <button
-                      key={`ils-${rwy}`}
-                      disabled={nordoLocked}
-                      onClick={() =>
-                        issueClearance({
-                          aircraftId: ac.id,
-                          controller: "DEPARTURE",
-                          type: "APPROACH",
-                          parameters: { runway: rwy },
-                        })
-                      }
-                      className="py-1.5 rounded bg-[var(--atc-emerald-bg)] hover:opacity-90 border border-[var(--atc-emerald-border)] text-[var(--atc-emerald)] font-mono text-[11px] font-semibold disabled:opacity-35"
-                    >
-                      ILS RWY {rwy}
-                    </button>
-                  ))}
-                </div>
-                <div className="grid grid-cols-4 gap-1">
-                  {Object.keys(sim.airport.fixes)
-                    .filter((id) => id !== "MISSED")
-                    .map((fixId) => (
-                      <button
-                        key={fixId}
-                        disabled={nordoLocked}
-                        onClick={() =>
-                          issueClearance({
-                            aircraftId: ac.id,
-                            controller: "DEPARTURE",
-                            type: "DIRECT",
-                            parameters: { fixId },
-                          })
-                        }
-                        className={`py-1 font-mono text-[10px] ${neutralBtn}`}
-                      >
-                        {fixId}
-                      </button>
-                    ))}
-                </div>
-              </div>
 
-              <button
-                disabled={nordoLocked || ac.controller === "TOWER"}
-                onClick={() =>
-                  issueClearance({
-                    aircraftId: ac.id,
-                    controller: "DEPARTURE",
-                    type: "HANDOFF",
-                    parameters: { targetController: "TOWER" },
-                  })
-                }
-                className="w-full py-1.5 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-xs font-semibold disabled:opacity-35"
-              >
-                HANDOFF → TOWER
-              </button>
-            </div>
-          )}
+                <button
+                  disabled={nordoLocked || ac.controller === "TOWER"}
+                  onClick={() =>
+                    issueClearance({
+                      aircraftId: ac.id,
+                      controller: "DEPARTURE",
+                      type: "HANDOFF",
+                      parameters: { targetController: "TOWER" },
+                    })
+                  }
+                  className="w-full py-1.5 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-xs font-semibold disabled:opacity-35"
+                >
+                  HANDOFF → TOWER
+                </button>
+              </div>
+            );
+          })()}
         </Accordion>
 
         {/* ACCORDION 2: Flight Telemetry & Assignments (Collapsed for minimal view) */}

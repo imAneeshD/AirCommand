@@ -5,6 +5,7 @@ import { isRunwayOccupied } from "../engine/validationEngine.ts";
 import { useAtcStore, type CameraState } from "../store/atcStore.ts";
 import type { Aircraft, AirportLayout, RunwaySpec, SimulationState, TaxiwayName } from "../types/atc.ts";
 import { drawGeoreferencedTilesToCanvas } from "../utils/canvasTileLayer.ts";
+import { computeDepAppGuidance } from "../utils/depAppGuidance.ts";
 import {
   hitTestAircraftOrLabel,
   placeAircraftLabels,
@@ -1572,7 +1573,7 @@ function drawScope(
     );
   }
 
-  // Airborne Vector Line for Selected Aircraft
+  // Airborne Vector Line + Suggested Go-Around Return Path for Selected Aircraft
   if (selectedAc && selectedAc.altitude > sim.airport.elevationFt + 50) {
     const [ax, ay] = toScreen(selectedAc.x, selectedAc.y);
     if (selectedAc.assignedDirectFix && sim.airport.fixes[selectedAc.assignedDirectFix]) {
@@ -1586,6 +1587,29 @@ function drawScope(
       ctx.lineTo(fx, fy);
       ctx.stroke();
       ctx.setLineDash([]);
+    }
+
+    if (
+      selectedAc.state === "GO_AROUND" ||
+      selectedAc.state === "MISSED_APPROACH"
+    ) {
+      const guidance = computeDepAppGuidance(sim.airport, selectedAc);
+      if (guidance.recoveryPreviewPoints.length >= 2) {
+        const recPts: ScreenPt[] = guidance.recoveryPreviewPoints.map((pt) => {
+          const [sx, sy] = toScreen(pt.x, pt.y);
+          return { x: sx, y: sy };
+        });
+        ctx.save();
+        traceRoundedPolylinePath(ctx, recPts, 28, false);
+        ctx.strokeStyle = isLight
+          ? "rgba(217, 119, 6, 0.65)"
+          : "rgba(245, 158, 11, 0.72)";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 5]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
     }
   }
 

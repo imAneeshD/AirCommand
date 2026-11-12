@@ -496,7 +496,7 @@ function integrateAirborneFlight(
     const fix = state.airport.fixes[ac.assignedDirectFix];
     if (fix) {
       const dist = Math.hypot(fix.x - ac.x, fix.y - ac.y);
-      if (dist < 0.85 && ac.assignedApproach && fix.kind === "IAF") {
+      if (dist < 1.1 && ac.assignedApproach && fix.kind === "IAF") {
         ac.heading = turnTowardHeading(ac.heading, rwy.heading, 4.5 * dt, "NEAREST");
       } else {
         const targetHdg = bearingDeg(ac.x, ac.y, fix.x, fix.y);

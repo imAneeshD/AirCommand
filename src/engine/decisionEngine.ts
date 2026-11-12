@@ -900,7 +900,21 @@ function applyAcknowledgedClearance(
       aircraft.assignedApproach = rwy;
       aircraft.targetRunway = rwy;
       aircraft.assignedDirectFix = state.airport.iafByRunway[rwy] ?? null;
-      if (aircraft.pendingRequest?.type === "APPROACH_CLEARANCE") {
+      if (
+        (aircraft.state === "GO_AROUND" || aircraft.state === "MISSED_APPROACH") &&
+        aircraft.altitude >= state.airport.elevationFt + 800
+      ) {
+        const baseAlt = Math.round(state.airport.elevationFt / 500) * 500;
+        aircraft.state = "APPROACH";
+        aircraft.stateEnteredAt = state.time;
+        aircraft.minimumsGoAroundTriggered = false;
+        aircraft.assignedAltitude = baseAlt + 2500;
+        aircraft.assignedSpeed = Math.min(aircraft.assignedSpeed ?? 180, 180);
+      }
+      if (
+        aircraft.pendingRequest?.type === "APPROACH_CLEARANCE" ||
+        aircraft.pendingRequest?.type === "APPROACH_VECTORS"
+      ) {
         aircraft.pendingRequest.resolved = true;
       }
       break;
@@ -911,6 +925,17 @@ function applyAcknowledgedClearance(
       aircraft.assignedTurnDirection =
         (clearance.parameters.turnDirection as "LEFT" | "RIGHT" | "NEAREST") ?? "NEAREST";
       aircraft.assignedDirectFix = null;
+      if (
+        (aircraft.state === "GO_AROUND" || aircraft.state === "MISSED_APPROACH") &&
+        aircraft.altitude >= state.airport.elevationFt + 800
+      ) {
+        aircraft.state = "APPROACH";
+        aircraft.stateEnteredAt = state.time;
+        aircraft.minimumsGoAroundTriggered = false;
+      }
+      if (aircraft.pendingRequest?.type === "APPROACH_VECTORS") {
+        aircraft.pendingRequest.resolved = true;
+      }
       break;
     }
 
@@ -929,6 +954,17 @@ function applyAcknowledgedClearance(
 
     case "DIRECT": {
       aircraft.assignedDirectFix = String(clearance.parameters.fixId);
+      if (
+        (aircraft.state === "GO_AROUND" || aircraft.state === "MISSED_APPROACH") &&
+        aircraft.altitude >= state.airport.elevationFt + 800
+      ) {
+        aircraft.state = "APPROACH";
+        aircraft.stateEnteredAt = state.time;
+        aircraft.minimumsGoAroundTriggered = false;
+      }
+      if (aircraft.pendingRequest?.type === "APPROACH_VECTORS") {
+        aircraft.pendingRequest.resolved = true;
+      }
       break;
     }
 

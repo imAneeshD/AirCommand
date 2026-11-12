@@ -24,6 +24,7 @@ import { convertLiveTracksToSimulation } from "../src/utils/liveToSim.ts";
 import { hitTestAircraftOrLabel, placeAircraftLabels } from "../src/utils/labelLayout.ts";
 import { getActiveCallingSignals } from "../src/utils/radioSignals.ts";
 import { computePilotSpeechProfile } from "../src/utils/radioAudio.ts";
+import { computeDepAppGuidance } from "../src/utils/depAppGuidance.ts";
 import { normalizeSpokenNumbers, parseAtcVoiceCommand } from "../src/utils/voiceCommandParser.ts";
 import { convertAirportBundleToLayout } from "../src/utils/osmToAirport.ts";
 import { loadSavedVoiceEnabled, saveVoiceEnabled } from "../src/utils/storage.ts";
@@ -1218,4 +1219,91 @@ test("LOW_TRAFFIC scenario spawns only 2 aircraft initially and caps active traf
   spawnRandomTraffic(sim, "ARRIVAL");
   spawnRandomTraffic(sim, "DEPARTURE");
   assert.equal(sim.aircraftOrder.length, 3, "LOW_TRAFFIC must cap active traffic at 3 planes");
+});
+
+test("DEP/APP guidance computes Go-Around return vectors & form suggestions and navigates Go-Around aircraft back to runway", () => {
+  const sim = createScenarioSimulation("SANDBOX", "ALL", "KAST");
+  sim.config.autoSpawnTraffic = false;
+  sim.config.autoManageOtherStations = false;
+  sim.config.readbackErrorProbability = 0;
+
+  const rwyId = sim.airport.primaryArrivalRunway;
+  const rwy = sim.airport.runways[rwyId];
+
+  // 1. Go-around aircraft past threshold climbing out
+  const arr = createArrivalAircraft(sim, {
+    callsign: "DAL814",
+    spokenCallsign: "Delta 814",
+    x: rwy.endX + 1.2,
+    y: rwy.endY + 0.6,
+    heading: rwy.heading,
+    altitude: sim.airport.elevationFt + 1700,
+    speed: 190,
+    targetRunway: rwyId,
+    gateId: sim.airport.gateIds[0],
+    state: "FINAL",
+    controller: "DEPARTURE",
+  });
+  arr.state = "GO_AROUND";
+
+  const gaGuidance = computeDepAppGuidance(sim.airport, arr, rwyId);
+  assert.equal(gaGuidance.mode, "GO_AROUND_RECOVERY");
+  assert.equal(gaGuidance.needsPatternTurn, true);
+  assert.equal(gaGuidance.recommendedRunway, rwyId);
+  assert.equal(gaGuidance.recommendedSpeed, 180);
+  assert.ok(gaGuidance.recommendedDirectFix);
+  assert.ok(gaGuidance.recoveryPreviewPoints.length >= 3);
+
+  // Applying suggested HEADING vector transitions GO_AROUND cleanly into APPROACH navigation
+  const hdgRes = submitClearanceDecision(
+    sim,
+    {
+      aircraftId: arr.id,
+      controller: "DEPARTURE",
+      type: "HEADING",
+      parameters: {
+        heading: gaGuidance.recommendedHeading,
+        turnDirection: gaGuidance.recommendedTurnDirection,
+      },
+    },
+    "PLAYER"
+  );
+  assert.equal(hdgRes.ok, true);
+  for (let i = 0; i < 6; i++) stepSimulation(sim, 0.5);
+  assert.equal(arr.state, "APPROACH");
+
+  // Once vectored onto approach side, guidance switches to Direct IAF + ILS intercept
+  const iafFix = sim.airport.fixes[gaGuidance.recommendedDirectFix!];
+  assert.ok(iafFix);
+  arr.x = iafFix.x - 1.5;
+  arr.y = iafFix.y;
+  const interceptGuidance = computeDepAppGuidance(sim.airport, arr, rwyId);
+  assert.equal(interceptGuidance.needsPatternTurn, false);
+  assert.equal(
+    submitClearanceDecision(
+      sim,
+      { aircraftId: arr.id, controller: "DEPARTURE", type: "APPROACH", parameters: { runway: rwyId } },
+      "PLAYER"
+    ).ok,
+    true
+  );
+  for (let i = 0; i < 6; i++) stepSimulation(sim, 0.5);
+  assert.equal(arr.assignedApproach, rwyId);
+
+  // 2. Departure climb form guidance suggests altitude, speed & departure fix
+  const dep = createDepartureAircraft(sim, {
+    callsign: "UAL452",
+    spokenCallsign: "United 452",
+    gateId: sim.airport.gateIds[1],
+    targetRunway: sim.airport.primaryDepartureRunway,
+    requiresPushback: false,
+    departureFix: sim.airport.departureFixIds[0],
+  });
+  dep.state = "CLIMB";
+  dep.altitude = sim.airport.elevationFt + 2200;
+  dep.speed = 210;
+  const depGuidance = computeDepAppGuidance(sim.airport, dep);
+  assert.equal(depGuidance.mode, "DEPARTURE_CLIMB");
+  assert.equal(depGuidance.recommendedSpeed, 210);
+  assert.equal(depGuidance.recommendedDirectFix, sim.airport.departureFixIds[0]);
 });

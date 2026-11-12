@@ -524,6 +524,16 @@ export function updateAircraftStates(state: SimulationState): void {
       }
 
       case "MISSED_APPROACH": {
+        if (ac.commStatus === "NORMAL" && ac.altitude >= elev + 1600) {
+          issuePilotRequestIfNeeded(
+            state,
+            ac,
+            "APPROACH_VECTORS",
+            ac.controller,
+            `${controllerCallsign(ac.controller, state.airport)}, ${ac.spokenCallsign}, climbing on missed approach, request vectors back to ILS runway ${runwaySpokenName(ac.targetRunway)}.`,
+            ac.targetRunway
+          );
+        }
         if (ac.altitude >= elev + 2600) {
           ac.state = "APPROACH";
           ac.stateEnteredAt = state.time;

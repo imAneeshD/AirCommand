@@ -136,6 +136,7 @@ export type PilotRequestType =
   | "LANDING"
   | "CLIMB_HIGHER"
   | "APPROACH_CLEARANCE"
+  | "APPROACH_VECTORS"
   | "GATE_TAXI"
   | "EMERGENCY_PRIORITY";
 
