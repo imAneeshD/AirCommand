@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Compass, Minus, Plus, PlaneLanding, PlaneTakeoff, RotateCcw } from "lucide-react";
+import { Compass, Minus, Plus, PlaneLanding, PlaneTakeoff, Radio, RotateCcw } from "lucide-react";
 import { runwayPoint } from "../data/asteriaAirport.ts";
 import { isRunwayOccupied } from "../engine/validationEngine.ts";
 import { useAtcStore, type CameraState } from "../store/atcStore.ts";
@@ -12,6 +12,8 @@ import {
   type IconObstacle,
   type LabelCandidateInput,
 } from "../utils/labelLayout.ts";
+import { radioAudio } from "../utils/radioAudio.ts";
+import { getActiveCallingSignals, type ActiveCallerSignal } from "../utils/radioSignals.ts";
 import { getAglAltitudeFt, isSurfaceAircraft } from "../utils/telemetry.ts";
 
 type ScopeBasemapLayer = "hybrid" | "satellite" | "chart";
@@ -333,6 +335,11 @@ export const RadarScopeCanvas: React.FC = () => {
 
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [scopeLayer, setScopeLayer] = useState<ScopeBasemapLayer>("hybrid");
+  const [ttsVersion, setTtsVersion] = useState(0);
+
+  useEffect(() => {
+    return radioAudio.subscribe(() => setTtsVersion((v) => v + 1));
+  }, []);
 
   const sim = useAtcStore((s) => s.sim);
   const tickVersion = useAtcStore((s) => s.tickVersion);
@@ -345,6 +352,9 @@ export const RadarScopeCanvas: React.FC = () => {
   const zoomAtPoint = useAtcStore((s) => s.zoomAtPoint);
   const resetCameraForStation = useAtcStore((s) => s.resetCameraForStation);
   const spawnFlight = useAtcStore((s) => s.spawnFlight);
+
+  const activeCallers = getActiveCallingSignals(sim, radioAudio.getActiveTransmission());
+  const primaryCaller = activeCallers[0] ?? null;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -375,10 +385,11 @@ export const RadarScopeCanvas: React.FC = () => {
       hoverPreviewRoute,
       hoveredId,
       theme,
-      scopeLayer
+      scopeLayer,
+      activeCallers
     );
     ctx.restore();
-  }, [sim, tickVersion, camera, hoverPreviewRoute, hoveredId, theme, scopeLayer]);
+  }, [sim, tickVersion, ttsVersion, camera, hoverPreviewRoute, hoveredId, theme, scopeLayer]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -502,10 +513,10 @@ export const RadarScopeCanvas: React.FC = () => {
         className={`w-full h-full block ${hoveredId ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"}`}
       />
 
-      {/* Top-Left Scope Mode Watermark */}
-      <div className="pointer-events-none absolute top-2.5 left-3 flex items-center gap-2">
+      {/* Top-Left Scope Mode Watermark + Live Radio Caller Voice Line */}
+      <div className="absolute top-2.5 left-3 flex flex-col items-start gap-1.5 z-10 pointer-events-none max-w-[calc(100%-7rem)]">
         <div className="px-2.5 py-1 rounded-md bg-[var(--atc-surface)]/92 border border-[var(--atc-border)] shadow-[var(--atc-shadow)] backdrop-blur-sm text-[11px] font-mono text-[var(--atc-text)] flex items-center gap-2">
-          <Compass className="w-3.5 h-3.5 text-[var(--atc-cyan)]" />
+          <Compass className="w-3.5 h-3.5 text-[var(--atc-cyan)] shrink-0" />
           <span className="font-semibold">
             {camera.pixelsPerNm >= 220
               ? "SURFACE MOVEMENT CHART"
@@ -516,6 +527,32 @@ export const RadarScopeCanvas: React.FC = () => {
           <span className="text-[var(--atc-muted)]">•</span>
           <span className="text-[var(--atc-muted)]">{sim.airport.windLabel}</span>
         </div>
+
+        {primaryCaller && (
+          <button
+            type="button"
+            onClick={() => selectAircraft(primaryCaller.aircraftId)}
+            title={`Click to select calling aircraft ${primaryCaller.callsign}`}
+            className={`pointer-events-auto px-2.5 py-1.5 rounded-md border shadow-[var(--atc-shadow)] backdrop-blur-sm text-[11px] font-mono flex items-center gap-2 max-w-full transition-colors ${
+              primaryCaller.category === "EMERGENCY" || primaryCaller.category === "READBACK_ERROR"
+                ? "bg-[var(--atc-red-bg)] border-[var(--atc-red-border)] text-[var(--atc-red)]"
+                : primaryCaller.category === "PILOT_REQUEST"
+                ? "bg-[var(--atc-amber-bg)] border-[var(--atc-amber-border)] text-[var(--atc-amber)]"
+                : "bg-[var(--atc-cyan-bg)] border-[var(--atc-cyan-border)] text-[var(--atc-cyan)]"
+            }`}
+          >
+            <Radio className="w-3.5 h-3.5 shrink-0 animate-pulse" />
+            <span className="font-extrabold shrink-0">
+              TX {primaryCaller.callsign}
+            </span>
+            <span className="px-1 py-0.2 rounded bg-black/10 text-[9px] font-bold shrink-0">
+              {primaryCaller.controller === "DEPARTURE" ? "DEP" : primaryCaller.controller}
+            </span>
+            <span className="truncate text-[var(--atc-text)] font-sans font-medium">
+              "{primaryCaller.text}"
+            </span>
+          </button>
+        )}
       </div>
 
       {/* Bottom-Left Scope Controls */}
@@ -899,6 +936,70 @@ function drawCompassNorthArrow(
   ctx.restore();
 }
 
+function getRadioSignalRgb(cat: ActiveCallerSignal["category"], isLight: boolean): [number, number, number] {
+  if (cat === "EMERGENCY" || cat === "READBACK_ERROR") return [239, 68, 68];
+  if (cat === "PILOT_REQUEST") return isLight ? [217, 119, 6] : [245, 158, 11];
+  return isLight ? [2, 132, 199] : [34, 211, 238];
+}
+
+function drawRadioTransmissionSignal(
+  ctx: CanvasRenderingContext2D,
+  ax: number,
+  ay: number,
+  towerX: number,
+  towerY: number,
+  signal: ActiveCallerSignal,
+  isLight: boolean,
+  nowMs: number
+): void {
+  const [rC, gC, bC] = getRadioSignalRgb(signal.category, isLight);
+  const fade = signal.isLiveTts ? 1.0 : Math.max(0.28, 1 - signal.progress01 * 0.72);
+
+  // 1. Animated VHF RF signal line linking the transmitting aircraft to Airport Control Tower
+  const distToTower = Math.hypot(towerX - ax, towerY - ay);
+  if (distToTower > 28) {
+    ctx.save();
+    ctx.strokeStyle = `rgba(${rC}, ${gC}, ${bC}, ${(0.65 * fade).toFixed(2)})`;
+    ctx.lineWidth = 1.6;
+    ctx.setLineDash([6, 8]);
+    ctx.lineDashOffset = -((nowMs * 0.045) % 14);
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(towerX, towerY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Small receiver ring around Tower origin
+    ctx.strokeStyle = `rgba(${rC}, ${gC}, ${bC}, ${(0.45 * fade).toFixed(2)})`;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(towerX, towerY, 9 + 3 * Math.sin(nowMs * 0.01), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // 2. Concentric propagating radio wave arcs ((( ✈ ))) radiating from the calling aircraft
+  ctx.save();
+  for (let i = 0; i < 3; i++) {
+    const phase = ((nowMs % 1450) / 1450 + i / 3) % 1;
+    const waveR = 13 + phase * 26;
+    const waveAlpha = (1 - phase) * 0.85 * fade;
+    ctx.strokeStyle = `rgba(${rC}, ${gC}, ${bC}, ${waveAlpha.toFixed(2)})`;
+    ctx.lineWidth = 1.8 - phase * 0.6;
+
+    // Right-facing wave arc
+    ctx.beginPath();
+    ctx.arc(ax, ay, waveR, -0.72, 0.72);
+    ctx.stroke();
+
+    // Left-facing wave arc
+    ctx.beginPath();
+    ctx.arc(ax, ay, waveR, Math.PI - 0.72, Math.PI + 0.72);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawScope(
   ctx: CanvasRenderingContext2D,
   w: number,
@@ -908,7 +1009,8 @@ function drawScope(
   hoverPreviewRoute: string[] | null,
   hoveredId: string | null,
   theme: "light" | "dark",
-  scopeLayer: ScopeBasemapLayer = "hybrid"
+  scopeLayer: ScopeBasemapLayer = "hybrid",
+  activeCallers: ActiveCallerSignal[] = []
 ): DrawnLabelHit[] {
   const isLight = theme === "light";
   const rotRad = getRotRad(sim.airport);
@@ -1488,6 +1590,10 @@ function drawScope(
   }
 
   // 4. Draw Aircraft Icons first, then Place & Draw Non-Overlapping Data Tags
+  const nowMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+  const callerById = new Map<string, ActiveCallerSignal>(
+    activeCallers.map((c) => [c.aircraftId, c])
+  );
   const visibleIcons: IconObstacle[] = [];
   const labelMetaById = new Map<
     string,
@@ -1500,6 +1606,7 @@ function drawScope(
       isHovered: boolean;
       isError: boolean;
       isEmerg: boolean;
+      caller?: ActiveCallerSignal;
     }
   >();
 
@@ -1512,6 +1619,11 @@ function drawScope(
     if (ax < -80 || ax > w + 80 || ay < -80 || ay > h + 80) continue;
 
     visibleIcons.push({ id: ac.id, ax, ay });
+
+    const caller = callerById.get(ac.id);
+    if (caller) {
+      drawRadioTransmissionSignal(ctx, ax, ay, cx0, cy0, caller, isLight, nowMs);
+    }
 
     // Radar Trail
     if (ac.trail.length > 1 && !isSurfaceAircraft(ac, sim.airport.elevationFt)) {
@@ -1556,19 +1668,46 @@ function drawScope(
       ? "#0284c7"
       : "#22d3ee";
 
-    // Selection / Alert Halo
-    if (isSelected || isHovered || isError || isEmerg) {
-      ctx.strokeStyle =
-        isError || isEmerg
-          ? "#ef4444"
-          : isSelected
-          ? isLight
-            ? "#eab308"
-            : "#22d3ee"
-          : "#94a3b8";
-      ctx.lineWidth = isSelected ? 2.2 : 1.5;
+    // Selection / Alert Halo + Target Lock Corner Reticle for selected aircraft
+    if (isSelected) {
+      const selColor = isError || isEmerg ? "#ef4444" : isLight ? "#d97706" : "#22d3ee";
+      const pulseR = 16 + Math.sin(nowMs * 0.006) * 2;
+      ctx.save();
+      ctx.strokeStyle = isLight ? "rgba(217, 119, 6, 0.35)" : "rgba(34, 211, 238, 0.35)";
+      ctx.lineWidth = 4;
       ctx.beginPath();
-      ctx.arc(ax, ay, isSelected ? 14 : 11, 0, Math.PI * 2);
+      ctx.arc(ax, ay, pulseR, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // 4 crisp corner target-lock brackets around selected aircraft
+      const r = 18;
+      const tick = 6;
+      ctx.strokeStyle = selColor;
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      // Top-Left
+      ctx.moveTo(ax - r, ay - r + tick);
+      ctx.lineTo(ax - r, ay - r);
+      ctx.lineTo(ax - r + tick, ay - r);
+      // Top-Right
+      ctx.moveTo(ax + r - tick, ay - r);
+      ctx.lineTo(ax + r, ay - r);
+      ctx.lineTo(ax + r, ay - r + tick);
+      // Bottom-Right
+      ctx.moveTo(ax + r, ay + r - tick);
+      ctx.lineTo(ax + r, ay + r);
+      ctx.lineTo(ax + r - tick, ay + r);
+      // Bottom-Left
+      ctx.moveTo(ax - r + tick, ay + r);
+      ctx.lineTo(ax - r, ay + r);
+      ctx.lineTo(ax - r, ay + r - tick);
+      ctx.stroke();
+      ctx.restore();
+    } else if (isHovered || isError || isEmerg) {
+      ctx.strokeStyle = isError || isEmerg ? "#ef4444" : "#94a3b8";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(ax, ay, 11, 0, Math.PI * 2);
       ctx.stroke();
     }
 
@@ -1630,7 +1769,15 @@ function drawScope(
       ac.state !== "LINE_UP_WAIT" &&
       ac.state !== "STOPPED_ON_RUNWAY";
 
-    if (cam.pixelsPerNm < 75 && isSurfaceOnly && !isSelected && !isHovered && !isError && !isEmerg) {
+    if (
+      cam.pixelsPerNm < 75 &&
+      isSurfaceOnly &&
+      !isSelected &&
+      !isHovered &&
+      !isError &&
+      !isEmerg &&
+      !caller
+    ) {
       continue;
     }
 
@@ -1656,6 +1803,8 @@ function drawScope(
       ? 400
       : isError || isEmerg
       ? 300
+      : caller
+      ? 260
       : isHovered
       ? 200
       : hasPendingReq
@@ -1680,6 +1829,7 @@ function drawScope(
       isHovered,
       isError,
       isEmerg,
+      caller,
     });
   }
 
@@ -1694,19 +1844,23 @@ function drawScope(
   for (const placed of placedLabels) {
     const meta = labelMetaById.get(placed.id);
     if (!meta) continue;
-    const { line1, line2, primaryColor, isSelected, isHovered, isError, isEmerg } = meta;
+    const { line1, line2, primaryColor, isSelected, isHovered, isError, isEmerg, caller } = meta;
     const { x: tagX, y: boxTop, w: boxW, h: boxH } = placed.rect;
     const tagY = boxTop + (isLight ? 11 : 10);
+    const callerRgb = caller ? getRadioSignalRgb(caller.category, isLight) : null;
+    const callerCss = callerRgb ? `rgb(${callerRgb[0]}, ${callerRgb[1]}, ${callerRgb[2]})` : null;
 
     // Leader line pointing cleanly from aircraft perimeter to closest label edge
-    ctx.strokeStyle = isSelected
+    ctx.strokeStyle = callerCss
+      ? callerCss
+      : isSelected
       ? isLight
         ? "rgba(234, 179, 8, 0.85)"
         : "rgba(34, 211, 238, 0.85)"
       : isLight
       ? "rgba(87, 83, 78, 0.55)"
       : "rgba(148, 163, 184, 0.5)";
-    ctx.lineWidth = isSelected ? 1.4 : 1;
+    ctx.lineWidth = caller || isSelected ? 1.5 : 1;
     ctx.beginPath();
     ctx.moveTo(placed.leaderStartX, placed.leaderStartY);
     ctx.lineTo(placed.leaderEndX, placed.leaderEndY);
@@ -1714,15 +1868,16 @@ function drawScope(
 
     if (isLight) {
       ctx.fillStyle = isSelected ? "#fffdf5" : isHovered ? "#ffffff" : "rgba(255, 255, 255, 0.94)";
-      ctx.strokeStyle =
-        isError || isEmerg
-          ? "#ef4444"
-          : isSelected
-          ? "#eab308"
-          : isHovered
-          ? "#0284c7"
-          : "#d6d3d1";
-      ctx.lineWidth = isSelected || isHovered ? 1.8 : 1;
+      ctx.strokeStyle = callerCss
+        ? callerCss
+        : isError || isEmerg
+        ? "#ef4444"
+        : isSelected
+        ? "#eab308"
+        : isHovered
+        ? "#0284c7"
+        : "#d6d3d1";
+      ctx.lineWidth = caller || isSelected || isHovered ? 1.8 : 1;
       drawRoundedRect(ctx, tagX, boxTop, boxW, boxH, 5);
       ctx.fill();
       ctx.stroke();
@@ -1740,15 +1895,16 @@ function drawScope(
         : isHovered
         ? "rgba(15, 28, 48, 0.92)"
         : "rgba(8, 16, 28, 0.84)";
-      ctx.strokeStyle =
-        isError || isEmerg
-          ? "#ef4444"
-          : isSelected
-          ? primaryColor
-          : isHovered
-          ? "#38bdf8"
-          : "rgba(30, 48, 72, 0.85)";
-      ctx.lineWidth = isSelected || isHovered ? 1.4 : 1;
+      ctx.strokeStyle = callerCss
+        ? callerCss
+        : isError || isEmerg
+        ? "#ef4444"
+        : isSelected
+        ? primaryColor
+        : isHovered
+        ? "#38bdf8"
+        : "rgba(30, 48, 72, 0.85)";
+      ctx.lineWidth = caller || isSelected || isHovered ? 1.6 : 1;
       drawRoundedRect(ctx, tagX, boxTop, boxW, boxH, 3);
       ctx.fill();
       ctx.stroke();

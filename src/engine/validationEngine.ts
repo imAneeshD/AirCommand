@@ -232,6 +232,15 @@ export function canAircraftExecuteAction(
           clearanceId: gaClr.id,
         };
       }
+      if (
+        aircraft.lightGunAuthorized === "STEADY_RED" &&
+        simulationState.config.nordoMode === "LIGHT_GUN_SIGNALS"
+      ) {
+        return {
+          allowed: true,
+          reason: "Tower Light Gun STEADY RED — give way and continue circling.",
+        };
+      }
       if (aircraft.minimumsGoAroundTriggered) {
         return {
           allowed: true,
@@ -475,6 +484,8 @@ export function canAircraftMove(
       return (
         canAircraftExecuteAction(aircraft, "CHANGE_ALTITUDE", simulation).allowed ||
         canAircraftExecuteAction(aircraft, "CHANGE_HEADING", simulation).allowed ||
+        (aircraft.lightGunAuthorized === "STEADY_RED" &&
+          simulation.config.nordoMode === "LIGHT_GUN_SIGNALS") ||
         aircraft.operationMode === "EMERGENCY_OPERATION"
       );
 

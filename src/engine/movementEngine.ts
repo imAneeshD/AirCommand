@@ -146,6 +146,15 @@ export function updateAircraftMovement(
       }
 
       case "HOLD_POSITION": {
+        // Safety invariant: never freeze or snap an airborne aircraft to ground elevation
+        if (ac.altitude > elev + 50) {
+          ac.state = "GO_AROUND";
+          ac.stateEnteredAt = state.time;
+          ac.assignedAltitude = ac.assignedAltitude ?? Math.round(elev / 500) * 500 + 2200;
+          ac.assignedSpeed = Math.max(190, ac.speed);
+          integrateAirborneFlight(state, ac, dt, elev);
+          break;
+        }
         ac.altitude = elev;
         ac.verticalSpeed = 0;
         // Smooth physical braking deceleration to 0 kts (Section 29)
@@ -557,8 +566,13 @@ function integrateAirborneFlight(
     }
   } else {
     const targetAlt =
-      ac.assignedAltitude !== null && canAircraftExecuteAction(ac, "CHANGE_ALTITUDE", state).allowed
+      ac.assignedAltitude !== null &&
+      (ac.state === "GO_AROUND" ||
+        ac.state === "MISSED_APPROACH" ||
+        canAircraftExecuteAction(ac, "CHANGE_ALTITUDE", state).allowed)
         ? ac.assignedAltitude
+        : ac.state === "GO_AROUND" || ac.state === "MISSED_APPROACH"
+        ? Math.round(elev / 500) * 500 + 2200
         : ac.state === "CLIMB"
         ? Math.round(elev / 500) * 500 + 3000
         : null;
@@ -593,6 +607,8 @@ function integrateAirborneFlight(
     canAircraftExecuteAction(ac, "CHANGE_SPEED", state).allowed
   ) {
     desiredSpeed = ac.assignedSpeed;
+  } else if (ac.state === "GO_AROUND" || ac.state === "MISSED_APPROACH") {
+    desiredSpeed = Math.max(190, ac.assignedSpeed ?? 190);
   } else if (ac.state === "CLIMB" || ac.state === "CRUISE_OUTBOUND") {
     // Natural jet climb acceleration schedule when no explicit speed restriction assigned
     desiredSpeed = agl < 1200 ? 178 : agl < 3000 ? 215 : 250;

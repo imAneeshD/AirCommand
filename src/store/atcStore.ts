@@ -36,16 +36,20 @@ import { radioAudio } from "../utils/radioAudio.ts";
 import {
   clearSavedAirportId,
   loadSavedAirportId,
+  loadSavedMinimizedPanels,
   loadSavedScenarioId,
   loadSavedSfxEnabled,
   loadSavedTheme,
   loadSavedVoiceEnabled,
+  saveMinimizedPanels,
   saveSelectedAirportId,
   saveSelectedScenarioId,
   saveSfxEnabled,
   saveTheme,
   saveVoiceEnabled,
+  type MinimizedPanelsState,
   type ThemeMode,
+  type WorkbenchPanelKey,
 } from "../utils/storage.ts";
 
 export type AppMode =
@@ -128,6 +132,9 @@ interface AtcStore {
   theme: ThemeMode;
   setTheme: (theme: ThemeMode) => void;
   toggleTheme: () => void;
+  minimizedPanels: MinimizedPanelsState;
+  togglePanelMinimized: (panel: WorkbenchPanelKey) => void;
+  setPanelMinimized: (panel: WorkbenchPanelKey, minimized: boolean) => void;
 
   // Phase 2 Real Airport & OSM Data
   selectedAirportRecord: AirportRecord | null;
@@ -187,6 +194,7 @@ interface AtcStore {
   // Phase 1 Core Simulation Actions (preserved)
   tick: (realDtSeconds: number) => void;
   selectAircraft: (id: string | null) => void;
+  focusAircraft: (id: string) => void;
   switchStation: (role: PlayerRoleMode) => void;
   toggleAutoAssist: () => void;
   loadScenario: (scenarioId: ScenarioId) => void;
@@ -293,6 +301,7 @@ const initialSavedScenario = loadSavedScenarioId();
 const initialSavedTheme = loadSavedTheme();
 const initialSavedVoice = loadSavedVoiceEnabled();
 const initialSavedSfx = loadSavedSfxEnabled();
+const initialMinimizedPanels = loadSavedMinimizedPanels();
 radioAudio.voiceEnabled = initialSavedVoice;
 radioAudio.sfxEnabled = initialSavedSfx;
 const LEGACY_IDS = new Set(["KAST", "KMRD", "KVEL", "KSOL"]);
@@ -565,6 +574,7 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
   sfxEnabled: initialSavedSfx,
   voiceEnabled: initialSavedVoice,
   theme: initialSavedTheme,
+  minimizedPanels: initialMinimizedPanels,
 
   selectedAirportRecord: null,
   selectedAirportGeoJson: null,
@@ -597,6 +607,19 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
     const next: ThemeMode = get().theme === "light" ? "dark" : "light";
     saveTheme(next);
     set({ theme: next });
+  },
+  togglePanelMinimized: (panel: WorkbenchPanelKey) => {
+    const prev = get().minimizedPanels;
+    const next: MinimizedPanelsState = { ...prev, [panel]: !prev[panel] };
+    saveMinimizedPanels(next);
+    set({ minimizedPanels: next });
+  },
+  setPanelMinimized: (panel: WorkbenchPanelKey, minimized: boolean) => {
+    const prev = get().minimizedPanels;
+    if (prev[panel] === minimized) return;
+    const next: MinimizedPanelsState = { ...prev, [panel]: minimized };
+    saveMinimizedPanels(next);
+    set({ minimizedPanels: next });
   },
 
   hydrateSavedRealAirport: async () => {
@@ -986,6 +1009,23 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
     const { sim } = get();
     sim.selectedAircraftId = id;
     set((s) => ({ tickVersion: s.tickVersion + 1, hoverPreviewRoute: null }));
+  },
+
+  focusAircraft: (id) => {
+    const { sim, camera } = get();
+    sim.selectedAircraftId = id;
+    const ac = sim.aircraft[id];
+    set((s) => ({
+      tickVersion: s.tickVersion + 1,
+      hoverPreviewRoute: null,
+      camera: ac
+        ? {
+            ...camera,
+            centerX: ac.x,
+            centerY: ac.y,
+          }
+        : camera,
+    }));
   },
 
   switchStation: (role) => {

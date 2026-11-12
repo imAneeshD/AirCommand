@@ -15,12 +15,16 @@ import {
   createDepartureAircraft,
   createScenarioSimulation,
   getAircraftPhaseLabel,
+  spawnRandomTraffic,
   stepSimulation,
 } from "../src/engine/simulation.ts";
 import type { AircraftState, AirportGeoJsonCollection, LiveAdsbTrack } from "../src/types/atc.ts";
 import { formatUserDateTime, formatWallClockAtSimOffset } from "../src/utils/dateTime.ts";
 import { convertLiveTracksToSimulation } from "../src/utils/liveToSim.ts";
 import { hitTestAircraftOrLabel, placeAircraftLabels } from "../src/utils/labelLayout.ts";
+import { getActiveCallingSignals } from "../src/utils/radioSignals.ts";
+import { computePilotSpeechProfile } from "../src/utils/radioAudio.ts";
+import { normalizeSpokenNumbers, parseAtcVoiceCommand } from "../src/utils/voiceCommandParser.ts";
 import { convertAirportBundleToLayout } from "../src/utils/osmToAirport.ts";
 import { loadSavedVoiceEnabled, saveVoiceEnabled } from "../src/utils/storage.ts";
 import { computeAircraftPitchDeg, formatAltitudeReadout } from "../src/utils/telemetry.ts";
@@ -247,6 +251,21 @@ test("MultiplayerRoomService enforces role lock, command dedup, explicit handoff
     assert.equal(created.ok, true);
     const code = created.room!.roomCode;
 
+    // 0a. Minimum 2 human players required to start multiplayer
+    const soloStart = env.rooms.startRoom(code, "p_tower");
+    assert.equal(soloStart.ok, false);
+    assert.match(soloStart.error ?? "", /Minimum 2 human players/i);
+
+    // 0b. Taken role rejection on join & claimRole
+    const takenJoin = env.rooms.joinRoom({
+      roomCode: code,
+      playerId: "p_ground",
+      playerName: "GroundCtrl",
+      preferredRole: "TOWER",
+    });
+    assert.equal(takenJoin.ok, false);
+    assert.match(takenJoin.error ?? "", /already taken/i);
+
     // Ground player joins with mock socket client
     let groundPackets = 0;
     const groundTypes: string[] = [];
@@ -271,6 +290,12 @@ test("MultiplayerRoomService enforces role lock, command dedup, explicit handoff
     assert.equal(joinG.assignedRole, "GROUND");
     assert.ok(groundPackets >= 1);
 
+    // Ground player cannot steal Tower's already-occupied slot
+    const stealAttempt = env.rooms.claimRole(code, "p_ground", "GroundCtrl", "TOWER");
+    assert.equal(stealAttempt.ok, false);
+    assert.match(stealAttempt.error ?? "", /occupied/i);
+
+    // With 2 players (GROUND + TOWER), host CAN start; 3rd role (DEPARTURE) runs autonomously on AI
     const startRes = env.rooms.startRoom(code, "p_tower");
     assert.equal(startRes.ok, true);
 
@@ -278,6 +303,28 @@ test("MultiplayerRoomService enforces role lock, command dedup, explicit handoff
     assert.equal(snap.sim.config.stationControl.GROUND, "PLAYER");
     assert.equal(snap.sim.config.stationControl.TOWER, "PLAYER");
     assert.equal(snap.sim.config.stationControl.DEPARTURE, "AUTONOMOUS");
+
+    // 3rd player joins by code without specifying role -> auto-assigned remaining DEPARTURE role
+    const joinD = env.rooms.joinRoom({
+      roomCode: code,
+      playerId: "p_dep",
+      playerName: "DepCtrl",
+    });
+    assert.equal(joinD.ok, true);
+    assert.equal(joinD.assignedRole, "DEPARTURE");
+    assert.equal(snap.sim.config.stationControl.DEPARTURE, "PLAYER");
+
+    // 4th player cannot join once all 3 seats are occupied
+    const join4 = env.rooms.joinRoom({
+      roomCode: code,
+      playerId: "p_extra",
+      playerName: "ExtraCtrl",
+    });
+    assert.equal(join4.ok, false);
+    assert.match(join4.error ?? "", /full/i);
+
+    // Release DEPARTURE slot so rest of test exercises 2 human + 1 AI cleanly
+    env.rooms.handleClientDisconnect({ clientId: "sock_d", playerId: "p_dep", roomCode: code, send: () => {} });
 
     const depAcId = snap.sim.aircraftOrder.find((id) => snap.sim.aircraft[id]?.controller === "GROUND")!;
     assert.ok(depAcId);
@@ -944,4 +991,231 @@ test("Clustered ground aircraft labels fan out without overlap and each label is
 
   // Clicking directly on an aircraft icon selects that exact aircraft
   assert.equal(hitTestAircraftOrLabel(424, 312, icons, hits), "IGO188");
+});
+
+test("Active radio caller resolver identifies speaking/calling aircraft for RF wave signal display", () => {
+  const sim = createScenarioSimulation("NORMAL_OPS", "GROUND", "KAST");
+  const dep = createDepartureAircraft(sim, {
+    callsign: "DAL437",
+    spokenCallsign: "Delta 437",
+    gateId: sim.airport.gateIds[0],
+    targetRunway: sim.airport.primaryDepartureRunway,
+    requiresPushback: true,
+  });
+
+  // Push a fresh pilot transmission on Ground frequency
+  sim.radioLog.push({
+    id: "TEST_RADIO_1",
+    timestamp: sim.time,
+    sender: dep.callsign,
+    recipient: `${sim.airport.controllerPrefix} Ground`,
+    controller: "GROUND",
+    aircraftId: dep.id,
+    category: "PILOT_REQUEST",
+    text: "Asteria Ground, Delta 437 at gate, request pushback.",
+  });
+
+  // Without TTS (e.g. muted), active recent caller resolves from radioLog
+  const mutedSignals = getActiveCallingSignals(sim, null);
+  assert.equal(mutedSignals.length >= 1, true);
+  assert.equal(mutedSignals[0].aircraftId, dep.id);
+  assert.equal(mutedSignals[0].callsign, "DAL437");
+  assert.equal(mutedSignals[0].isLiveTts, false);
+
+  // With active live TTS utterance, live TTS speaker is prioritized at the top
+  const liveSignals = getActiveCallingSignals(sim, {
+    speakerKey: dep.id,
+    role: "PILOT",
+    rawText: "Asteria Ground, Delta 437 at gate, request pushback.",
+    startedAtMs: Date.now(),
+  });
+  assert.equal(liveSignals[0].aircraftId, dep.id);
+  assert.equal(liveSignals[0].isLiveTts, true);
+
+  // Station isolation: switching to TOWER filters out GROUND pilot calls unless live TTS says otherwise
+  sim.config.activePlayerStation = "TOWER";
+  const towerOnlySignals = getActiveCallingSignals(sim, null);
+  assert.equal(towerOnlySignals.some((s) => s.aircraftId === dep.id), false);
+});
+
+test("Tower Light Gun STEADY_RED never stops an airborne flight in mid-air or marks it as ground", () => {
+  const sim = createScenarioSimulation("SANDBOX", "TOWER", "KAST");
+  sim.config.autoSpawnTraffic = false;
+  sim.config.readbackErrorProbability = 0;
+
+  const rwyId = sim.airport.primaryArrivalRunway;
+  const rwy = sim.airport.runways[rwyId];
+
+  // 1. Airborne arrival on final (at ~1800 ft MSL, 150 kt)
+  const arr = createArrivalAircraft(sim, {
+    callsign: "UAL452",
+    spokenCallsign: "United 452",
+    x: rwy.thresholdX - 4.0,
+    y: rwy.thresholdY,
+    heading: rwy.heading,
+    altitude: sim.airport.elevationFt + 1800,
+    speed: 150,
+    targetRunway: rwyId,
+    gateId: sim.airport.gateIds[0],
+    state: "FINAL",
+    controller: "TOWER",
+  });
+
+  const redFinal = submitClearanceDecision(
+    sim,
+    { aircraftId: arr.id, controller: "TOWER", type: "LIGHT_GUN", parameters: { signal: "STEADY_RED" } },
+    "PLAYER"
+  );
+  assert.equal(redFinal.ok, true);
+  assert.notEqual(arr.state, "HOLD_POSITION");
+  assert.equal(arr.state, "GO_AROUND");
+  assert.equal(formatAltitudeReadout(arr, sim.airport.elevationFt).isGround, false);
+
+  for (let i = 0; i < 12; i++) {
+    stepSimulation(sim, 0.5);
+  }
+  assert.ok(arr.speed >= 150, `Go-around flight must keep flying, got ${arr.speed} kt`);
+  assert.ok(arr.altitude > sim.airport.elevationFt + 1800, "Go-around should climb safely");
+  assert.equal(formatAltitudeReadout(arr, sim.airport.elevationFt).isGround, false);
+
+  // 2. Airborne departure in climb (at +2500 ft, 215 kt) must stay in CLIMB & never stop in air
+  const dep = createDepartureAircraft(sim, {
+    callsign: "DAL814",
+    spokenCallsign: "Delta 814",
+    gateId: sim.airport.gateIds[1],
+    targetRunway: sim.airport.primaryDepartureRunway,
+    requiresPushback: false,
+  });
+  dep.state = "CLIMB";
+  dep.controller = "DEPARTURE";
+  dep.altitude = sim.airport.elevationFt + 2500;
+  dep.speed = 215;
+
+  const redClimb = submitClearanceDecision(
+    sim,
+    { aircraftId: dep.id, controller: "TOWER", type: "LIGHT_GUN", parameters: { signal: "STEADY_RED" } },
+    "PLAYER"
+  );
+  assert.equal(redClimb.ok, true);
+  assert.equal(dep.state, "CLIMB");
+  assert.equal(formatAltitudeReadout(dep, sim.airport.elevationFt).isGround, false);
+
+  stepSimulation(sim, 1.0);
+  assert.ok(dep.speed >= 200, "Climbing flight must never pause in air");
+  assert.ok(dep.altitude >= sim.airport.elevationFt + 2500);
+
+  // 3. Parked aircraft AT_GATE keeps AT_GATE status when flashed STEADY_RED; moving taxi stops on surface
+  const parked = createDepartureAircraft(sim, {
+    callsign: "SWA101",
+    spokenCallsign: "Southwest 101",
+    gateId: sim.airport.gateIds[2],
+    targetRunway: sim.airport.primaryDepartureRunway,
+    requiresPushback: true,
+  });
+  assert.equal(parked.state, "AT_GATE");
+  submitClearanceDecision(
+    sim,
+    { aircraftId: parked.id, controller: "TOWER", type: "LIGHT_GUN", parameters: { signal: "STEADY_RED" } },
+    "PLAYER"
+  );
+  assert.equal(parked.state, "AT_GATE");
+
+  parked.state = "TAXIING";
+  parked.speed = 20;
+  submitClearanceDecision(
+    sim,
+    { aircraftId: parked.id, controller: "TOWER", type: "LIGHT_GUN", parameters: { signal: "STEADY_RED" } },
+    "PLAYER"
+  );
+  assert.equal(parked.state, "HOLD_POSITION");
+});
+
+test("Voice PTT command parser and per-pilot speech profile handle spoken ATC phraseology cleanly", () => {
+  // 1. Per-aircraft deterministic pitch & fast pilot rate
+  const profA = computePilotSpeechProfile("DAL437", true, 1.15);
+  const profB = computePilotSpeechProfile("IGO412", true, 1.15);
+  assert.ok(profA.pitch >= 0.88 && profA.pitch <= 1.12);
+  assert.ok(profA.rate >= 1.15 && profA.rate <= 1.28);
+  assert.notEqual(`${profA.pitch}:${profA.rate}`, `${profB.pitch}:${profB.rate}`);
+
+  // 2. Spoken aviation number normalization
+  assert.equal(
+    normalizeSpokenNumbers("Delta four three seven climb and maintain five thousand"),
+    "delta 437 climb and maintain 5000"
+  );
+  assert.equal(
+    normalizeSpokenNumbers("Turn left heading two seven zero"),
+    "turn left heading 270"
+  );
+
+  // 3. Parse full clearances against active aircraft
+  const sim = createScenarioSimulation("SANDBOX", "ALL", "KAST");
+  sim.config.autoSpawnTraffic = false;
+  const dal = createDepartureAircraft(sim, {
+    callsign: "DAL437",
+    spokenCallsign: "Delta 437",
+    gateId: sim.airport.gateIds[0],
+    targetRunway: "09L",
+    requiresPushback: true,
+  });
+  const igo = createArrivalAircraft(sim, {
+    callsign: "IGO412",
+    spokenCallsign: "IndiGo 412",
+    x: -6,
+    y: sim.airport.runways["09R"].thresholdY,
+    heading: 90,
+    altitude: 2200,
+    speed: 155,
+    targetRunway: "09R",
+    gateId: sim.airport.gateIds[1],
+    state: "FINAL",
+    controller: "TOWER",
+  });
+
+  const climbCmd = parseAtcVoiceCommand(
+    "Delta four three seven climb and maintain five thousand",
+    sim
+  );
+  assert.equal(climbCmd.ok, true);
+  if (climbCmd.ok) {
+    assert.equal(climbCmd.aircraftId, dal.id);
+    assert.equal(climbCmd.command.type, "ALTITUDE");
+    assert.equal(climbCmd.command.parameters?.altitude, 5000);
+  }
+
+  const hdgCmd = parseAtcVoiceCommand("IndiGo 412 turn left heading two seven zero", sim);
+  assert.equal(hdgCmd.ok, true);
+  if (hdgCmd.ok) {
+    assert.equal(hdgCmd.aircraftId, igo.id);
+    assert.equal(hdgCmd.command.type, "HEADING");
+    assert.equal(hdgCmd.command.parameters?.heading, 270);
+    assert.equal(hdgCmd.command.parameters?.turnDirection, "LEFT");
+  }
+
+  const pushCmd = parseAtcVoiceCommand("Delta 437 pushback approved", sim);
+  assert.equal(pushCmd.ok, true);
+  if (pushCmd.ok) {
+    assert.equal(pushCmd.command.type, "PUSHBACK");
+  }
+
+  // Fallback to selectedAircraftId when no callsign spoken
+  sim.selectedAircraftId = igo.id;
+  const landCmd = parseAtcVoiceCommand("cleared to land runway zero niner right", sim);
+  assert.equal(landCmd.ok, true);
+  if (landCmd.ok) {
+    assert.equal(landCmd.aircraftId, igo.id);
+    assert.equal(landCmd.command.type, "LAND");
+    assert.equal(landCmd.command.parameters?.runway, "09R");
+  }
+});
+
+test("LOW_TRAFFIC scenario spawns only 2 aircraft initially and caps active traffic at 3 planes", () => {
+  const sim = createScenarioSimulation("LOW_TRAFFIC", "ALL", "KAST");
+  assert.equal(sim.aircraftOrder.length, 2, "LOW_TRAFFIC should start with just 2 planes (1 dep, 1 arr)");
+
+  // Even forcing spawns repeatedly never exceeds 3 active planes
+  spawnRandomTraffic(sim, "DEPARTURE");
+  spawnRandomTraffic(sim, "ARRIVAL");
+  spawnRandomTraffic(sim, "DEPARTURE");
+  assert.equal(sim.aircraftOrder.length, 3, "LOW_TRAFFIC must cap active traffic at 3 planes");
 });

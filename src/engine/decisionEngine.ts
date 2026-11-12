@@ -6,6 +6,7 @@ import {
   taxiwayFullName,
 } from "../data/asteriaAirport.ts";
 import { formatFixIcao, formatGateIcao } from "../utils/natoPhonetics.ts";
+import { isSurfaceAircraft } from "../utils/telemetry.ts";
 import type {
   ATCClearance,
   Aircraft,
@@ -182,12 +183,64 @@ export function submitClearanceDecision(
       }
       const signal = (params.signal as LightGunSignal) ?? "STEADY_GREEN";
       params.signal = signal;
-      phraseology = `[TOWER LIGHT GUN → ${aircraft.callsign}] ${signal.replace("_", " ")}`;
-      expectedReadback = `[WING ROCK / VISUAL ACK] ${aircraft.callsign}`;
+      const onSurface = isSurfaceAircraft(aircraft, state.airport.elevationFt);
       immediate = true;
       aircraft.lightGunAuthorized = signal;
+
       if (signal === "STEADY_RED") {
-        aircraft.state = "HOLD_POSITION";
+        if (!onSurface) {
+          // ICAO / FAA Light Gun in flight: STEADY RED = Give way to other aircraft and continue circling (NEVER pause/stop in air!)
+          const wasLandingPhase =
+            aircraft.state === "APPROACH" ||
+            aircraft.state === "FINAL" ||
+            aircraft.state === "CLEARED_TO_LAND" ||
+            aircraft.state === "LANDING";
+          if (wasLandingPhase) {
+            const rwy = state.airport.runways[aircraft.assignedApproach ?? aircraft.targetRunway];
+            const safeAlt = Math.max(
+              aircraft.altitude + 600,
+              Math.round((state.airport.elevationFt + 2200) / 100) * 100
+            );
+            aircraft.state = "GO_AROUND";
+            aircraft.stateEnteredAt = state.time;
+            aircraft.assignedAltitude = safeAlt;
+            aircraft.assignedHeading = rwy ? rwy.heading : aircraft.heading;
+            aircraft.assignedSpeed = Math.max(190, aircraft.speed);
+            aircraft.assignedApproach = null;
+            aircraft.minimumsGoAroundTriggered = false;
+            state.metrics.goAroundsExecuted += 1;
+            if (aircraft.pendingRequest?.type === "LANDING") {
+              aircraft.pendingRequest.resolved = true;
+            }
+            phraseology = `[TOWER LIGHT GUN → ${aircraft.callsign}] STEADY RED (IN FLIGHT: GIVE WAY / CONTINUE CIRCLING — GO AROUND)`;
+          } else {
+            phraseology = `[TOWER LIGHT GUN → ${aircraft.callsign}] STEADY RED (IN FLIGHT: GIVE WAY & CONTINUE CIRCLING)`;
+          }
+          expectedReadback = `[WING ROCK / CONTINUING CIRCLING] ${aircraft.callsign}`;
+        } else {
+          // On ground surface: STEADY RED = STOP
+          if (
+            aircraft.state === "AT_GATE" ||
+            aircraft.state === "PUSHBACK_COMPLETE" ||
+            aircraft.state === "HOLDING_SHORT" ||
+            aircraft.state === "STOPPED_ON_RUNWAY" ||
+            aircraft.state === "TAKEOFF_CANCELLED"
+          ) {
+            // Already parked/holding stationary on surface — retain gate or hold-short state
+            aircraft.speed = 0;
+          } else if (aircraft.state === "TAKEOFF_ROLL") {
+            aircraft.state = "BRAKING";
+            aircraft.stateEnteredAt = state.time;
+          } else {
+            aircraft.state = "HOLD_POSITION";
+            aircraft.stateEnteredAt = state.time;
+          }
+          phraseology = `[TOWER LIGHT GUN → ${aircraft.callsign}] STEADY RED (SURFACE: STOP)`;
+          expectedReadback = `[VISUAL ACK / HOLDING ON GROUND] ${aircraft.callsign}`;
+        }
+      } else {
+        phraseology = `[TOWER LIGHT GUN → ${aircraft.callsign}] ${signal.replace("_", " ")}`;
+        expectedReadback = `[WING ROCK / VISUAL ACK] ${aircraft.callsign}`;
       }
       break;
     }
@@ -401,10 +454,13 @@ export function submitClearanceDecision(
     }
 
     case "HOLD_POSITION": {
-      if (aircraft.altitude > state.airport.elevationFt + 50) {
+      if (
+        !isSurfaceAircraft(aircraft, state.airport.elevationFt) ||
+        aircraft.altitude > state.airport.elevationFt + 50
+      ) {
         return {
           ok: false,
-          reason: `HOLD_POSITION is a ground surface instruction.`,
+          reason: `HOLD_POSITION is a ground surface instruction and cannot stop an airborne aircraft.`,
         };
       }
       phraseology = `${aircraft.spokenCallsign}, hold position.`;

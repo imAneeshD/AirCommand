@@ -64,6 +64,7 @@ export function clearSavedAirportId(): void {
 }
 
 const VALID_SCENARIOS = new Set<ScenarioId>([
+  "LOW_TRAFFIC",
   "NORMAL_OPS",
   "RUSH_HOUR",
   "CROSSINGS_AND_READBACK",
@@ -138,6 +139,41 @@ export function saveSfxEnabled(enabled: boolean): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(SFX_ENABLED_KEY, enabled ? "true" : "false");
+  } catch {
+    // Ignore
+  }
+}
+
+export type WorkbenchPanelKey = "left" | "right" | "bottom";
+export type MinimizedPanelsState = Record<WorkbenchPanelKey, boolean>;
+
+const MINIMIZED_PANELS_KEY = "aircommand_minimized_panels_v1";
+const DEFAULT_MINIMIZED_PANELS: MinimizedPanelsState = {
+  left: false,
+  right: false,
+  bottom: false,
+};
+
+export function loadSavedMinimizedPanels(): MinimizedPanelsState {
+  if (typeof window === "undefined") return { ...DEFAULT_MINIMIZED_PANELS };
+  try {
+    const raw = window.localStorage.getItem(MINIMIZED_PANELS_KEY);
+    if (!raw) return { ...DEFAULT_MINIMIZED_PANELS };
+    const parsed = JSON.parse(raw) as Partial<Record<WorkbenchPanelKey, unknown>>;
+    return {
+      left: Boolean(parsed?.left),
+      right: Boolean(parsed?.right),
+      bottom: Boolean(parsed?.bottom),
+    };
+  } catch {
+    return { ...DEFAULT_MINIMIZED_PANELS };
+  }
+}
+
+export function saveMinimizedPanels(state: MinimizedPanelsState): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(MINIMIZED_PANELS_KEY, JSON.stringify(state));
   } catch {
     // Ignore
   }

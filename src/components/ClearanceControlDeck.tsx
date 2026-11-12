@@ -8,7 +8,10 @@ import {
   CheckCircle,
   ClipboardList,
   Compass,
+  Info,
   Lock,
+  PanelRightClose,
+  PanelRightOpen,
   Radio,
   RotateCcw,
   ShieldAlert,
@@ -42,6 +45,8 @@ export const ClearanceControlDeck: React.FC = () => {
   const causeEmergency = useAtcStore((s) => s.causeEmergency);
   const towDisabledAircraft = useAtcStore((s) => s.towDisabledAircraft);
   const setHoverPreviewRoute = useAtcStore((s) => s.setHoverPreviewRoute);
+  const minimized = useAtcStore((s) => s.minimizedPanels.right);
+  const togglePanelMinimized = useAtcStore((s) => s.togglePanelMinimized);
 
   const ac = sim.selectedAircraftId ? sim.aircraft[sim.selectedAircraftId] : null;
   const activeRole = sim.config.activePlayerStation;
@@ -59,15 +64,79 @@ export const ClearanceControlDeck: React.FC = () => {
     }
   }, [ac?.id, ac?.controller, ac?.targetRunway, activeRole]);
 
+  if (minimized) {
+    const hasAlert = Boolean(
+      ac &&
+        (ac.hasReadbackError ||
+          ac.operationMode === "EMERGENCY_OPERATION" ||
+          (ac.pendingRequest && !ac.pendingRequest.resolved))
+    );
+    return (
+      <aside
+        onClick={() => togglePanelMinimized("right")}
+        title="Expand Flight Deck & Clearances panel"
+        className="w-9 bg-[var(--atc-panel)] border-l border-[var(--atc-border)] flex flex-col items-center py-2.5 gap-2.5 shrink-0 cursor-pointer hover:bg-[var(--atc-surface-alt)] transition-colors select-none"
+      >
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            togglePanelMinimized("right");
+          }}
+          aria-label="Expand Flight Deck panel"
+          title="Expand Flight Deck panel"
+          className="p-1 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)] text-[var(--atc-text-secondary)] hover:text-[var(--atc-text)]"
+        >
+          <PanelRightOpen className="w-3.5 h-3.5" />
+        </button>
+
+        {ac && (
+          <span
+            className={`w-2 h-2 rounded-full ${
+              ac.hasReadbackError || ac.operationMode === "EMERGENCY_OPERATION"
+                ? "bg-red-500 animate-pulse"
+                : hasAlert
+                ? "bg-amber-500 animate-pulse"
+                : "bg-[var(--atc-cyan)]"
+            }`}
+          />
+        )}
+
+        <span
+          className="mt-1 text-[10px] font-mono font-bold tracking-widest uppercase text-[var(--atc-muted)]"
+          style={{ writingMode: "vertical-rl" }}
+        >
+          {ac ? ac.callsign : "FLIGHT DECK"}
+        </span>
+      </aside>
+    );
+  }
+
   if (!ac) {
     return (
-      <aside className="w-80 xl:w-[356px] bg-[var(--atc-panel)] border-l border-[var(--atc-border)] p-5 flex flex-col justify-center items-center text-center shrink-0 transition-colors">
-        <div className="w-11 h-11 rounded-full bg-[var(--atc-surface)] border border-[var(--atc-border)] flex items-center justify-center mb-3 shadow-[var(--atc-shadow)]">
-          <Radio className="w-5 h-5 text-[var(--atc-muted)]" />
+      <aside className="w-80 xl:w-[356px] bg-[var(--atc-panel)] border-l border-[var(--atc-border)] flex flex-col shrink-0 transition-colors">
+        <div className="px-3 py-2 border-b border-[var(--atc-border)] bg-[var(--atc-surface)] flex items-center justify-between">
+          <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-[var(--atc-text-secondary)]">
+            Flight Deck
+          </span>
+          <button
+            type="button"
+            onClick={() => togglePanelMinimized("right")}
+            aria-label="Minimize Flight Deck panel"
+            title="Minimize Flight Deck panel"
+            className="p-1 rounded text-[var(--atc-muted)] hover:text-[var(--atc-text)] hover:bg-[var(--atc-surface-alt)] transition-colors"
+          >
+            <PanelRightClose className="w-3.5 h-3.5" />
+          </button>
         </div>
-        <div className="text-sm font-semibold text-[var(--atc-text)]">No Aircraft Selected</div>
-        <div className="text-xs text-[var(--atc-muted)] mt-1 max-w-[230px] leading-relaxed">
-          Click any aircraft on the chart or flight strips to inspect telemetry and issue clearances.
+        <div className="flex-1 p-5 flex flex-col justify-center items-center text-center">
+          <div className="w-11 h-11 rounded-full bg-[var(--atc-surface)] border border-[var(--atc-border)] flex items-center justify-center mb-3 shadow-[var(--atc-shadow)]">
+            <Radio className="w-5 h-5 text-[var(--atc-muted)]" />
+          </div>
+          <div className="text-sm font-semibold text-[var(--atc-text)]">No Aircraft Selected</div>
+          <div className="text-xs text-[var(--atc-muted)] mt-1 max-w-[230px] leading-relaxed">
+            Click any aircraft on the chart or flight strips to inspect telemetry and issue clearances.
+          </div>
         </div>
       </aside>
     );
@@ -144,6 +213,15 @@ export const ClearanceControlDeck: React.FC = () => {
               <span className="font-semibold text-[var(--atc-text-secondary)]">{ac.controller}</span>
             </div>
           </div>
+          <button
+            type="button"
+            onClick={() => togglePanelMinimized("right")}
+            aria-label="Minimize Flight Deck panel"
+            title="Minimize Flight Deck panel"
+            className="p-1 rounded text-[var(--atc-muted)] hover:text-[var(--atc-text)] hover:bg-[var(--atc-surface-alt)] shrink-0 transition-colors"
+          >
+            <PanelRightClose className="w-4 h-4" />
+          </button>
         </div>
 
         {/* Compact Status & Movement Gate Pill */}
@@ -291,28 +369,23 @@ export const ClearanceControlDeck: React.FC = () => {
             </button>{" "}
             or ask {deckTab} controller in Coordination Chat.
           </div>
-        ) : activeRole === "ALL" ? (
-          <div className="rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface)] px-3 py-2 text-[11px] text-[var(--atc-text-secondary)]">
-            <span className="font-bold text-[var(--atc-accent-text)]">ALL AUTO:</span> All stations automated & all voices active. You can still manually override any clearance below or switch to G / T / D.
-          </div>
-        ) : (
+        ) : activeRole !== "ALL" &&
           ac.controller !== activeRole &&
-          sim.config.stationControl[ac.controller] === "AUTONOMOUS" && (
-            <div className="rounded-lg border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] p-2.5 text-[11px] font-mono text-[var(--atc-text)] space-y-1.5">
-              <div>
-                <span className="font-bold text-[var(--atc-emerald)]">{ac.callsign}</span> is on{" "}
-                <span className="font-bold">{ac.controller}</span> (auto-managed while operating{" "}
-                <span className="font-bold">{activeRole}</span>).
-              </div>
-              <button
-                onClick={() => switchStation(ac.controller)}
-                className="w-full py-1 rounded bg-[var(--atc-surface)] hover:bg-[var(--atc-surface-alt)] border border-[var(--atc-emerald-border)] text-[var(--atc-emerald)] font-bold text-[10px]"
-              >
-                SWITCH ROLE TO {ac.controller}
-              </button>
+          sim.config.stationControl[ac.controller] === "AUTONOMOUS" ? (
+          <div className="rounded-lg border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] p-2.5 text-[11px] font-mono text-[var(--atc-text)] space-y-1.5">
+            <div>
+              <span className="font-bold text-[var(--atc-emerald)]">{ac.callsign}</span> is on{" "}
+              <span className="font-bold">{ac.controller}</span> (auto-managed while operating{" "}
+              <span className="font-bold">{activeRole}</span>).
             </div>
-          )
-        )}
+            <button
+              onClick={() => switchStation(ac.controller)}
+              className="w-full py-1 rounded bg-[var(--atc-surface)] hover:bg-[var(--atc-surface-alt)] border border-[var(--atc-emerald-border)] text-[var(--atc-emerald)] font-bold text-[10px]"
+            >
+              SWITCH ROLE TO {ac.controller}
+            </button>
+          </div>
+        ) : null}
 
         {/* ACCORDION 1: Clearances & Actions (Open by default) */}
         <Accordion
@@ -323,6 +396,22 @@ export const ClearanceControlDeck: React.FC = () => {
             <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-[var(--atc-accent-bg)] text-[var(--atc-accent-text)]">
               {deckTab === "DEPARTURE" ? "DEP/APP" : deckTab}
             </span>
+          }
+          rightSlot={
+            activeRole === "ALL" ? (
+              <span className="relative group inline-flex items-center">
+                <span
+                  tabIndex={0}
+                  aria-label="ALL AUTO mode info"
+                  className="p-0.5 rounded text-[var(--atc-amber)] hover:bg-[var(--atc-amber-bg)] cursor-help inline-flex items-center"
+                >
+                  <Info className="w-3.5 h-3.5" />
+                </span>
+                <span className="pointer-events-none opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity absolute right-0 top-full mt-1.5 w-60 z-40 rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface)] shadow-xl p-2 text-[10px] leading-relaxed text-[var(--atc-text-secondary)]">
+                  <strong className="text-[var(--atc-accent-text)]">ALL AUTO:</strong> All stations automated &amp; all voices active. You can still manually override any clearance below or switch to G / T / D.
+                </span>
+              </span>
+            ) : undefined
           }
           bodyClassName="space-y-2.5"
         >
@@ -852,6 +941,18 @@ export const ClearanceControlDeck: React.FC = () => {
                         type: "LIGHT_GUN",
                         parameters: { signal: "STEADY_RED" },
                       })
+                    }
+                    title={
+                      ac.altitude > sim.airport.elevationFt + 40 ||
+                      ac.state === "ROTATE" ||
+                      ac.state === "CLIMB" ||
+                      ac.state === "APPROACH" ||
+                      ac.state === "FINAL" ||
+                      ac.state === "CLEARED_TO_LAND" ||
+                      ac.state === "LANDING" ||
+                      ac.state === "GO_AROUND"
+                        ? "In Flight: Give way & continue circling (Go Around if landing)"
+                        : "On Ground: Stop immediately"
                     }
                     className="py-1 rounded bg-[var(--atc-red-bg)] border border-[var(--atc-red-border)] text-[var(--atc-red)] text-[10px] font-mono font-semibold"
                   >

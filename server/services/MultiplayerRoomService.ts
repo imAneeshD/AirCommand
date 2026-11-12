@@ -250,6 +250,16 @@ export class MultiplayerRoomService {
     }
 
     if (!assignedRole) {
+      if (opts.preferredRole) {
+        const prefSlot = ir.room.slots[opts.preferredRole];
+        if (prefSlot.playerId && prefSlot.playerId !== opts.playerId && prefSlot.connected) {
+          return {
+            ok: false,
+            error: `${opts.preferredRole} is already taken by ${prefSlot.playerName}. Choose an open role or join with Auto-Assign.`,
+          };
+        }
+      }
+
       const targetRoles = opts.preferredRole
         ? [opts.preferredRole, ...ROLES.filter((r) => r !== opts.preferredRole)]
         : ROLES;
@@ -273,6 +283,13 @@ export class MultiplayerRoomService {
           });
           break;
         }
+      }
+
+      if (!assignedRole) {
+        return {
+          ok: false,
+          error: `Room ${code} is full — all 3 ATC roles (GROUND, TOWER, DEPARTURE) are already taken.`,
+        };
       }
     }
 
@@ -407,14 +424,28 @@ export class MultiplayerRoomService {
     if (ir.room.hostPlayerId !== playerId) {
       return { ok: false, error: "Only the room host may start the session." };
     }
+    const connectedRoles = ROLES.filter((r) => {
+      const s = ir.room.slots[r];
+      return Boolean(s.playerId && s.connected);
+    });
+    if (connectedRoles.length < 2) {
+      return {
+        ok: false,
+        error: "Minimum 2 human players required to start multiplayer. Share the room code with a teammate (unclaimed 3rd station runs on AI).",
+      };
+    }
+
     ir.room.status = "ACTIVE";
     ir.sim.paused = false;
     this.syncStationControlWithSlots(ir);
+    const aiRoles = ROLES.filter((r) => !connectedRoles.includes(r));
     this.comms.addMessage(ir.room, {
       senderPlayerId: "SYSTEM",
       senderName: "SYSTEM",
       senderRole: "SYSTEM",
-      text: `Simulation started at ${ir.room.airportIcao} (${ir.room.scenarioId}). Empty positions automated.`,
+      text: `Simulation started at ${ir.room.airportIcao} (${ir.room.scenarioId}). Humans: ${connectedRoles.join(", ")}${
+        aiRoles.length > 0 ? ` · AI Backup: ${aiRoles.join(", ")}` : " · All 3 human seats staffed"
+      }.`,
     });
     this.db.saveRoomSession(ir.room);
     this.broadcastRoomState(ir);

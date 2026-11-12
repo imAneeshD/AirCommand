@@ -379,6 +379,7 @@ export interface StationControlConfig {
 }
 
 export type ScenarioId =
+  | "LOW_TRAFFIC"
   | "NORMAL_OPS"
   | "RUSH_HOUR"
   | "CROSSINGS_AND_READBACK"
