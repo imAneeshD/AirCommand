@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { alongRunwayNm, getSuggestedTaxiRoutes, runwayPoint } from "../src/data/asteriaAirport.ts";
+import {
+  alongRunwayNm,
+  getRunwayExitOptions,
+  getSuggestedTaxiRoutes,
+  runwayPoint,
+} from "../src/data/asteriaAirport.ts";
 import { submitClearanceDecision } from "../src/engine/decisionEngine.ts";
 import {
   createArrivalAircraft,
@@ -12,9 +17,10 @@ import {
   getAircraftPhaseLabel,
   stepSimulation,
 } from "../src/engine/simulation.ts";
-import type { AirportGeoJsonCollection, LiveAdsbTrack } from "../src/types/atc.ts";
+import type { AircraftState, AirportGeoJsonCollection, LiveAdsbTrack } from "../src/types/atc.ts";
 import { formatUserDateTime, formatWallClockAtSimOffset } from "../src/utils/dateTime.ts";
 import { convertLiveTracksToSimulation } from "../src/utils/liveToSim.ts";
+import { hitTestAircraftOrLabel, placeAircraftLabels } from "../src/utils/labelLayout.ts";
 import { convertAirportBundleToLayout } from "../src/utils/osmToAirport.ts";
 import { loadSavedVoiceEnabled, saveVoiceEnabled } from "../src/utils/storage.ts";
 import { computeAircraftPitchDeg, formatAltitudeReadout } from "../src/utils/telemetry.ts";
@@ -694,4 +700,248 @@ test("Voice mute persistence and user local date/time formatting work accurately
 
   const wallAt30 = formatWallClockAtSimOffset(fixed.getTime(), 0, 30);
   assert.match(wallAt30, /^23:14:34$/);
+});
+
+test("Tower VACATE_RUNWAY clearance guides landed arrival onto chosen exit taxiway and expedites runway clearing", () => {
+  const sim = createScenarioSimulation("SANDBOX", "TOWER", "KAST");
+  sim.config.autoSpawnTraffic = false;
+  sim.config.autoManageOtherStations = false;
+  sim.config.readbackErrorProbability = 0;
+
+  const rwyId = sim.airport.primaryArrivalRunway;
+  const rwy = sim.airport.runways[rwyId];
+  const ptTouch = runwayPoint(rwy, 0.25, 0);
+  const arr = createArrivalAircraft(sim, {
+    callsign: "AIC302",
+    spokenCallsign: "Air India 302",
+    x: ptTouch.x,
+    y: ptTouch.y,
+    heading: rwy.heading,
+    altitude: sim.airport.elevationFt + 400,
+    speed: 135,
+    targetRunway: rwyId,
+    gateId: sim.airport.gateIds[0],
+    state: "FINAL",
+    controller: "TOWER",
+    assignedApproach: rwyId,
+  });
+
+  // 1. Disallowed while still airborne
+  const airReject = submitClearanceDecision(
+    sim,
+    { aircraftId: arr.id, controller: "TOWER", type: "VACATE_RUNWAY", parameters: { runway: rwyId } },
+    "PLAYER"
+  );
+  assert.equal(airReject.ok, false);
+  assert.match(airReject.reason, /landed on the runway/i);
+
+  // Land aircraft legitimately onto ROLLOUT
+  assert.equal(
+    submitClearanceDecision(
+      sim,
+      { aircraftId: arr.id, controller: "TOWER", type: "LAND", parameters: { runway: rwyId } },
+      "PLAYER"
+    ).ok,
+    true
+  );
+  arr.altitude = sim.airport.elevationFt;
+  arr.verticalSpeed = 0;
+  arr.speed = 65;
+  arr.state = "ROLLOUT";
+
+  // 2. Disallowed from GROUND controller (must be respective TOWER controller)
+  const wrongRole = submitClearanceDecision(
+    sim,
+    { aircraftId: arr.id, controller: "GROUND", type: "VACATE_RUNWAY", parameters: { runway: rwyId } },
+    "PLAYER"
+  );
+  assert.equal(wrongRole.ok, false);
+  assert.match(wrongRole.reason, /Tower Control/i);
+
+  // 3. TOWER issues VACATE_RUNWAY choosing a specific forward exit + expedite
+  const exits = getRunwayExitOptions(sim.airport, arr, rwyId);
+  assert.ok(exits.length >= 1, "Expected forward runway exits");
+  const chosenExit = exits.length >= 2 ? exits[1] : exits[0];
+
+  const vacateRes = submitClearanceDecision(
+    sim,
+    {
+      aircraftId: arr.id,
+      controller: "TOWER",
+      type: "VACATE_RUNWAY",
+      parameters: {
+        runway: rwyId,
+        exitRwyNodeId: chosenExit.exitRwyNodeId,
+        holdShortNodeId: chosenExit.holdShortNodeId,
+        taxiway: chosenExit.taxiway,
+        expedite: true,
+      },
+    },
+    "PLAYER"
+  );
+  assert.equal(vacateRes.ok, true);
+  assert.match(vacateRes.clearance?.phraseology ?? "", /expedite vacating runway/i);
+  assert.equal(arr.vacateAssignedHoldShortId, chosenExit.holdShortNodeId);
+
+  let sawExpediteVacatingSpeed = false;
+  for (let i = 0; i < 160; i++) {
+    stepSimulation(sim, 0.5);
+    const curState = arr.state as AircraftState;
+    if (curState === "VACATING_RUNWAY" && arr.speed >= 29) {
+      sawExpediteVacatingSpeed = true;
+    }
+    if (curState === "HOLDING_SHORT") break;
+  }
+
+  assert.equal(sawExpediteVacatingSpeed, true, "Expedited vacating should move at ~30 kt");
+  assert.equal(arr.state, "HOLDING_SHORT");
+  assert.equal(arr.currentNodeId, chosenExit.holdShortNodeId);
+});
+
+test("Taxi route planner warns on occupied/head-on route conflicts and generates CLEAR bypass alternatives", () => {
+  const sim = createScenarioSimulation("SANDBOX", "GROUND", "VIDP", (() => {
+    const osmPackPath = path.join(process.cwd(), "public", "data", "osm", "VIDP.geojson");
+    const geoJson = JSON.parse(fs.readFileSync(osmPackPath, "utf8")) as AirportGeoJsonCollection;
+    return convertAirportBundleToLayout({
+      icao: "VIDP",
+      iata: "DEL",
+      name: "Indira Gandhi International Airport",
+      city: "New Delhi",
+      country: "India",
+      isoCountry: "IN",
+      category: "INTERNATIONAL",
+      lat: 28.5556,
+      lon: 77.0952,
+      elevationFt: 777,
+      timezone: "Asia/Kolkata",
+      dataQuality: "Imported",
+      source: "OurAirports",
+      hasOsmGeometry: true,
+      runwayCount: 4,
+      runways: [],
+      frequencies: [],
+      navaids: [],
+      geoJson,
+    });
+  })());
+  sim.config.autoSpawnTraffic = false;
+  sim.config.readbackErrorProbability = 0;
+
+  const gateId = sim.airport.gateIds[0];
+  const rwyId = sim.airport.primaryDepartureRunway;
+  const ual = createDepartureAircraft(sim, {
+    callsign: "IGO412",
+    spokenCallsign: "IndiGo 412",
+    gateId,
+    targetRunway: rwyId,
+    requiresPushback: false,
+  });
+
+  const baselineRoutes = getSuggestedTaxiRoutes(
+    sim.airport,
+    ual.currentNodeId ?? `GATE_${gateId}`,
+    rwyId,
+    gateId,
+    false,
+    sim,
+    ual.id
+  );
+  assert.ok(baselineRoutes.length >= 2, `Expected multiple route alternatives on VIDP, got ${baselineRoutes.length}`);
+  assert.equal(baselineRoutes[0].conflictLevel, "CLEAR");
+
+  // Place a stopped/opposing blocker directly on the midpoint of baselineRoutes[0]
+  const primary = baselineRoutes[0];
+  const midNodeId = primary.nodeIds[Math.floor(primary.nodeIds.length / 2)];
+  const midNode = sim.airport.nodes[midNodeId];
+  assert.ok(midNode);
+
+  const blocker = createArrivalAircraft(sim, {
+    callsign: "DAL814",
+    spokenCallsign: "Delta 814",
+    x: midNode.x,
+    y: midNode.y,
+    heading: 270,
+    altitude: sim.airport.elevationFt,
+    speed: 0,
+    targetRunway: rwyId,
+    gateId,
+    state: "FINAL",
+    controller: "GROUND",
+  });
+  blocker.state = "HOLD_POSITION";
+  blocker.currentNodeId = midNode.id;
+
+  const deconflictedRoutes = getSuggestedTaxiRoutes(
+    sim.airport,
+    ual.currentNodeId ?? `GATE_${gateId}`,
+    rwyId,
+    gateId,
+    false,
+    sim,
+    ual.id
+  );
+  const blockedEntry = deconflictedRoutes.find((r) => r.nodeIds.join(">") === primary.nodeIds.join(">"));
+  assert.ok(blockedEntry);
+  assert.equal(blockedEntry.conflictLevel, "BLOCKED");
+  assert.ok(blockedEntry.conflictCallsigns.includes("DAL814"));
+  assert.match(blockedEntry.conflictReason ?? "", /DAL814/);
+
+  const clearBypass = deconflictedRoutes.find((r) => r.conflictLevel === "CLEAR");
+  assert.ok(clearBypass, "Expected at least one CLEAR bypass route avoiding blocked midNode");
+  assert.equal(deconflictedRoutes[0].conflictLevel, "CLEAR", "CLEAR bypass route must be ranked first");
+});
+
+test("Clustered ground aircraft labels fan out without overlap and each label is directly clickable", () => {
+  const icons = [
+    { id: "IGO412", ax: 400, ay: 300 },
+    { id: "IGO188", ax: 424, ay: 312 },
+    { id: "IGO586", ax: 446, ay: 320 },
+    { id: "DAL814", ax: 468, ay: 308 },
+  ];
+
+  const placed = placeAircraftLabels(
+    icons.map((ic) => ({
+      id: ic.id,
+      ax: ic.ax,
+      ay: ic.ay,
+      boxW: 72,
+      boxH: 27,
+      preferredAbove: ic.id === "DAL814",
+      priority: 0,
+    })),
+    icons,
+    1200,
+    800
+  );
+
+  assert.equal(placed.length, 4);
+
+  // Pairwise check: zero overlap between any two placed label rectangles
+  for (let i = 0; i < placed.length; i++) {
+    const a = placed[i].rect;
+    for (let j = i + 1; j < placed.length; j++) {
+      const b = placed[j].rect;
+      const xOverlap = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
+      const yOverlap = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+      assert.equal(
+        xOverlap * yOverlap,
+        0,
+        `Labels ${placed[i].id} and ${placed[j].id} should not overlap`
+      );
+    }
+    // Check inside viewport bounds
+    assert.ok(a.x >= 0 && a.y >= 0 && a.x + a.w <= 1200 && a.y + a.h <= 800);
+  }
+
+  // Clicking center of each placed label pill resolves to that exact aircraft
+  const hits = placed.map((p) => ({ id: p.id, rect: p.rect }));
+  for (const p of placed) {
+    const cx = p.rect.x + p.rect.w / 2;
+    const cy = p.rect.y + p.rect.h / 2;
+    const hitId = hitTestAircraftOrLabel(cx, cy, icons, hits);
+    assert.equal(hitId, p.id, `Expected clicking label center of ${p.id} to select ${p.id}`);
+  }
+
+  // Clicking directly on an aircraft icon selects that exact aircraft
+  assert.equal(hitTestAircraftOrLabel(424, 312, icons, hits), "IGO188");
 });

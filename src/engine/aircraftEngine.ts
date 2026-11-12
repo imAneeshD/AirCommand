@@ -1,6 +1,7 @@
 import {
   alongRunwayNm,
   crossTrackRunwayNm,
+  getRunwayExitOptions,
   headingDiffDeg,
   runwaySpokenName,
 } from "../data/asteriaAirport.ts";
@@ -52,40 +53,23 @@ function selectExitHoldShortNode(
   ac: Aircraft,
   rwyId: RunwayId
 ): { exitRwyNodeId: string; holdShortNodeId: string } | null {
-  const rwy = state.airport.runways[rwyId];
-  if (!rwy || rwy.exitNodeIds.length === 0) return null;
-
-  const along = alongRunwayNm(rwy, ac.x, ac.y);
-  const exitCandidates = rwy.exitNodeIds
-    .map((eid) => {
-      const node = state.airport.nodes[eid];
-      return node ? { eid, eAlong: alongRunwayNm(rwy, node.x, node.y) } : null;
-    })
-    .filter((item): item is { eid: string; eAlong: number } => Boolean(item))
-    .sort((a, b) => a.eAlong - b.eAlong);
-
-  if (exitCandidates.length === 0) return null;
-  const aheadExit =
-    exitCandidates.find((c) => c.eAlong >= along + 0.04) ??
-    exitCandidates[exitCandidates.length - 1];
-  const chosenExitId = aheadExit.eid;
-
-  const gateNode = ac.gateId ? state.airport.nodes[`GATE_${ac.gateId}`] : undefined;
-  const candidateHs: Array<{ id: string; distToGate: number }> = [];
-  for (const e of state.airport.edges) {
-    if (e.from !== chosenExitId) continue;
-    const targetNode = state.airport.nodes[e.to];
-    if (!targetNode || targetNode.kind !== "HOLD_SHORT") continue;
-    const distToGate = gateNode
-      ? Math.hypot(gateNode.x - targetNode.x, gateNode.y - targetNode.y)
-      : targetNode.isNorthSide
-      ? 0
-      : 1;
-    candidateHs.push({ id: targetNode.id, distToGate });
+  if (
+    ac.vacateAssignedRwyNodeId &&
+    ac.vacateAssignedHoldShortId &&
+    state.airport.nodes[ac.vacateAssignedRwyNodeId] &&
+    state.airport.nodes[ac.vacateAssignedHoldShortId]
+  ) {
+    return {
+      exitRwyNodeId: ac.vacateAssignedRwyNodeId,
+      holdShortNodeId: ac.vacateAssignedHoldShortId,
+    };
   }
-  candidateHs.sort((a, b) => a.distToGate - b.distToGate);
-  if (candidateHs.length === 0) return null;
-  return { exitRwyNodeId: chosenExitId, holdShortNodeId: candidateHs[0].id };
+  const options = getRunwayExitOptions(state.airport, ac, rwyId);
+  if (options.length === 0) return null;
+  return {
+    exitRwyNodeId: options[0].exitRwyNodeId,
+    holdShortNodeId: options[0].holdShortNodeId,
+  };
 }
 
 /**
@@ -481,8 +465,9 @@ export function updateAircraftStates(state: SimulationState): void {
         if (!rwyExitNode) break;
         const along = alongRunwayNm(rwy, ac.x, ac.y);
         const exitAlong = alongRunwayNm(rwy, rwyExitNode.x, rwyExitNode.y);
+        const maxTurnoffSpd = ac.expediteVacate ? 38 : 32;
         if (
-          ac.speed <= 32 &&
+          ac.speed <= maxTurnoffSpd &&
           (along >= exitAlong - 0.04 || along >= rwy.lengthNm - 0.06)
         ) {
           ac.vacatingExitNodeId = exitSel.holdShortNodeId;
@@ -503,7 +488,12 @@ export function updateAircraftStates(state: SimulationState): void {
             ac.speed = 0;
             ac.currentNodeId = exitNode.id;
             ac.vacatingExitNodeId = undefined;
+            ac.vacateAssignedRwyNodeId = undefined;
+            ac.vacateAssignedHoldShortId = undefined;
+            ac.vacateAssignedTaxiway = undefined;
+            ac.expediteVacate = false;
             completeClearancesOfType(ac, "LAND");
+            completeClearancesOfType(ac, "VACATE_RUNWAY");
             completeClearancesOfType(ac, "APPROACH");
             ac.assignedApproach = null;
             ac.holdingAtRunway = undefined;

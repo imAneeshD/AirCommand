@@ -209,7 +209,8 @@ export function canAircraftExecuteAction(
     case "VACATE_RUNWAY": {
       const runway = aircraft.assignedApproach ?? aircraft.targetRunway;
       const landClr = getValidClearanceForRunway(aircraft, "LAND", runway);
-      if (!landClr && !hasLightGun("STEADY_GREEN")) {
+      const vacateClr = getValidClearanceForRunway(aircraft, "VACATE_RUNWAY", runway);
+      if (!landClr && !vacateClr && !hasLightGun("STEADY_GREEN")) {
         return {
           allowed: false,
           reason: "Runway vacation requires prior landing clearance completion.",
@@ -218,7 +219,7 @@ export function canAircraftExecuteAction(
       return {
         allowed: true,
         reason: "Vacating runway following landing rollout.",
-        clearanceId: landClr?.id,
+        clearanceId: vacateClr?.id ?? landClr?.id,
       };
     }
 

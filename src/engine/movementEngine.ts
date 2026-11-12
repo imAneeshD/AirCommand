@@ -390,23 +390,32 @@ export function updateAircraftMovement(
         const along = alongRunwayNm(rwy, ac.x, ac.y);
         const cross = crossTrackRunwayNm(rwy, ac.x, ac.y);
         let targetExitAlong = rwy.lengthNm - 0.05;
-        const forwardExits = rwy.exitNodeIds
-          .map((eid) => state.airport.nodes[eid])
-          .filter((n): n is NonNullable<typeof n> => Boolean(n))
-          .map((n) => alongRunwayNm(rwy, n.x, n.y))
-          .filter((ea) => ea >= along + 0.02)
-          .sort((a, b) => a - b);
-        if (forwardExits.length > 0) {
-          targetExitAlong = forwardExits[0];
+        const assignedNode = ac.vacateAssignedRwyNodeId
+          ? state.airport.nodes[ac.vacateAssignedRwyNodeId]
+          : undefined;
+        if (assignedNode) {
+          targetExitAlong = alongRunwayNm(rwy, assignedNode.x, assignedNode.y);
+        } else {
+          const forwardExits = rwy.exitNodeIds
+            .map((eid) => state.airport.nodes[eid])
+            .filter((n): n is NonNullable<typeof n> => Boolean(n))
+            .map((n) => alongRunwayNm(rwy, n.x, n.y))
+            .filter((ea) => ea >= along + 0.02)
+            .sort((a, b) => a - b);
+          if (forwardExits.length > 0) {
+            targetExitAlong = forwardExits[0];
+          }
         }
 
         const distToExit = Math.max(0, targetExitAlong - along);
-        const targetRolloutSpd = distToExit < 0.09 ? 24 : 62;
+        const expedite = Boolean(ac.expediteVacate);
+        const targetRolloutSpd =
+          distToExit < 0.09 ? (expedite ? 32 : 24) : expedite ? 74 : 62;
         if (ac.speed > targetRolloutSpd) {
-          const brakeRate = ac.speed > 55 ? 15 : 11;
+          const brakeRate = ac.speed > 55 ? 16 : 11;
           ac.speed = Math.max(targetRolloutSpd, ac.speed - brakeRate * dt);
-        } else {
-          ac.speed = targetRolloutSpd;
+        } else if (ac.speed < targetRolloutSpd) {
+          ac.speed = Math.min(targetRolloutSpd, ac.speed + 10 * dt);
         }
         const step = (ac.speed / 3600) * dt;
         const nextAlong = Math.min(rwy.lengthNm - 0.04, along + step);
@@ -426,7 +435,7 @@ export function updateAircraftMovement(
           break;
         }
         const exitNode = state.airport.nodes[exitId];
-        ac.speed = 20;
+        ac.speed = ac.expediteVacate ? 30 : 20;
         moveTowardPoint(ac, exitNode.x, exitNode.y, ac.speed, dt);
         break;
       }

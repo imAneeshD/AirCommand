@@ -5,6 +5,13 @@ import { isRunwayOccupied } from "../engine/validationEngine.ts";
 import { useAtcStore, type CameraState } from "../store/atcStore.ts";
 import type { Aircraft, AirportLayout, RunwaySpec, SimulationState, TaxiwayName } from "../types/atc.ts";
 import { drawGeoreferencedTilesToCanvas } from "../utils/canvasTileLayer.ts";
+import {
+  hitTestAircraftOrLabel,
+  placeAircraftLabels,
+  type DrawnLabelHit,
+  type IconObstacle,
+  type LabelCandidateInput,
+} from "../utils/labelLayout.ts";
 import { getAglAltitudeFt, isSurfaceAircraft } from "../utils/telemetry.ts";
 
 type ScopeBasemapLayer = "hybrid" | "satellite" | "chart";
@@ -314,6 +321,7 @@ function resolveTaxiwayChains(airport: AirportLayout): Array<{ taxiway: TaxiwayN
 export const RadarScopeCanvas: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const drawnLabelHitsRef = useRef<DrawnLabelHit[]>([]);
   const dragRef = useRef<{
     active: boolean;
     startX: number;
@@ -358,7 +366,17 @@ export const RadarScopeCanvas: React.FC = () => {
 
     ctx.save();
     ctx.scale(dpr, dpr);
-    drawScope(ctx, width, height, sim, camera, hoverPreviewRoute, hoveredId, theme, scopeLayer);
+    drawnLabelHitsRef.current = drawScope(
+      ctx,
+      width,
+      height,
+      sim,
+      camera,
+      hoverPreviewRoute,
+      hoveredId,
+      theme,
+      scopeLayer
+    );
     ctx.restore();
   }, [sim, tickVersion, camera, hoverPreviewRoute, hoveredId, theme, scopeLayer]);
 
@@ -393,21 +411,15 @@ export const RadarScopeCanvas: React.FC = () => {
     const w = container.clientWidth;
     const h = container.clientHeight;
 
-    let bestId: string | null = null;
-    let bestPx = 22;
-
+    const icons: IconObstacle[] = [];
     for (const id of sim.aircraftOrder) {
       const ac = sim.aircraft[id];
       if (!ac) continue;
       if (ac.state === "COMPLETED_ARRIVAL" || ac.state === "COMPLETED_DEPARTURE") continue;
       const [ax, ay] = worldToScreen(ac.x, ac.y, w, h, camera, rotRad);
-      const distPx = Math.hypot(sx - ax, sy - ay);
-      if (distPx < bestPx) {
-        bestPx = distPx;
-        bestId = ac.id;
-      }
+      icons.push({ id: ac.id, ax, ay });
     }
-    return bestId;
+    return hitTestAircraftOrLabel(sx, sy, icons, drawnLabelHitsRef.current);
   };
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -897,7 +909,7 @@ function drawScope(
   hoveredId: string | null,
   theme: "light" | "dark",
   scopeLayer: ScopeBasemapLayer = "hybrid"
-): void {
+): DrawnLabelHit[] {
   const isLight = theme === "light";
   const rotRad = getRotRad(sim.airport);
   const toScreen = (wx: number, wy: number): [number, number] =>
@@ -1475,7 +1487,22 @@ function drawScope(
     }
   }
 
-  // 4. Draw Aircraft Icons & Data Tags
+  // 4. Draw Aircraft Icons first, then Place & Draw Non-Overlapping Data Tags
+  const visibleIcons: IconObstacle[] = [];
+  const labelMetaById = new Map<
+    string,
+    {
+      input: LabelCandidateInput;
+      line1: string;
+      line2: string;
+      primaryColor: string;
+      isSelected: boolean;
+      isHovered: boolean;
+      isError: boolean;
+      isEmerg: boolean;
+    }
+  >();
+
   for (const id of sim.aircraftOrder) {
     const ac = sim.aircraft[id];
     if (!ac) continue;
@@ -1483,6 +1510,8 @@ function drawScope(
 
     const [ax, ay] = toScreen(ac.x, ac.y);
     if (ax < -80 || ax > w + 80 || ay < -80 || ay > h + 80) continue;
+
+    visibleIcons.push({ id: ac.id, ax, ay });
 
     // Radar Trail
     if (ac.trail.length > 1 && !isSurfaceAircraft(ac, sim.airport.elevationFt)) {
@@ -1605,20 +1634,7 @@ function drawScope(
       continue;
     }
 
-    // Leader line + Floating Pill Data Block
-    const offsetX = 15;
-    const offsetY = ac.flightKind === "ARRIVAL" ? -20 : 12;
-    ctx.strokeStyle = isLight ? "rgba(87, 83, 78, 0.45)" : "rgba(148, 163, 184, 0.45)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(ax + 6, ay);
-    ctx.lineTo(ax + offsetX, ay + offsetY);
-    ctx.stroke();
-
-    const tagX = ax + offsetX + 2;
-    const tagY = ay + offsetY;
     const hasPendingReq = Boolean(ac.pendingRequest && !ac.pendingRequest.resolved);
-
     const badge = isError
       ? " ERR!"
       : isEmerg
@@ -1632,16 +1648,82 @@ function drawScope(
     const line1 = `${ac.callsign}${badge}`;
     const line2 = shortStateTag(ac, sim.airport.elevationFt);
     const boxW = Math.max(line1.length, line2.length) * 6.4 + 12;
+    const boxH = isLight ? 27 : 25;
+
+    // Keep placement priority independent of hover/selection so fanning labels stay rock-steady under the cursor.
+    const placementPriority = isError || isEmerg ? 200 : hasPendingReq ? 50 : 0;
+    const drawPriority = isSelected
+      ? 400
+      : isError || isEmerg
+      ? 300
+      : isHovered
+      ? 200
+      : hasPendingReq
+      ? 100
+      : 0;
+
+    labelMetaById.set(ac.id, {
+      input: {
+        id: ac.id,
+        ax,
+        ay,
+        boxW,
+        boxH,
+        preferredAbove: ac.flightKind === "ARRIVAL",
+        priority: placementPriority,
+        drawPriority,
+      },
+      line1,
+      line2,
+      primaryColor,
+      isSelected,
+      isHovered,
+      isError,
+      isEmerg,
+    });
+  }
+
+  const placedLabels = placeAircraftLabels(
+    Array.from(labelMetaById.values(), (m) => m.input),
+    visibleIcons,
+    w,
+    h
+  );
+  const drawnLabelHits: DrawnLabelHit[] = [];
+
+  for (const placed of placedLabels) {
+    const meta = labelMetaById.get(placed.id);
+    if (!meta) continue;
+    const { line1, line2, primaryColor, isSelected, isHovered, isError, isEmerg } = meta;
+    const { x: tagX, y: boxTop, w: boxW, h: boxH } = placed.rect;
+    const tagY = boxTop + (isLight ? 11 : 10);
+
+    // Leader line pointing cleanly from aircraft perimeter to closest label edge
+    ctx.strokeStyle = isSelected
+      ? isLight
+        ? "rgba(234, 179, 8, 0.85)"
+        : "rgba(34, 211, 238, 0.85)"
+      : isLight
+      ? "rgba(87, 83, 78, 0.55)"
+      : "rgba(148, 163, 184, 0.5)";
+    ctx.lineWidth = isSelected ? 1.4 : 1;
+    ctx.beginPath();
+    ctx.moveTo(placed.leaderStartX, placed.leaderStartY);
+    ctx.lineTo(placed.leaderEndX, placed.leaderEndY);
+    ctx.stroke();
 
     if (isLight) {
-      ctx.fillStyle = isSelected ? "#fffdf5" : "rgba(255, 255, 255, 0.94)";
-      ctx.strokeStyle = isError || isEmerg
-        ? "#ef4444"
-        : isSelected
-        ? "#eab308"
-        : "#d6d3d1";
-      ctx.lineWidth = isSelected ? 1.8 : 1;
-      drawRoundedRect(ctx, tagX, tagY - 11, boxW, 27, 5);
+      ctx.fillStyle = isSelected ? "#fffdf5" : isHovered ? "#ffffff" : "rgba(255, 255, 255, 0.94)";
+      ctx.strokeStyle =
+        isError || isEmerg
+          ? "#ef4444"
+          : isSelected
+          ? "#eab308"
+          : isHovered
+          ? "#0284c7"
+          : "#d6d3d1";
+      ctx.lineWidth = isSelected || isHovered ? 1.8 : 1;
+      drawRoundedRect(ctx, tagX, boxTop, boxW, boxH, 5);
       ctx.fill();
       ctx.stroke();
 
@@ -1653,10 +1735,21 @@ function drawScope(
       ctx.font = "500 9px 'JetBrains Mono', monospace";
       ctx.fillText(line2, tagX + 5, tagY + 11);
     } else {
-      ctx.fillStyle = isSelected ? "rgba(15, 32, 54, 0.92)" : "rgba(8, 16, 28, 0.82)";
-      ctx.strokeStyle = isSelected ? primaryColor : "rgba(30, 48, 72, 0.85)";
-      ctx.lineWidth = 1;
-      drawRoundedRect(ctx, tagX, tagY - 10, boxW, 25, 3);
+      ctx.fillStyle = isSelected
+        ? "rgba(15, 32, 54, 0.94)"
+        : isHovered
+        ? "rgba(15, 28, 48, 0.92)"
+        : "rgba(8, 16, 28, 0.84)";
+      ctx.strokeStyle =
+        isError || isEmerg
+          ? "#ef4444"
+          : isSelected
+          ? primaryColor
+          : isHovered
+          ? "#38bdf8"
+          : "rgba(30, 48, 72, 0.85)";
+      ctx.lineWidth = isSelected || isHovered ? 1.4 : 1;
+      drawRoundedRect(ctx, tagX, boxTop, boxW, boxH, 3);
       ctx.fill();
       ctx.stroke();
 
@@ -1668,8 +1761,11 @@ function drawScope(
       ctx.font = "500 9px 'JetBrains Mono', monospace";
       ctx.fillText(line2, tagX + 5, tagY + 11);
     }
+
+    drawnLabelHits.push({ id: placed.id, rect: placed.rect });
   }
 
   // 5. True North Compass Indicator (Top-Right)
   drawCompassNorthArrow(ctx, w, rotRad, isLight);
+  return drawnLabelHits;
 }
