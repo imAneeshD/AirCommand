@@ -1,9 +1,12 @@
 import {
+  alongRunwayNm,
   findRouteAlongTaxiways,
+  getRunwayExitOptions,
   runwaySpokenName,
   taxiwayFullName,
 } from "../data/asteriaAirport.ts";
 import { formatFixIcao, formatGateIcao } from "../utils/natoPhonetics.ts";
+import { isSurfaceAircraft } from "../utils/telemetry.ts";
 import type {
   ATCClearance,
   Aircraft,
@@ -180,12 +183,64 @@ export function submitClearanceDecision(
       }
       const signal = (params.signal as LightGunSignal) ?? "STEADY_GREEN";
       params.signal = signal;
-      phraseology = `[TOWER LIGHT GUN → ${aircraft.callsign}] ${signal.replace("_", " ")}`;
-      expectedReadback = `[WING ROCK / VISUAL ACK] ${aircraft.callsign}`;
+      const onSurface = isSurfaceAircraft(aircraft, state.airport.elevationFt);
       immediate = true;
       aircraft.lightGunAuthorized = signal;
+
       if (signal === "STEADY_RED") {
-        aircraft.state = "HOLD_POSITION";
+        if (!onSurface) {
+          // ICAO / FAA Light Gun in flight: STEADY RED = Give way to other aircraft and continue circling (NEVER pause/stop in air!)
+          const wasLandingPhase =
+            aircraft.state === "APPROACH" ||
+            aircraft.state === "FINAL" ||
+            aircraft.state === "CLEARED_TO_LAND" ||
+            aircraft.state === "LANDING";
+          if (wasLandingPhase) {
+            const rwy = state.airport.runways[aircraft.assignedApproach ?? aircraft.targetRunway];
+            const safeAlt = Math.max(
+              aircraft.altitude + 600,
+              Math.round((state.airport.elevationFt + 2200) / 100) * 100
+            );
+            aircraft.state = "GO_AROUND";
+            aircraft.stateEnteredAt = state.time;
+            aircraft.assignedAltitude = safeAlt;
+            aircraft.assignedHeading = rwy ? rwy.heading : aircraft.heading;
+            aircraft.assignedSpeed = Math.max(190, aircraft.speed);
+            aircraft.assignedApproach = null;
+            aircraft.minimumsGoAroundTriggered = false;
+            state.metrics.goAroundsExecuted += 1;
+            if (aircraft.pendingRequest?.type === "LANDING") {
+              aircraft.pendingRequest.resolved = true;
+            }
+            phraseology = `[TOWER LIGHT GUN → ${aircraft.callsign}] STEADY RED (IN FLIGHT: GIVE WAY / CONTINUE CIRCLING — GO AROUND)`;
+          } else {
+            phraseology = `[TOWER LIGHT GUN → ${aircraft.callsign}] STEADY RED (IN FLIGHT: GIVE WAY & CONTINUE CIRCLING)`;
+          }
+          expectedReadback = `[WING ROCK / CONTINUING CIRCLING] ${aircraft.callsign}`;
+        } else {
+          // On ground surface: STEADY RED = STOP
+          if (
+            aircraft.state === "AT_GATE" ||
+            aircraft.state === "PUSHBACK_COMPLETE" ||
+            aircraft.state === "HOLDING_SHORT" ||
+            aircraft.state === "STOPPED_ON_RUNWAY" ||
+            aircraft.state === "TAKEOFF_CANCELLED"
+          ) {
+            // Already parked/holding stationary on surface — retain gate or hold-short state
+            aircraft.speed = 0;
+          } else if (aircraft.state === "TAKEOFF_ROLL") {
+            aircraft.state = "BRAKING";
+            aircraft.stateEnteredAt = state.time;
+          } else {
+            aircraft.state = "HOLD_POSITION";
+            aircraft.stateEnteredAt = state.time;
+          }
+          phraseology = `[TOWER LIGHT GUN → ${aircraft.callsign}] STEADY RED (SURFACE: STOP)`;
+          expectedReadback = `[VISUAL ACK / HOLDING ON GROUND] ${aircraft.callsign}`;
+        }
+      } else {
+        phraseology = `[TOWER LIGHT GUN → ${aircraft.callsign}] ${signal.replace("_", " ")}`;
+        expectedReadback = `[WING ROCK / VISUAL ACK] ${aircraft.callsign}`;
       }
       break;
     }
@@ -250,12 +305,35 @@ export function submitClearanceDecision(
         }
       }
 
-      const routeNodeIds = findRouteAlongTaxiways(
-        state.airport,
-        startNodeId,
-        destinationNodeId,
-        routeTaxiways
-      );
+      let routeNodeIds: string[] | null = null;
+      const providedNodeIds = params.routeNodeIds as string[] | undefined;
+      if (
+        Array.isArray(providedNodeIds) &&
+        providedNodeIds.length >= 2 &&
+        providedNodeIds[0] === startNodeId &&
+        providedNodeIds[providedNodeIds.length - 1] === destinationNodeId
+      ) {
+        const edgePairs = new Set(state.airport.edges.map((e) => `${e.from}|${e.to}`));
+        let validChain = true;
+        for (let i = 0; i < providedNodeIds.length - 1; i++) {
+          if (!edgePairs.has(`${providedNodeIds[i]}|${providedNodeIds[i + 1]}`)) {
+            validChain = false;
+            break;
+          }
+        }
+        if (validChain) {
+          routeNodeIds = [...providedNodeIds];
+        }
+      }
+
+      if (!routeNodeIds) {
+        routeNodeIds = findRouteAlongTaxiways(
+          state.airport,
+          startNodeId,
+          destinationNodeId,
+          routeTaxiways
+        );
+      }
 
       if (!routeNodeIds || routeNodeIds.length === 0) {
         return {
@@ -376,10 +454,13 @@ export function submitClearanceDecision(
     }
 
     case "HOLD_POSITION": {
-      if (aircraft.altitude > state.airport.elevationFt + 50) {
+      if (
+        !isSurfaceAircraft(aircraft, state.airport.elevationFt) ||
+        aircraft.altitude > state.airport.elevationFt + 50
+      ) {
         return {
           ok: false,
-          reason: `HOLD_POSITION is a ground surface instruction.`,
+          reason: `HOLD_POSITION is a ground surface instruction and cannot stop an airborne aircraft.`,
         };
       }
       phraseology = `${aircraft.spokenCallsign}, hold position.`;
@@ -413,6 +494,62 @@ export function submitClearanceDecision(
       params.runway = runway;
       phraseology = `${aircraft.spokenCallsign}, ${controllerCallsign(command.controller, state.airport)}, wind ${state.airport.windText}, runway ${runwaySpokenName(runway)}, cleared to land.`;
       expectedReadback = `Cleared to land runway ${runwaySpokenName(runway)}, ${aircraft.spokenCallsign}.`;
+      break;
+    }
+
+    case "VACATE_RUNWAY": {
+      if (command.controller !== "TOWER") {
+        return {
+          ok: false,
+          reason: `Vacate runway clearances must be issued by Tower Control (selected: ${command.controller}).`,
+        };
+      }
+      const onSurface = aircraft.altitude <= state.airport.elevationFt + 50;
+      const canVacateState =
+        aircraft.state === "TOUCHDOWN" ||
+        aircraft.state === "ROLLOUT" ||
+        aircraft.state === "VACATING_RUNWAY" ||
+        (aircraft.state === "HOLD_POSITION" && onSurface) ||
+        aircraft.state === "STOPPED_ON_RUNWAY";
+      if (!canVacateState) {
+        return {
+          ok: false,
+          reason: `${aircraft.callsign} must be landed on the runway to vacate (current: ${aircraft.state}).`,
+        };
+      }
+      const runway =
+        (params.runway as RunwayId | undefined) ??
+        aircraft.assignedApproach ??
+        aircraft.targetRunway;
+      const options = getRunwayExitOptions(state.airport, aircraft, runway);
+      const reqRwyNode = params.exitRwyNodeId as string | undefined;
+      const reqTw = (params.taxiway as TaxiwayName | undefined)?.trim().toUpperCase();
+      const chosen =
+        (reqRwyNode ? options.find((o) => o.exitRwyNodeId === reqRwyNode) : undefined) ??
+        (reqTw ? options.find((o) => o.taxiway.toUpperCase() === reqTw) : undefined) ??
+        options[0];
+      if (!chosen) {
+        return {
+          ok: false,
+          reason: `No runway exit taxiway found ahead on runway ${runway}.`,
+        };
+      }
+      const expedite = Boolean(params.expedite);
+      params.runway = runway;
+      params.exitRwyNodeId = chosen.exitRwyNodeId;
+      params.holdShortNodeId = chosen.holdShortNodeId;
+      params.taxiway = chosen.taxiway;
+      params.expedite = expedite;
+
+      const rwySpoken = runwaySpokenName(runway);
+      const twSpoken = chosen.spokenName;
+      phraseology = expedite
+        ? `${aircraft.spokenCallsign}, ${controllerCallsign(command.controller, state.airport)}, expedite vacating runway ${rwySpoken} via taxiway ${twSpoken}, traffic on final.`
+        : `${aircraft.spokenCallsign}, ${controllerCallsign(command.controller, state.airport)}, vacate runway ${rwySpoken} via taxiway ${twSpoken}.`;
+      expectedReadback = expedite
+        ? `Expediting off runway ${rwySpoken} via taxiway ${twSpoken}, ${aircraft.spokenCallsign}.`
+        : `Vacating runway ${rwySpoken} via taxiway ${twSpoken}, ${aircraft.spokenCallsign}.`;
+      immediate = true;
       break;
     }
 
@@ -612,6 +749,39 @@ function applyClearanceImmediateEffects(
       state.metrics.goAroundsExecuted += 1;
       if (aircraft.pendingRequest?.type === "LANDING") {
         aircraft.pendingRequest.resolved = true;
+      }
+      break;
+    }
+    case "VACATE_RUNWAY": {
+      const rwyId = (clearance.parameters.runway as RunwayId | undefined) ?? aircraft.assignedApproach ?? aircraft.targetRunway;
+      const exitRwyNodeId = clearance.parameters.exitRwyNodeId as string | undefined;
+      const holdShortNodeId = clearance.parameters.holdShortNodeId as string | undefined;
+      const taxiway = clearance.parameters.taxiway as TaxiwayName | undefined;
+      aircraft.vacateAssignedRwyNodeId = exitRwyNodeId;
+      aircraft.vacateAssignedHoldShortId = holdShortNodeId;
+      aircraft.vacateAssignedTaxiway = taxiway;
+      aircraft.expediteVacate = Boolean(clearance.parameters.expedite);
+
+      if (aircraft.state === "VACATING_RUNWAY") {
+        if (holdShortNodeId && state.airport.nodes[holdShortNodeId]) {
+          aircraft.vacatingExitNodeId = holdShortNodeId;
+        }
+      } else if (
+        aircraft.state === "TOUCHDOWN" ||
+        aircraft.state === "HOLD_POSITION" ||
+        aircraft.state === "STOPPED_ON_RUNWAY"
+      ) {
+        const rwy = state.airport.runways[rwyId];
+        const rwyNode = exitRwyNodeId ? state.airport.nodes[exitRwyNodeId] : undefined;
+        const along = rwy ? alongRunwayNm(rwy, aircraft.x, aircraft.y) : 0;
+        const exitAlong = rwy && rwyNode ? alongRunwayNm(rwy, rwyNode.x, rwyNode.y) : 0;
+        if (holdShortNodeId && rwy && rwyNode && along >= exitAlong - 0.04) {
+          aircraft.vacatingExitNodeId = holdShortNodeId;
+          aircraft.state = "VACATING_RUNWAY";
+        } else {
+          aircraft.state = "ROLLOUT";
+        }
+        aircraft.stateEnteredAt = state.time;
       }
       break;
     }

@@ -50,6 +50,7 @@ export type ClearanceType =
   | "REJECT_TAKEOFF"
   | "LAND"
   | "GO_AROUND"
+  | "VACATE_RUNWAY"
   | "APPROACH"
   | "HEADING"
   | "ALTITUDE"
@@ -198,6 +199,10 @@ export interface Aircraft {
   crossRunwayCleared: Record<string, boolean>;
   lightGunAuthorized?: LightGunSignal;
   vacatingExitNodeId?: string;
+  vacateAssignedRwyNodeId?: string;
+  vacateAssignedHoldShortId?: string;
+  vacateAssignedTaxiway?: TaxiwayName;
+  expediteVacate?: boolean;
   pushbackTargetHeading?: number;
   requiresPushback: boolean;
 
@@ -374,6 +379,7 @@ export interface StationControlConfig {
 }
 
 export type ScenarioId =
+  | "LOW_TRAFFIC"
   | "NORMAL_OPS"
   | "RUSH_HOUR"
   | "CROSSINGS_AND_READBACK"

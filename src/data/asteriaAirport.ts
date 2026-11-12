@@ -4,6 +4,7 @@ import type {
   NavFix,
   RunwayId,
   RunwaySpec,
+  SimulationState,
   TaxiEdge,
   TaxiNode,
   TaxiwayName,
@@ -1297,13 +1298,14 @@ function findShortestTaxiwayPath(
   airport: AirportLayout,
   startNodeId: string,
   destNodeId: string,
-  avoidRunwayEntryIds?: Set<string>
+  avoidRunwayEntryIds?: Set<string>,
+  nodePenalties?: Map<string, number>
 ): string[] | null {
   if (!airport.nodes[startNodeId] || !airport.nodes[destNodeId]) return null;
   if (startNodeId === destNodeId) return [startNodeId];
 
   const adj = buildOutgoingIndex(airport);
-  // 0-1 BFS / Dijkstra minimizing (runwayCrossings * 1_000_000 + hopCount) in O((V + E) log V)
+  // 0-1 BFS / Dijkstra minimizing (runwayCrossings * 1_000_000 + hopCount + penalties) in O((V + E) log V)
   const bestScore = new Map<string, number>([[startNodeId, 0]]);
   const parent = new Map<string, string>();
   const settled = new Set<string>();
@@ -1338,7 +1340,8 @@ function findShortestTaxiwayPath(
     for (const e of adj.get(cur.nodeId) ?? []) {
       if (settled.has(e.to)) continue;
       if (avoidRunwayEntryIds?.has(e.to) && e.to !== destNodeId) continue;
-      const nextScore = (curCross + (e.runwayCrossing ? 1 : 0)) * 1_000_000 + (curHops + 1);
+      const pen = e.to === destNodeId ? 0 : nodePenalties?.get(e.to) ?? 0;
+      const nextScore = (curCross + (e.runwayCrossing ? 1 : 0)) * 1_000_000 + (curHops + 1 + pen);
       const prevBest = bestScore.get(e.to);
       if (prevBest !== undefined && prevBest <= nextScore) continue;
       bestScore.set(e.to, nextScore);
@@ -1349,52 +1352,286 @@ function findShortestTaxiwayPath(
   return null;
 }
 
+export type RouteConflictLevel = "CLEAR" | "CONGESTED" | "BLOCKED";
+
+export interface SuggestedTaxiRoute {
+  label: string;
+  taxiways: TaxiwayName[];
+  destinationNodeId: string;
+  nodeIds: string[];
+  conflictLevel: RouteConflictLevel;
+  conflictCallsigns: string[];
+  conflictReason?: string;
+}
+
+/**
+ * Evaluates whether a candidate taxi path collides with, faces head-on, or shares taxiways
+ * with active surface aircraft so controllers get conflict warnings and clear bypass routes.
+ */
+export function evaluateTaxiRouteConflicts(
+  airport: AirportLayout,
+  nodeIds: string[],
+  sim?: SimulationState,
+  excludeAircraftId?: string
+): {
+  conflictLevel: RouteConflictLevel;
+  conflictCallsigns: string[];
+  conflictReason?: string;
+} {
+  if (!sim || nodeIds.length < 2) {
+    return { conflictLevel: "CLEAR", conflictCallsigns: [] };
+  }
+
+  const elev = airport.elevationFt;
+  const checkNodes = nodeIds.slice(1);
+  const myNodeIdx = new Map<string, number>();
+  for (let i = 1; i < nodeIds.length; i++) {
+    myNodeIdx.set(nodeIds[i], i);
+  }
+
+  const blockedSet = new Set<string>();
+  const congestedSet = new Set<string>();
+  let headOnFound = false;
+
+  for (const otherId of sim.aircraftOrder) {
+    if (otherId === excludeAircraftId) continue;
+    const other = sim.aircraft[otherId];
+    if (
+      !other ||
+      other.altitude > elev + 50 ||
+      other.state === "COMPLETED_ARRIVAL" ||
+      other.state === "COMPLETED_DEPARTURE"
+    ) {
+      continue;
+    }
+
+    // 1. Check physical presence along candidate path (within ~0.055 NM of path nodes/segments)
+    let minD = Infinity;
+    let closestIdx = -1;
+    for (let i = 0; i < checkNodes.length; i++) {
+      const n = airport.nodes[checkNodes[i]];
+      if (!n) continue;
+      const d = Math.hypot(n.x - other.x, n.y - other.y);
+      if (d < minD) {
+        minD = d;
+        closestIdx = i + 1;
+      }
+    }
+
+    if (minD <= 0.055 && closestIdx >= 1) {
+      const prevN = airport.nodes[nodeIds[closestIdx - 1]];
+      const curN = airport.nodes[nodeIds[closestIdx]];
+      let facingOpposing = false;
+      if (prevN && curN) {
+        const vx = curN.x - prevN.x;
+        const vy = curN.y - prevN.y;
+        const vLen = Math.hypot(vx, vy);
+        if (vLen > 0.0001) {
+          const rad = (other.heading * Math.PI) / 180;
+          const dot = ((vx / vLen) * Math.sin(rad)) + ((vy / vLen) * Math.cos(rad));
+          facingOpposing = dot < -0.25;
+        }
+      }
+      if (
+        facingOpposing ||
+        other.speed <= 1.5 ||
+        other.state === "HOLD_POSITION" ||
+        other.state === "HOLDING_SHORT" ||
+        other.state === "PUSHBACK_COMPLETE"
+      ) {
+        blockedSet.add(other.callsign);
+        if (facingOpposing) headOnFound = true;
+      } else {
+        congestedSet.add(other.callsign);
+      }
+      continue;
+    }
+
+    // 2. Check remaining active taxi route overlap (head-on opposing vs same-direction sharing)
+    if (other.assignedRouteNodeIds.length > 0 && other.routeStepIndex < other.assignedRouteNodeIds.length) {
+      const otherRem = other.assignedRouteNodeIds.slice(other.routeStepIndex);
+      const sharedPairs: Array<{ myI: number; otherI: number }> = [];
+      for (let oi = 0; oi < otherRem.length; oi++) {
+        const mi = myNodeIdx.get(otherRem[oi]);
+        if (mi !== undefined) {
+          sharedPairs.push({ myI: mi, otherI: oi });
+        }
+      }
+      if (sharedPairs.length >= 2) {
+        const first = sharedPairs[0];
+        const last = sharedPairs[sharedPairs.length - 1];
+        if ((first.myI < last.myI && first.otherI > last.otherI) || (first.myI > last.myI && first.otherI < last.otherI)) {
+          blockedSet.add(other.callsign);
+          headOnFound = true;
+        } else {
+          congestedSet.add(other.callsign);
+        }
+      } else if (sharedPairs.length === 1 && sharedPairs[0].myI <= 10) {
+        congestedSet.add(other.callsign);
+      }
+    }
+  }
+
+  if (blockedSet.size > 0) {
+    const calls = [...blockedSet];
+    return {
+      conflictLevel: "BLOCKED",
+      conflictCallsigns: calls,
+      conflictReason: headOnFound
+        ? `Head-on / opposing traffic with ${calls.join(", ")}`
+        : `Blocked on taxiway by ${calls.join(", ")}`,
+    };
+  }
+  if (congestedSet.size > 0) {
+    const calls = [...congestedSet];
+    return {
+      conflictLevel: "CONGESTED",
+      conflictCallsigns: calls,
+      conflictReason: `Same taxiway traffic ahead (${calls.join(", ")})`,
+    };
+  }
+  return { conflictLevel: "CLEAR", conflictCallsigns: [] };
+}
+
+function buildTrafficPenaltyMap(
+  airport: AirportLayout,
+  sim: SimulationState,
+  excludeAircraftId?: string
+): Map<string, number> {
+  const penalties = new Map<string, number>();
+  const elev = airport.elevationFt;
+
+  for (const otherId of sim.aircraftOrder) {
+    if (otherId === excludeAircraftId) continue;
+    const other = sim.aircraft[otherId];
+    if (
+      !other ||
+      other.altitude > elev + 50 ||
+      other.state === "COMPLETED_ARRIVAL" ||
+      other.state === "COMPLETED_DEPARTURE"
+    ) {
+      continue;
+    }
+
+    if (other.currentNodeId) {
+      penalties.set(other.currentNodeId, (penalties.get(other.currentNodeId) ?? 0) + 500);
+    }
+    for (const node of Object.values(airport.nodes)) {
+      if (Math.hypot(node.x - other.x, node.y - other.y) <= 0.055) {
+        penalties.set(node.id, (penalties.get(node.id) ?? 0) + 450);
+      }
+    }
+    if (other.assignedRouteNodeIds.length > 0 && other.routeStepIndex < other.assignedRouteNodeIds.length) {
+      for (const nid of other.assignedRouteNodeIds.slice(other.routeStepIndex)) {
+        penalties.set(nid, (penalties.get(nid) ?? 0) + 220);
+      }
+    }
+  }
+
+  return penalties;
+}
+
 export function getSuggestedTaxiRoutes(
   airport: AirportLayout,
   aircraftNodeId: string,
   targetRunway: RunwayId,
   gateId?: string,
-  isArrivalToGate = false
-): Array<{
-  label: string;
-  taxiways: TaxiwayName[];
-  destinationNodeId: string;
-  nodeIds: string[];
-}> {
-  const options: Array<{
-    label: string;
-    taxiways: TaxiwayName[];
-    destinationNodeId: string;
-    nodeIds: string[];
-  }> = [];
-  const seen = new Set<string>();
-  const seenLabels = new Set<string>();
+  isArrivalToGate = false,
+  sim?: SimulationState,
+  excludeAircraftId?: string
+): SuggestedTaxiRoute[] {
+  const options: SuggestedTaxiRoute[] = [];
+  const seenPaths = new Set<string>();
+  const seenLabelKeys = new Set<string>();
 
-  const pushOption = (label: string, taxiways: TaxiwayName[], destinationNodeId: string) => {
-    const key = `${destinationNodeId}|${taxiways.join(",")}`;
-    if (seen.has(key) || seenLabels.has(label) || taxiways.length === 0) return;
-    const nodeIds = findRouteAlongTaxiways(airport, aircraftNodeId, destinationNodeId, taxiways);
-    if (nodeIds && nodeIds.length > 0) {
-      seen.add(key);
-      seenLabels.add(label);
-      options.push({ label, taxiways, destinationNodeId, nodeIds });
+  const pushPathOption = (
+    basePrefix: string,
+    taxiways: TaxiwayName[],
+    destinationNodeId: string,
+    nodeIds: string[] | null
+  ) => {
+    if (!nodeIds || nodeIds.length === 0 || taxiways.length === 0) return;
+    const pathKey = `${destinationNodeId}|${nodeIds.join(">")}`;
+    if (seenPaths.has(pathKey)) return;
+
+    let label = `${basePrefix} via ${taxiways.map(taxiwayFullName).join(", ")}`;
+    const twKey = `${destinationNodeId}|${label}`;
+    if (seenLabelKeys.has(twKey)) {
+      // Allow genuinely distinct bypass paths to appear even if taxiway ref sequence simplifies similarly
+      const idx = options.filter((o) => o.destinationNodeId === destinationNodeId).length + 1;
+      label = `${label} (Bypass ${idx})`;
     }
+    seenPaths.add(pathKey);
+    seenLabelKeys.add(twKey);
+
+    const conflict = evaluateTaxiRouteConflicts(airport, nodeIds, sim, excludeAircraftId);
+    options.push({
+      label,
+      taxiways,
+      destinationNodeId,
+      nodeIds,
+      ...conflict,
+    });
+  };
+
+  const collectDiversifiedPaths = (basePrefix: string, dest: string, basePenalties?: Map<string, number>) => {
+    const p1 = findShortestTaxiwayPath(airport, aircraftNodeId, dest, undefined, basePenalties);
+    if (p1) {
+      pushPathOption(basePrefix, extractTaxiwaySequence(airport, p1), dest, p1);
+    }
+
+    if (sim) {
+      const trafficPenalties = buildTrafficPenaltyMap(airport, sim, excludeAircraftId);
+      if (trafficPenalties.size > 0) {
+        const bypass = findShortestTaxiwayPath(airport, aircraftNodeId, dest, undefined, trafficPenalties);
+        if (bypass) {
+          pushPathOption(basePrefix, extractTaxiwaySequence(airport, bypass), dest, bypass);
+        }
+      }
+    }
+
+    // Generate 2 alternative bypass corridors by penalizing mid-route nodes of prior paths
+    const divPenalties = new Map<string, number>(basePenalties ?? []);
+    let prevPath = p1;
+    for (let pass = 0; pass < 2 && prevPath && prevPath.length > 3; pass++) {
+      const startMargin = 1;
+      const endMargin = prevPath.length - 1;
+      for (let i = startMargin; i < endMargin; i++) {
+        divPenalties.set(prevPath[i], (divPenalties.get(prevPath[i]) ?? 0) + (pass === 0 ? 70 : 140));
+      }
+      const altPath = findShortestTaxiwayPath(airport, aircraftNodeId, dest, undefined, divPenalties);
+      if (altPath) {
+        pushPathOption(basePrefix, extractTaxiwaySequence(airport, altPath), dest, altPath);
+        prevPath = altPath;
+      } else {
+        break;
+      }
+    }
+  };
+
+  const sortByClearancePriority = (list: SuggestedTaxiRoute[]): SuggestedTaxiRoute[] => {
+    if (!sim) return list;
+    const rank: Record<RouteConflictLevel, number> = { CLEAR: 0, CONGESTED: 1, BLOCKED: 2 };
+    return [...list].sort((a, b) => {
+      const rDiff = rank[a.conflictLevel] - rank[b.conflictLevel];
+      if (rDiff !== 0) return rDiff;
+      return a.nodeIds.length - b.nodeIds.length;
+    });
   };
 
   if (isArrivalToGate && gateId) {
     const dest = `GATE_${gateId}`;
+    const prefix = `Gate ${gateId}`;
     const startTw = getAdjacentTaxiway(airport, aircraftNodeId);
     const gateTw = getAdjacentTaxiway(airport, dest);
 
     if (startTw && gateTw) {
-      pushOption(`Gate ${gateId} via ${[startTw, gateTw].map(taxiwayFullName).join(", ")}`, [startTw, gateTw], dest);
+      const twSeq = startTw === gateTw ? [startTw] : [startTw, gateTw];
+      const simpleNodes = findRouteAlongTaxiways(airport, aircraftNodeId, dest, twSeq);
+      pushPathOption(prefix, twSeq, dest, simpleNodes);
     }
 
-    const shortest = findShortestTaxiwayPath(airport, aircraftNodeId, dest);
-    if (shortest) {
-      const seq = extractTaxiwaySequence(airport, shortest);
-      pushOption(`Gate ${gateId} via ${seq.map(taxiwayFullName).join(", ")}`, seq, dest);
-    }
+    collectDiversifiedPaths(prefix, dest);
 
     const fallbackSeqs: TaxiwayName[][] = [
       ["E", "A"],
@@ -1405,13 +1642,12 @@ export function getSuggestedTaxiRoutes(
       ["H", "G"],
       ["E", "C"],
       ["E", "F"],
-      ["E", "F", "D", "A"],
-      ["D", "F", "C", "A"],
     ];
     for (const seq of fallbackSeqs) {
-      pushOption(`Gate ${gateId} via ${seq.map(taxiwayFullName).join(", ")}`, seq, dest);
+      const fbNodes = findRouteAlongTaxiways(airport, aircraftNodeId, dest, seq);
+      if (fbNodes) pushPathOption(prefix, seq, dest, fbNodes);
     }
-    return options;
+    return sortByClearancePriority(options);
   }
 
   // Departure routes to targetRunway entry hold-shorts
@@ -1421,6 +1657,7 @@ export function getSuggestedTaxiRoutes(
   const startTw = getAdjacentTaxiway(airport, aircraftNodeId);
   const startNode = airport.nodes[aircraftNodeId];
   const preferNorth = startNode?.isNorthSide !== false;
+  const prefix = `RWY ${targetRunway}`;
 
   // Gather hold-short nodes directly connected to runway entry nodes
   const candidateTargets: Array<{ hsId: string; conn: TaxiwayName; distStart: number }> = [];
@@ -1441,13 +1678,100 @@ export function getSuggestedTaxiRoutes(
   for (const { hsId, conn } of candidateTargets.slice(0, 6)) {
     if (startTw) {
       const twSeq: TaxiwayName[] = startTw === conn ? [conn] : [startTw, conn];
-      pushOption(`RWY ${targetRunway} via ${twSeq.map(taxiwayFullName).join(", ")}`, twSeq, hsId);
+      const simpleNodes = findRouteAlongTaxiways(airport, aircraftNodeId, hsId, twSeq);
+      pushPathOption(prefix, twSeq, hsId, simpleNodes);
     }
-    const shortest = findShortestTaxiwayPath(airport, aircraftNodeId, hsId);
-    if (shortest) {
-      const seq = extractTaxiwaySequence(airport, shortest);
-      pushOption(`RWY ${targetRunway} via ${seq.map(taxiwayFullName).join(", ")}`, seq, hsId);
+    collectDiversifiedPaths(prefix, hsId);
+  }
+
+  return sortByClearancePriority(options);
+}
+
+export interface RunwayExitOption {
+  exitRwyNodeId: string;
+  holdShortNodeId: string;
+  taxiway: TaxiwayName;
+  spokenName: string;
+  label: string;
+  distAheadNm: number;
+  nodeIds: string[];
+}
+
+/**
+ * Returns real forward runway exits (exit runway node + clear hold-short node + taxiway label)
+ * sorted in landing rollout order ahead of the aircraft's current position.
+ */
+export function getRunwayExitOptions(
+  airport: AirportLayout,
+  ac: { x: number; y: number; gateId?: string },
+  runwayId: RunwayId
+): RunwayExitOption[] {
+  const rwy = airport.runways[runwayId];
+  if (!rwy || rwy.exitNodeIds.length === 0) return [];
+
+  const along = alongRunwayNm(rwy, ac.x, ac.y);
+  const gateNode = ac.gateId ? airport.nodes[`GATE_${ac.gateId}`] : undefined;
+
+  const sortedExits = rwy.exitNodeIds
+    .map((eid) => {
+      const node = airport.nodes[eid];
+      return node ? { eid, node, eAlong: alongRunwayNm(rwy, node.x, node.y) } : null;
+    })
+    .filter((item): item is { eid: string; node: TaxiNode; eAlong: number } => Boolean(item))
+    .sort((a, b) => a.eAlong - b.eAlong);
+
+  if (sortedExits.length === 0) return [];
+
+  const forward = sortedExits.filter((c) => c.eAlong >= along - 0.02);
+  const candidates = forward.length > 0 ? forward : [sortedExits[sortedExits.length - 1]];
+
+  const options: RunwayExitOption[] = [];
+  const seenKey = new Set<string>();
+
+  for (const cand of candidates) {
+    const hsChoices: Array<{ hsNode: TaxiNode; edgeTaxiway: TaxiwayName; distToGate: number }> = [];
+    for (const e of airport.edges) {
+      if (e.from !== cand.eid) continue;
+      const targetNode = airport.nodes[e.to];
+      if (!targetNode || targetNode.kind !== "HOLD_SHORT") continue;
+      const distToGate = gateNode
+        ? Math.hypot(gateNode.x - targetNode.x, gateNode.y - targetNode.y)
+        : targetNode.isNorthSide
+        ? 0
+        : 1;
+      hsChoices.push({
+        hsNode: targetNode,
+        edgeTaxiway: e.taxiway,
+        distToGate,
+      });
     }
+    if (hsChoices.length === 0) continue;
+    hsChoices.sort((a, b) => a.distToGate - b.distToGate);
+    const best = hsChoices[0];
+
+    let tw = best.edgeTaxiway;
+    if (!tw || tw === "APRON" || tw === "LINK") {
+      const adjTw = getAdjacentTaxiway(airport, best.hsNode.id);
+      if (adjTw && adjTw !== "APRON") {
+        tw = adjTw;
+      }
+    }
+    const key = `${cand.eid}|${best.hsNode.id}`;
+    if (seenKey.has(key)) continue;
+    seenKey.add(key);
+
+    const distAheadNm = Math.max(0, cand.eAlong - along);
+    const spokenName = taxiwayFullName(tw);
+    const distTag = distAheadNm < 0.05 ? "NEXT EXIT" : `${distAheadNm.toFixed(2)} NM`;
+    options.push({
+      exitRwyNodeId: cand.eid,
+      holdShortNodeId: best.hsNode.id,
+      taxiway: tw,
+      spokenName,
+      label: `VIA ${tw} (${distTag})`,
+      distAheadNm,
+      nodeIds: [cand.eid, best.hsNode.id],
+    });
   }
 
   return options;

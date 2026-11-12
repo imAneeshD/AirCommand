@@ -36,16 +36,20 @@ import { radioAudio } from "../utils/radioAudio.ts";
 import {
   clearSavedAirportId,
   loadSavedAirportId,
+  loadSavedMinimizedPanels,
   loadSavedScenarioId,
   loadSavedSfxEnabled,
   loadSavedTheme,
   loadSavedVoiceEnabled,
+  saveMinimizedPanels,
   saveSelectedAirportId,
   saveSelectedScenarioId,
   saveSfxEnabled,
   saveTheme,
   saveVoiceEnabled,
+  type MinimizedPanelsState,
   type ThemeMode,
+  type WorkbenchPanelKey,
 } from "../utils/storage.ts";
 
 export type AppMode =
@@ -128,6 +132,9 @@ interface AtcStore {
   theme: ThemeMode;
   setTheme: (theme: ThemeMode) => void;
   toggleTheme: () => void;
+  minimizedPanels: MinimizedPanelsState;
+  togglePanelMinimized: (panel: WorkbenchPanelKey) => void;
+  setPanelMinimized: (panel: WorkbenchPanelKey, minimized: boolean) => void;
 
   // Phase 2 Real Airport & OSM Data
   selectedAirportRecord: AirportRecord | null;
@@ -187,6 +194,7 @@ interface AtcStore {
   // Phase 1 Core Simulation Actions (preserved)
   tick: (realDtSeconds: number) => void;
   selectAircraft: (id: string | null) => void;
+  focusAircraft: (id: string) => void;
   switchStation: (role: PlayerRoleMode) => void;
   toggleAutoAssist: () => void;
   loadScenario: (scenarioId: ScenarioId) => void;
@@ -266,11 +274,13 @@ function dispatchRadioMessagesAudio(
 function getOrCreatePlayerId(): string {
   if (typeof window === "undefined") return `ctrl_${Math.random().toString(36).slice(2, 8)}`;
   try {
-    const key = "aircommand_player_id_v1";
-    const existing = window.localStorage.getItem(key);
+    // Use sessionStorage so multiple tabs in the same browser represent distinct controllers,
+    // while refreshing the same tab preserves the playerId for seamless seat reconnection.
+    const key = "aircommand_tab_player_id_v1";
+    const existing = window.sessionStorage.getItem(key);
     if (existing) return existing;
     const generated = `ctrl_${Math.random().toString(36).slice(2, 10)}`;
-    window.localStorage.setItem(key, generated);
+    window.sessionStorage.setItem(key, generated);
     return generated;
   } catch {
     return `ctrl_${Math.random().toString(36).slice(2, 8)}`;
@@ -291,6 +301,7 @@ const initialSavedScenario = loadSavedScenarioId();
 const initialSavedTheme = loadSavedTheme();
 const initialSavedVoice = loadSavedVoiceEnabled();
 const initialSavedSfx = loadSavedSfxEnabled();
+const initialMinimizedPanels = loadSavedMinimizedPanels();
 radioAudio.voiceEnabled = initialSavedVoice;
 radioAudio.sfxEnabled = initialSavedSfx;
 const LEGACY_IDS = new Set(["KAST", "KMRD", "KVEL", "KSOL"]);
@@ -315,18 +326,38 @@ function ensureWsClient(set: (fn: (s: AtcStore) => Partial<AtcStore>) => void, g
         set(() => ({ multiplayerError: payload.error ?? "Failed to join room" }));
         return;
       }
+      const curState = get();
+      const joinedRole = payload.assignedRole ?? payload.role ?? curState.assignedRole;
+      const incomingSim = payload.sim;
+      if (incomingSim) {
+        if (!incomingSim.airport && curState.sim.airport.icao === payload.room?.airportIcao) {
+          incomingSim.airport = curState.sim.airport;
+        }
+        if (joinedRole) {
+          incomingSim.config.activePlayerStation = joinedRole;
+        }
+      }
+      const isNowActive = payload.room?.status === "ACTIVE";
       set((s) => ({
         multiplayerError: null,
         roomState: payload.room ?? s.roomState,
-        assignedRole: payload.role ?? s.assignedRole,
-        appMode: payload.room?.status === "ACTIVE" ? "SIMULATION" : "MULTIPLAYER_LOBBY",
+        assignedRole: joinedRole,
+        sim: incomingSim ?? s.sim,
+        tickVersion: incomingSim ? s.tickVersion + 1 : s.tickVersion,
+        appMode: isNowActive ? "SIMULATION" : "MULTIPLAYER_LOBBY",
+        camera:
+          isNowActive && (incomingSim ?? s.sim).airport
+            ? getPresetCameraForStation(joinedRole ?? "TOWER", (incomingSim ?? s.sim).airport)
+            : s.camera,
       }));
     },
     onActionResult: (payload) => {
-      if (!payload.ok && payload.reason) {
+      const errText = payload.error ?? payload.reason;
+      if (!payload.ok && errText) {
+        radioAudio.playRadioClick("ERROR");
         set((s) => ({
-          multiplayerError: payload.reason ?? null,
-          lastFeedback: { ok: false, text: payload.reason!, at: s.sim.time },
+          multiplayerError: errText,
+          lastFeedback: { ok: false, text: errText, at: s.sim.time },
         }));
       }
     },
@@ -342,6 +373,11 @@ function ensureWsClient(set: (fn: (s: AtcStore) => Partial<AtcStore>) => void, g
       const state = get();
       const prevSelected = state.sim.selectedAircraftId;
       const prevLastMsg = state.sim.radioLog[state.sim.radioLog.length - 1]?.id ?? null;
+
+      // Merge cached static airport layout when 5 Hz tick deltas omit unchanged geometry
+      if (!remoteSim.airport) {
+        remoteSim.airport = state.sim.airport;
+      }
 
       // Determine this client's role in the multiplayer room
       const myRole =
@@ -365,12 +401,21 @@ function ensureWsClient(set: (fn: (s: AtcStore) => Partial<AtcStore>) => void, g
       }
 
       const switchedToActive = room.status === "ACTIVE" && state.appMode === "MULTIPLAYER_LOBBY";
+      const sessionCompleted = room.status === "COMPLETED" && Boolean(room.report);
+      if (sessionCompleted) {
+        radioAudio.stopAllSpeech();
+      }
       set((s) => ({
         roomState: room,
         assignedRole: myRole ?? null,
         sim: remoteSim,
         tickVersion: s.tickVersion + 1,
-        appMode: switchedToActive ? "SIMULATION" : s.appMode,
+        postSessionReport: sessionCompleted ? room.report : s.postSessionReport,
+        appMode: sessionCompleted
+          ? "MULTIPLAYER_LOBBY"
+          : switchedToActive
+          ? "SIMULATION"
+          : s.appMode,
         camera: switchedToActive
           ? getPresetCameraForStation(myRole ?? "TOWER", remoteSim.airport)
           : s.camera,
@@ -378,10 +423,18 @@ function ensureWsClient(set: (fn: (s: AtcStore) => Partial<AtcStore>) => void, g
           remoteSim.radioLog[remoteSim.radioLog.length - 1]?.id ?? s.lastSpokenRadioId,
       }));
     },
-    onSessionEnded: (report) => {
+    onSessionEnded: (report, error) => {
+      if (error && !report) {
+        radioAudio.playRadioClick("ERROR");
+        set((s) => ({
+          multiplayerError: error,
+          lastFeedback: { ok: false, text: error, at: s.sim.time },
+        }));
+        return;
+      }
       radioAudio.stopAllSpeech();
       set(() => ({
-        postSessionReport: report,
+        postSessionReport: report ?? null,
         appMode: "MULTIPLAYER_LOBBY",
       }));
     },
@@ -521,6 +574,7 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
   sfxEnabled: initialSavedSfx,
   voiceEnabled: initialSavedVoice,
   theme: initialSavedTheme,
+  minimizedPanels: initialMinimizedPanels,
 
   selectedAirportRecord: null,
   selectedAirportGeoJson: null,
@@ -553,6 +607,19 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
     const next: ThemeMode = get().theme === "light" ? "dark" : "light";
     saveTheme(next);
     set({ theme: next });
+  },
+  togglePanelMinimized: (panel: WorkbenchPanelKey) => {
+    const prev = get().minimizedPanels;
+    const next: MinimizedPanelsState = { ...prev, [panel]: !prev[panel] };
+    saveMinimizedPanels(next);
+    set({ minimizedPanels: next });
+  },
+  setPanelMinimized: (panel: WorkbenchPanelKey, minimized: boolean) => {
+    const prev = get().minimizedPanels;
+    if (prev[panel] === minimized) return;
+    const next: MinimizedPanelsState = { ...prev, [panel]: minimized };
+    saveMinimizedPanels(next);
+    set({ minimizedPanels: next });
   },
 
   hydrateSavedRealAirport: async () => {
@@ -880,7 +947,7 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
   },
 
   claimMultiplayerRole: (role) => {
-    ensureWsClient(set, get).claimRole(role);
+    ensureWsClient(set, get).claimRole(role, get().playerName);
   },
 
   setMultiplayerReady: (ready) => {
@@ -942,6 +1009,23 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
     const { sim } = get();
     sim.selectedAircraftId = id;
     set((s) => ({ tickVersion: s.tickVersion + 1, hoverPreviewRoute: null }));
+  },
+
+  focusAircraft: (id) => {
+    const { sim, camera } = get();
+    sim.selectedAircraftId = id;
+    const ac = sim.aircraft[id];
+    set((s) => ({
+      tickVersion: s.tickVersion + 1,
+      hoverPreviewRoute: null,
+      camera: ac
+        ? {
+            ...camera,
+            centerX: ac.x,
+            centerY: ac.y,
+          }
+        : camera,
+    }));
   },
 
   switchStation: (role) => {

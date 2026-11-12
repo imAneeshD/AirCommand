@@ -209,7 +209,8 @@ export function canAircraftExecuteAction(
     case "VACATE_RUNWAY": {
       const runway = aircraft.assignedApproach ?? aircraft.targetRunway;
       const landClr = getValidClearanceForRunway(aircraft, "LAND", runway);
-      if (!landClr && !hasLightGun("STEADY_GREEN")) {
+      const vacateClr = getValidClearanceForRunway(aircraft, "VACATE_RUNWAY", runway);
+      if (!landClr && !vacateClr && !hasLightGun("STEADY_GREEN")) {
         return {
           allowed: false,
           reason: "Runway vacation requires prior landing clearance completion.",
@@ -218,7 +219,7 @@ export function canAircraftExecuteAction(
       return {
         allowed: true,
         reason: "Vacating runway following landing rollout.",
-        clearanceId: landClr?.id,
+        clearanceId: vacateClr?.id ?? landClr?.id,
       };
     }
 
@@ -229,6 +230,15 @@ export function canAircraftExecuteAction(
           allowed: true,
           reason: "ATC GO_AROUND clearance acknowledged.",
           clearanceId: gaClr.id,
+        };
+      }
+      if (
+        aircraft.lightGunAuthorized === "STEADY_RED" &&
+        simulationState.config.nordoMode === "LIGHT_GUN_SIGNALS"
+      ) {
+        return {
+          allowed: true,
+          reason: "Tower Light Gun STEADY RED — give way and continue circling.",
         };
       }
       if (aircraft.minimumsGoAroundTriggered) {
@@ -474,6 +484,8 @@ export function canAircraftMove(
       return (
         canAircraftExecuteAction(aircraft, "CHANGE_ALTITUDE", simulation).allowed ||
         canAircraftExecuteAction(aircraft, "CHANGE_HEADING", simulation).allowed ||
+        (aircraft.lightGunAuthorized === "STEADY_RED" &&
+          simulation.config.nordoMode === "LIGHT_GUN_SIGNALS") ||
         aircraft.operationMode === "EMERGENCY_OPERATION"
       );
 

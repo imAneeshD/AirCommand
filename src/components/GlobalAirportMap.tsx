@@ -80,6 +80,7 @@ const LEGACY_TRAINING_AIRFIELDS: Array<{ id: AirportId; label: string; desc: str
 ];
 
 const SCENARIO_CHOICES: Array<{ id: ScenarioId; label: string }> = [
+  { id: "LOW_TRAFFIC", label: "Low Traffic (Very Few Planes)" },
   { id: "NORMAL_OPS", label: "Normal Ops (Balanced)" },
   { id: "LIGHT", label: "Light Traffic" },
   { id: "MEDIUM", label: "Medium Traffic" },
@@ -634,7 +635,7 @@ export const GlobalAirportMap: React.FC = () => {
             <div className="flex items-center gap-2">
               <span className="font-bold tracking-wider text-sm">AIRCOMMAND</span>
               <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] text-[var(--atc-cyan)]">
-                PHASE 2 · GLOBAL ATC
+                GLOBAL ATC
               </span>
             </div>
             <p className="text-[11px] text-[var(--atc-muted)] truncate">
@@ -672,6 +673,11 @@ export const GlobalAirportMap: React.FC = () => {
               type="text"
               value={joinCode}
               onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && joinCode.trim() && isOnline) {
+                  joinMultiplayerRoom(joinCode);
+                }
+              }}
               placeholder="ROOM CODE"
               maxLength={8}
               className="w-20 bg-transparent text-xs font-mono uppercase focus:outline-none"
@@ -1136,12 +1142,19 @@ export const GlobalAirportMap: React.FC = () => {
                 <button
                   onClick={async () => {
                     setConvertingLive(true);
-                    await launchSimulationFromLiveTraffic(
+                    const res = await launchSimulationFromLiveTraffic(
                       selectedAirportRecord,
                       undefined,
                       selectedStartRole
                     );
                     setConvertingLive(false);
+                    if (!res.ok) {
+                      setStatusNote(
+                        `Live flight conversion failed for ${selectedAirportRecord.icao}: ${
+                          res.error ?? "Backend unavailable."
+                        }`
+                      );
+                    }
                   }}
                   disabled={!isOnline || airportDetailLoading || convertingLive}
                   className="w-full py-2.5 px-3 rounded-lg border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] font-bold text-xs flex items-center justify-center gap-2 hover:brightness-105 disabled:opacity-45"

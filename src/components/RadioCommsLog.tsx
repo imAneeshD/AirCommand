@@ -54,7 +54,9 @@ export const RadioCommsLog: React.FC = () => {
   }
 
   const [activeTab, setActiveTab] = useState<BottomTab>("LOGS");
-  const [collapsed, setCollapsed] = useState(false);
+  const collapsed = useAtcStore((s) => s.minimizedPanels.bottom);
+  const togglePanelMinimized = useAtcStore((s) => s.togglePanelMinimized);
+  const setPanelMinimized = useAtcStore((s) => s.setPanelMinimized);
   const [chatText, setChatText] = useState("");
   const [filter, setFilter] = useState<LogFilter>(
     sim.config.activePlayerStation === "ALL" ? "ALL" : "STATION"
@@ -88,7 +90,7 @@ export const RadioCommsLog: React.FC = () => {
 
   const switchTab = (tab: BottomTab) => {
     setActiveTab(tab);
-    if (collapsed) setCollapsed(false);
+    if (collapsed) setPanelMinimized("bottom", false);
   };
 
   return (
@@ -204,8 +206,9 @@ export const RadioCommsLog: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => setCollapsed((v) => !v)}
-            title={collapsed ? "Expand Bottom Panel" : "Collapse Bottom Panel"}
+            onClick={() => togglePanelMinimized("bottom")}
+            aria-label={collapsed ? "Expand Bottom Panel" : "Minimize Bottom Panel"}
+            title={collapsed ? "Expand Bottom Panel" : "Minimize Bottom Panel"}
             className="p-1 rounded text-[var(--atc-muted)] hover:text-[var(--atc-text)] hover:bg-[var(--atc-surface-alt)]"
           >
             <ChevronDown

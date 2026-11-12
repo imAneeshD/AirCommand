@@ -6,6 +6,7 @@ import {
   spellDigitsIcao,
   spellLettersIcao,
 } from "./natoPhonetics.ts";
+import type { ActiveRadioTransmission } from "./radioSignals.ts";
 
 function formatAltitudeWord(altStr: string): string {
   const num = Number(altStr);
@@ -168,20 +169,54 @@ export function scoreSpeechVoice(v: SpeechSynthesisVoice): RankedVoice {
 
 interface QueuedSpeechItem {
   text: string;
+  rawText: string;
   role: "CONTROLLER" | "PILOT";
   speakerKey: string;
   priority: boolean;
   forceLocal?: boolean;
 }
 
+function makeSoftClipCurve(drive = 2.4): Float32Array<ArrayBuffer> {
+  const n = 512;
+  const buf = new ArrayBuffer(n * 4);
+  const curve = new Float32Array(buf);
+  for (let i = 0; i < n; i++) {
+    const x = (i * 2) / (n - 1) - 1;
+    curve[i] = Math.tanh(x * drive) / Math.tanh(drive);
+  }
+  return curve;
+}
+
+export function computePilotSpeechProfile(
+  speakerKey: string,
+  isNeuralOrCloud: boolean,
+  baseRate = 1.15
+): { pitch: number; rate: number } {
+  let hash = 0;
+  for (let i = 0; i < speakerKey.length; i++) {
+    hash = (hash * 31 + speakerKey.charCodeAt(i)) >>> 0;
+  }
+  // Subtle natural pilot-to-pilot variation without robotic extremes on SAPI voices
+  const norm = ((hash % 100) / 99) * 2 - 1; // [-1, 1]
+  const pitch = isNeuralOrCloud
+    ? Number((1.0 + norm * 0.12).toFixed(2)) // 0.88 .. 1.12
+    : Number((1.0 + norm * 0.04).toFixed(2)); // 0.96 .. 1.04
+  const rateOffset = (((hash >>> 8) % 13) / 100); // 0.00 .. 0.12
+  const rate = Number(Math.max(1.0, Math.min(1.35, baseRate + rateOffset)).toFixed(2));
+  return { pitch, rate };
+}
+
 class RadioAudioEngine {
   private ctx: AudioContext | null = null;
+  private vhfBusInput: AudioNode | null = null;
   private noiseBuffer: AudioBuffer | null = null;
   private carrierNodes: { src: AudioBufferSourceNode; gain: GainNode } | null = null;
 
   public sfxEnabled = true;
   public voiceEnabled = true;
   public radioStaticLevel = 0.65; // 0..1
+  public rogerBeepEnabled = true;
+  public pilotRateBase = 1.15;
   public tunedStationOnly = true;
 
   public preferredControllerVoiceURI = "AUTO";
@@ -191,6 +226,7 @@ class RadioAudioEngine {
   private queue: QueuedSpeechItem[] = [];
   private speaking = false;
   private activeUtterance: SpeechSynthesisUtterance | null = null;
+  private activeTransmission: ActiveRadioTransmission | null = null;
   private speechToken = 0;
   private safetyTimer: number | null = null;
   private listeners = new Set<() => void>();
@@ -234,6 +270,10 @@ class RadioAudioEngine {
       this.refreshVoices();
     }
     return this.rankedVoices;
+  }
+
+  public getActiveTransmission(): ActiveRadioTransmission | null {
+    return this.activeTransmission;
   }
 
   public getEffectiveControllerVoice(): RankedVoice | null {
@@ -301,7 +341,45 @@ class RadioAudioEngine {
       }
       this.noiseBuffer = buf;
     }
+    if (!this.vhfBusInput && this.ctx) {
+      try {
+        // Real aviation VHF filter bus: 300 Hz HP -> 1500 Hz Bandpass -> Soft-Clipper -> Compressor
+        const input = this.ctx.createGain();
+        const hp = this.ctx.createBiquadFilter();
+        hp.type = "highpass";
+        hp.frequency.setValueAtTime(300, this.ctx.currentTime);
+
+        const bp = this.ctx.createBiquadFilter();
+        bp.type = "bandpass";
+        bp.frequency.setValueAtTime(1500, this.ctx.currentTime);
+        bp.Q.setValueAtTime(1.65, this.ctx.currentTime);
+
+        const shaper = this.ctx.createWaveShaper();
+        shaper.curve = makeSoftClipCurve(2.2);
+        shaper.oversample = "2x";
+
+        const comp = this.ctx.createDynamicsCompressor();
+        comp.threshold.setValueAtTime(-24, this.ctx.currentTime);
+        comp.knee.setValueAtTime(10, this.ctx.currentTime);
+        comp.ratio.setValueAtTime(6, this.ctx.currentTime);
+        comp.attack.setValueAtTime(0.003, this.ctx.currentTime);
+        comp.release.setValueAtTime(0.12, this.ctx.currentTime);
+
+        input.connect(hp);
+        hp.connect(bp);
+        bp.connect(shaper);
+        shaper.connect(comp);
+        comp.connect(this.ctx.destination);
+        this.vhfBusInput = input;
+      } catch {
+        this.vhfBusInput = this.ctx.destination;
+      }
+    }
     return this.ctx;
+  }
+
+  private getOutputNode(ctx: AudioContext): AudioNode {
+    return this.vhfBusInput ?? ctx.destination;
   }
 
   private playVhfBurst(durationSec: number, gainPeak: number, freqHz: number, q = 1.6): void {
@@ -326,7 +404,7 @@ class RadioAudioEngine {
 
       src.connect(bp);
       bp.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(this.getOutputNode(ctx));
       src.start(now, Math.random() * 1.2);
       src.stop(now + durationSec + 0.01);
     } catch {
@@ -334,7 +412,29 @@ class RadioAudioEngine {
     }
   }
 
-  private startCarrierStatic(): void {
+  private playRogerBeep(): void {
+    if (!this.sfxEnabled || !this.rogerBeepEnabled) return;
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+    try {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(1320, now);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.linearRampToValueAtTime(0.032, now + 0.004);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.042);
+      osc.connect(gain);
+      gain.connect(this.getOutputNode(ctx));
+      osc.start(now);
+      osc.stop(now + 0.048);
+    } catch {
+      // Ignore
+    }
+  }
+
+  public startCarrierStatic(): void {
     this.stopCarrierStatic();
     if (!this.sfxEnabled || this.radioStaticLevel <= 0.02) return;
     const ctx = this.ensureContext();
@@ -347,22 +447,22 @@ class RadioAudioEngine {
 
       const hp = ctx.createBiquadFilter();
       hp.type = "highpass";
-      hp.frequency.setValueAtTime(420, now);
+      hp.frequency.setValueAtTime(340, now);
 
       const bp = ctx.createBiquadFilter();
       bp.type = "bandpass";
       bp.frequency.setValueAtTime(1450, now);
-      bp.Q.setValueAtTime(0.95, now);
+      bp.Q.setValueAtTime(1.5, now);
 
       const gain = ctx.createGain();
-      const level = 0.024 * this.radioStaticLevel;
+      const level = 0.032 * this.radioStaticLevel;
       gain.gain.setValueAtTime(0.0001, now);
-      gain.gain.linearRampToValueAtTime(level, now + 0.03);
+      gain.gain.linearRampToValueAtTime(level, now + 0.025);
 
       src.connect(hp);
       hp.connect(bp);
       bp.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(this.getOutputNode(ctx));
       src.start(now, Math.random());
 
       this.carrierNodes = { src, gain };
@@ -371,7 +471,7 @@ class RadioAudioEngine {
     }
   }
 
-  private stopCarrierStatic(): void {
+  public stopCarrierStatic(): void {
     if (!this.carrierNodes) return;
     try {
       const { src, gain } = this.carrierNodes;
@@ -458,7 +558,7 @@ class RadioAudioEngine {
         this.queue.shift();
       }
     }
-    this.queue.push({ text: formatted, role, speakerKey, priority });
+    this.queue.push({ text: formatted, rawText: text, role, speakerKey, priority });
     this.drainQueue();
   }
 
@@ -467,6 +567,7 @@ class RadioAudioEngine {
     this.queue = [];
     this.speaking = false;
     this.activeUtterance = null;
+    this.activeTransmission = null;
     this.stopCarrierStatic();
     if (this.safetyTimer !== null && typeof window !== "undefined") {
       window.clearTimeout(this.safetyTimer);
@@ -475,6 +576,7 @@ class RadioAudioEngine {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
+    this.notify();
   }
 
   private drainQueue(): void {
@@ -484,6 +586,13 @@ class RadioAudioEngine {
     const item = this.queue.shift()!;
     this.speaking = true;
     const myToken = ++this.speechToken;
+    this.activeTransmission = {
+      speakerKey: item.speakerKey,
+      role: item.role,
+      rawText: item.rawText,
+      startedAtMs: Date.now(),
+    };
+    this.notify();
 
     try {
       const utter = new SpeechSynthesisUtterance(item.text);
@@ -500,14 +609,20 @@ class RadioAudioEngine {
         utter.lang = picked.voice.lang;
       }
 
-      // Avoid unnatural pitch bending on local SAPI voices (keep neutral 1.0!)
-      const isNeuralOrCloud = picked && picked.quality !== "LOCAL";
-      utter.rate = item.role === "CONTROLLER" ? 1.04 : 1.07;
-      utter.pitch = isNeuralOrCloud
-        ? item.role === "CONTROLLER"
-          ? 0.97
-          : 1.02
-        : 1.0;
+      // Use distinct pilot cadence (brisk real-world ATC/cockpit rate + deterministic per-plane pitch)
+      const isNeuralOrCloud = Boolean(picked && picked.quality !== "LOCAL");
+      if (item.role === "CONTROLLER") {
+        utter.rate = Math.max(1.0, Math.min(1.3, this.pilotRateBase - 0.05));
+        utter.pitch = isNeuralOrCloud ? 0.96 : 1.0;
+      } else {
+        const prof = computePilotSpeechProfile(
+          item.speakerKey,
+          isNeuralOrCloud,
+          this.pilotRateBase
+        );
+        utter.rate = prof.rate;
+        utter.pitch = prof.pitch;
+      }
       utter.volume = 0.88;
 
       const finish = (playSquelch: boolean) => {
@@ -517,12 +632,17 @@ class RadioAudioEngine {
           this.safetyTimer = null;
         }
         this.activeUtterance = null;
+        this.activeTransmission = null;
         this.stopCarrierStatic();
-        if (playSquelch && this.sfxEnabled && this.radioStaticLevel > 0.05) {
-          // Authentic VHF squelch tail at end of transmission
-          this.playVhfBurst(0.075, 0.055 * this.radioStaticLevel, 1750, 1.4);
+        if (playSquelch && this.sfxEnabled) {
+          this.playRogerBeep();
+          if (this.radioStaticLevel > 0.05) {
+            // Authentic VHF squelch tail at end of transmission
+            this.playVhfBurst(0.075, 0.055 * this.radioStaticLevel, 1750, 1.4);
+          }
         }
         this.speaking = false;
+        this.notify();
         window.setTimeout(() => this.drainQueue(), 90);
       };
 
@@ -548,8 +668,10 @@ class RadioAudioEngine {
       window.speechSynthesis.speak(utter);
     } catch {
       this.activeUtterance = null;
+      this.activeTransmission = null;
       this.stopCarrierStatic();
       this.speaking = false;
+      this.notify();
     }
   }
 }

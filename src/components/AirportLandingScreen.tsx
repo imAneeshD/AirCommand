@@ -18,6 +18,7 @@ import type { AirportId, PlayerRoleMode, ScenarioId } from "../types/atc.ts";
 import { Accordion } from "./Accordion.tsx";
 
 const SCENARIOS: Array<{ id: ScenarioId; label: string }> = [
+  { id: "LOW_TRAFFIC", label: "Low Traffic (Very Few Planes)" },
   { id: "NORMAL_OPS", label: "Normal Operations" },
   { id: "CROSSINGS_AND_READBACK", label: "Runway Crossings & Readbacks" },
   { id: "EMERGENCY_AND_NORDO", label: "Emergency & NORDO 7600" },

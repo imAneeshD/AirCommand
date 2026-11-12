@@ -3,18 +3,25 @@ import { BookOpen, ChevronDown, Mic, SlidersHorizontal, Volume2, VolumeX } from 
 import { useAtcStore } from "../store/atcStore.ts";
 import { ICAO_PHONETIC_TABLE } from "../utils/natoPhonetics.ts";
 import { radioAudio, type RankedVoice } from "../utils/radioAudio.ts";
+import { parseAtcVoiceCommand } from "../utils/voiceCommandParser.ts";
 import { Accordion } from "./Accordion.tsx";
 
 export const RadioVoiceMenu: React.FC = () => {
   const sim = useAtcStore((s) => s.sim);
   const voiceEnabled = useAtcStore((s) => s.voiceEnabled);
   const toggleVoice = useAtcStore((s) => s.toggleVoice);
+  const selectAircraft = useAtcStore((s) => s.selectAircraft);
+  const issueClearance = useAtcStore((s) => s.issueClearance);
 
   const [open, setOpen] = useState(false);
   const [voices, setVoices] = useState<RankedVoice[]>(() => radioAudio.getAvailableVoices());
   const [ctrlVoice, setCtrlVoice] = useState(radioAudio.preferredControllerVoiceURI);
   const [pilotVoice, setPilotVoice] = useState(radioAudio.preferredPilotVoiceURI);
   const [staticLevel, setStaticLevel] = useState(radioAudio.radioStaticLevel);
+  const [pilotRate, setPilotRate] = useState(radioAudio.pilotRateBase);
+  const [rogerBeep, setRogerBeep] = useState(radioAudio.rogerBeepEnabled);
+  const [phraseInput, setPhraseInput] = useState("");
+  const [phraseStatus, setPhraseStatus] = useState<string | null>(null);
 
   useEffect(() => {
     const unsub = radioAudio.subscribe(() => {
@@ -167,6 +174,83 @@ export const RadioVoiceMenu: React.FC = () => {
               className="w-full accent-amber-500"
             />
           </div>
+
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-[10px] text-[var(--atc-muted)]">
+              <span>PILOT CADENCE (RATE)</span>
+              <span className="text-[var(--atc-text)] font-bold">
+                {pilotRate.toFixed(2)}x
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0.95}
+              max={1.3}
+              step={0.05}
+              value={pilotRate}
+              onChange={(e) => {
+                const val = Number(e.target.value);
+                radioAudio.pilotRateBase = val;
+                setPilotRate(val);
+              }}
+              className="w-full accent-cyan-500"
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              const next = !rogerBeep;
+              radioAudio.rogerBeepEnabled = next;
+              setRogerBeep(next);
+            }}
+            className="w-full px-2.5 py-1.5 rounded border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] text-[10px] flex items-center justify-between"
+          >
+            <span className="text-[var(--atc-muted)]">VHF ROGER BEEP & SQUELCH TAIL</span>
+            <span className={`font-bold ${rogerBeep ? "text-[var(--atc-emerald)]" : "text-[var(--atc-muted)]"}`}>
+              {rogerBeep ? "ON" : "OFF"}
+            </span>
+          </button>
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const parsed = parseAtcVoiceCommand(phraseInput, useAtcStore.getState().sim);
+              if (!parsed.ok) {
+                setPhraseStatus(parsed.reason);
+                return;
+              }
+              selectAircraft(parsed.aircraftId);
+              issueClearance(parsed.command);
+              setPhraseStatus(`Sent: ${parsed.summary}`);
+              setPhraseInput("");
+            }}
+            className="space-y-1 pt-1 border-t border-[var(--atc-border)]"
+          >
+            <label className="text-[10px] text-[var(--atc-muted)] block">
+              VOICE / PHRASE COMMAND (HOLD [V] FOR MIC PTT)
+            </label>
+            <div className="flex gap-1">
+              <input
+                type="text"
+                value={phraseInput}
+                onChange={(e) => setPhraseInput(e.target.value)}
+                placeholder='e.g. "Delta 437 climb 5000"'
+                className="flex-1 min-w-0 bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] rounded px-2 py-1 text-[11px] text-[var(--atc-text)] placeholder:text-[var(--atc-muted)]"
+              />
+              <button
+                type="submit"
+                className="px-2 py-1 rounded bg-[var(--atc-cyan-bg)] border border-[var(--atc-cyan-border)] text-[var(--atc-cyan)] font-bold text-[10px]"
+              >
+                TX
+              </button>
+            </div>
+            {phraseStatus && (
+              <div className="text-[10px] text-[var(--atc-text-secondary)] truncate">
+                {phraseStatus}
+              </div>
+            )}
+          </form>
 
           <div className="px-2.5 py-1.5 rounded bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] text-[10px] flex items-center justify-between">
             <span className="text-[var(--atc-muted)]">ACTIVE FREQ:</span>

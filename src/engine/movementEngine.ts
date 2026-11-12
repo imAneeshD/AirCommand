@@ -146,6 +146,15 @@ export function updateAircraftMovement(
       }
 
       case "HOLD_POSITION": {
+        // Safety invariant: never freeze or snap an airborne aircraft to ground elevation
+        if (ac.altitude > elev + 50) {
+          ac.state = "GO_AROUND";
+          ac.stateEnteredAt = state.time;
+          ac.assignedAltitude = ac.assignedAltitude ?? Math.round(elev / 500) * 500 + 2200;
+          ac.assignedSpeed = Math.max(190, ac.speed);
+          integrateAirborneFlight(state, ac, dt, elev);
+          break;
+        }
         ac.altitude = elev;
         ac.verticalSpeed = 0;
         // Smooth physical braking deceleration to 0 kts (Section 29)
@@ -390,23 +399,32 @@ export function updateAircraftMovement(
         const along = alongRunwayNm(rwy, ac.x, ac.y);
         const cross = crossTrackRunwayNm(rwy, ac.x, ac.y);
         let targetExitAlong = rwy.lengthNm - 0.05;
-        const forwardExits = rwy.exitNodeIds
-          .map((eid) => state.airport.nodes[eid])
-          .filter((n): n is NonNullable<typeof n> => Boolean(n))
-          .map((n) => alongRunwayNm(rwy, n.x, n.y))
-          .filter((ea) => ea >= along + 0.02)
-          .sort((a, b) => a - b);
-        if (forwardExits.length > 0) {
-          targetExitAlong = forwardExits[0];
+        const assignedNode = ac.vacateAssignedRwyNodeId
+          ? state.airport.nodes[ac.vacateAssignedRwyNodeId]
+          : undefined;
+        if (assignedNode) {
+          targetExitAlong = alongRunwayNm(rwy, assignedNode.x, assignedNode.y);
+        } else {
+          const forwardExits = rwy.exitNodeIds
+            .map((eid) => state.airport.nodes[eid])
+            .filter((n): n is NonNullable<typeof n> => Boolean(n))
+            .map((n) => alongRunwayNm(rwy, n.x, n.y))
+            .filter((ea) => ea >= along + 0.02)
+            .sort((a, b) => a - b);
+          if (forwardExits.length > 0) {
+            targetExitAlong = forwardExits[0];
+          }
         }
 
         const distToExit = Math.max(0, targetExitAlong - along);
-        const targetRolloutSpd = distToExit < 0.09 ? 24 : 62;
+        const expedite = Boolean(ac.expediteVacate);
+        const targetRolloutSpd =
+          distToExit < 0.09 ? (expedite ? 32 : 24) : expedite ? 74 : 62;
         if (ac.speed > targetRolloutSpd) {
-          const brakeRate = ac.speed > 55 ? 15 : 11;
+          const brakeRate = ac.speed > 55 ? 16 : 11;
           ac.speed = Math.max(targetRolloutSpd, ac.speed - brakeRate * dt);
-        } else {
-          ac.speed = targetRolloutSpd;
+        } else if (ac.speed < targetRolloutSpd) {
+          ac.speed = Math.min(targetRolloutSpd, ac.speed + 10 * dt);
         }
         const step = (ac.speed / 3600) * dt;
         const nextAlong = Math.min(rwy.lengthNm - 0.04, along + step);
@@ -426,7 +444,7 @@ export function updateAircraftMovement(
           break;
         }
         const exitNode = state.airport.nodes[exitId];
-        ac.speed = 20;
+        ac.speed = ac.expediteVacate ? 30 : 20;
         moveTowardPoint(ac, exitNode.x, exitNode.y, ac.speed, dt);
         break;
       }
@@ -548,8 +566,13 @@ function integrateAirborneFlight(
     }
   } else {
     const targetAlt =
-      ac.assignedAltitude !== null && canAircraftExecuteAction(ac, "CHANGE_ALTITUDE", state).allowed
+      ac.assignedAltitude !== null &&
+      (ac.state === "GO_AROUND" ||
+        ac.state === "MISSED_APPROACH" ||
+        canAircraftExecuteAction(ac, "CHANGE_ALTITUDE", state).allowed)
         ? ac.assignedAltitude
+        : ac.state === "GO_AROUND" || ac.state === "MISSED_APPROACH"
+        ? Math.round(elev / 500) * 500 + 2200
         : ac.state === "CLIMB"
         ? Math.round(elev / 500) * 500 + 3000
         : null;
@@ -584,6 +607,8 @@ function integrateAirborneFlight(
     canAircraftExecuteAction(ac, "CHANGE_SPEED", state).allowed
   ) {
     desiredSpeed = ac.assignedSpeed;
+  } else if (ac.state === "GO_AROUND" || ac.state === "MISSED_APPROACH") {
+    desiredSpeed = Math.max(190, ac.assignedSpeed ?? 190);
   } else if (ac.state === "CLIMB" || ac.state === "CRUISE_OUTBOUND") {
     // Natural jet climb acceleration schedule when no explicit speed restriction assigned
     desiredSpeed = agl < 1200 ? 178 : agl < 3000 ? 215 : 250;

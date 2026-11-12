@@ -130,6 +130,10 @@ export function supersedeClearancesForNewInstruction(
     case "LAND":
       supersedeTypes.add("LAND");
       break;
+    case "VACATE_RUNWAY":
+      supersedeTypes.add("VACATE_RUNWAY");
+      supersedeTypes.add("HOLD_POSITION");
+      break;
     case "GO_AROUND":
       supersedeTypes.add("LAND");
       supersedeTypes.add("APPROACH");

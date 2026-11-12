@@ -1,6 +1,7 @@
 import {
   alongRunwayNm,
   crossTrackRunwayNm,
+  getRunwayExitOptions,
   getSuggestedTaxiRoutes,
   headingDiffDeg,
 } from "../data/asteriaAirport.ts";
@@ -145,8 +146,17 @@ function runAutonomousGround(state: SimulationState): void {
       } else {
         const nodeId = ac.currentNodeId ?? (ac.gateId ? `GATE_${ac.gateId}` : undefined);
         if (nodeId) {
-          const routes = getSuggestedTaxiRoutes(state.airport, nodeId, ac.targetRunway, ac.gateId, false);
-          if (routes.length > 0) {
+          const routes = getSuggestedTaxiRoutes(
+            state.airport,
+            nodeId,
+            ac.targetRunway,
+            ac.gateId,
+            false,
+            state,
+            ac.id
+          );
+          const chosen = routes.find((r) => r.conflictLevel !== "BLOCKED");
+          if (chosen) {
             submitClearanceDecision(
               state,
               {
@@ -155,8 +165,9 @@ function runAutonomousGround(state: SimulationState): void {
                 type: "TAXI",
                 parameters: {
                   runway: ac.targetRunway,
-                  routeTaxiways: routes[0].taxiways,
-                  destinationNodeId: routes[0].destinationNodeId,
+                  routeTaxiways: chosen.taxiways,
+                  destinationNodeId: chosen.destinationNodeId,
+                  routeNodeIds: chosen.nodeIds,
                 },
               },
               "AUTONOMOUS"
@@ -170,8 +181,17 @@ function runAutonomousGround(state: SimulationState): void {
     if (ac.state === "PUSHBACK_COMPLETE") {
       const nodeId = ac.currentNodeId ?? (ac.gateId ? `PB_${ac.gateId}` : undefined);
       if (nodeId) {
-        const routes = getSuggestedTaxiRoutes(state.airport, nodeId, ac.targetRunway, ac.gateId, false);
-        if (routes.length > 0) {
+        const routes = getSuggestedTaxiRoutes(
+          state.airport,
+          nodeId,
+          ac.targetRunway,
+          ac.gateId,
+          false,
+          state,
+          ac.id
+        );
+        const chosen = routes.find((r) => r.conflictLevel !== "BLOCKED") ?? routes[0];
+        if (chosen && chosen.conflictLevel !== "BLOCKED") {
           submitClearanceDecision(
             state,
             {
@@ -180,8 +200,9 @@ function runAutonomousGround(state: SimulationState): void {
               type: "TAXI",
               parameters: {
                 runway: ac.targetRunway,
-                routeTaxiways: routes[0].taxiways,
-                destinationNodeId: routes[0].destinationNodeId,
+                routeTaxiways: chosen.taxiways,
+                destinationNodeId: chosen.destinationNodeId,
+                routeNodeIds: chosen.nodeIds,
               },
             },
             "AUTONOMOUS"
@@ -226,9 +247,12 @@ function runAutonomousGround(state: SimulationState): void {
           ac.currentNodeId,
           ac.targetRunway,
           ac.gateId,
-          true
+          true,
+          state,
+          ac.id
         );
-        if (routes.length > 0) {
+        const chosen = routes.find((r) => r.conflictLevel !== "BLOCKED");
+        if (chosen) {
           submitClearanceDecision(
             state,
             {
@@ -237,8 +261,9 @@ function runAutonomousGround(state: SimulationState): void {
               type: "TAXI",
               parameters: {
                 runway: ac.targetRunway,
-                routeTaxiways: routes[0].taxiways,
-                destinationNodeId: routes[0].destinationNodeId,
+                routeTaxiways: chosen.taxiways,
+                destinationNodeId: chosen.destinationNodeId,
+                routeNodeIds: chosen.nodeIds,
               },
             },
             "AUTONOMOUS"
@@ -294,6 +319,48 @@ function runAutonomousTower(state: SimulationState): void {
           },
           "AUTONOMOUS"
         );
+      }
+      continue;
+    }
+
+    if (
+      ac.flightKind === "ARRIVAL" &&
+      (ac.state === "ROLLOUT" || ac.state === "VACATING_RUNWAY") &&
+      !ac.expediteVacate &&
+      !ac.vacateAssignedHoldShortId
+    ) {
+      const rwy = ac.assignedApproach ?? ac.targetRunway;
+      const depWaiting = state.aircraftOrder.some((oid) => {
+        const o = state.aircraft[oid];
+        return (
+          o &&
+          o.id !== ac.id &&
+          o.flightKind === "DEPARTURE" &&
+          o.targetRunway === rwy &&
+          o.state === "HOLDING_SHORT" &&
+          o.holdingShortReason === "DEPARTURE_RUNWAY"
+        );
+      });
+      if (depWaiting || isFinalApproachCrowded(state, rwy, 4.0, ac.id)) {
+        const exits = getRunwayExitOptions(state.airport, ac, rwy);
+        if (exits.length > 0) {
+          submitClearanceDecision(
+            state,
+            {
+              aircraftId: ac.id,
+              controller: "TOWER",
+              type: "VACATE_RUNWAY",
+              parameters: {
+                runway: rwy,
+                exitRwyNodeId: exits[0].exitRwyNodeId,
+                holdShortNodeId: exits[0].holdShortNodeId,
+                taxiway: exits[0].taxiway,
+                expedite: true,
+              },
+            },
+            "AUTONOMOUS"
+          );
+        }
       }
       continue;
     }

@@ -1,4 +1,6 @@
+import fs from "node:fs";
 import http from "node:http";
+import path from "node:path";
 import { WebSocketServer } from "ws";
 import type { AirportDataQuality, AirportGeoJsonCollection, ClearanceCommandInput, ControllerRole, DifficultyLevel, ScenarioId } from "../src/types/atc.ts";
 import { DatabaseService } from "./db/DatabaseService.ts";
@@ -40,6 +42,110 @@ async function readJsonBody(req: http.IncomingMessage): Promise<Record<string, u
   const text = Buffer.concat(chunks).toString("utf8").trim();
   if (!text) return {};
   return JSON.parse(text) as Record<string, unknown>;
+}
+
+const DIST_DIR = path.resolve("dist");
+const MIME_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".mjs": "application/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".geojson": "application/geo+json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".wasm": "application/wasm",
+  ".txt": "text/plain; charset=utf-8",
+};
+
+function sendStaticFile(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  filePath: string,
+  sizeBytes: number
+): void {
+  const ext = path.extname(filePath).toLowerCase();
+  const mime = MIME_TYPES[ext] ?? "application/octet-stream";
+  const isHtml = ext === ".html";
+  const isHashedAsset = filePath.includes(`${path.sep}assets${path.sep}`);
+  const cacheControl = isHtml
+    ? "no-cache"
+    : isHashedAsset
+    ? "public, max-age=31536000, immutable"
+    : "public, max-age=3600";
+
+  res.writeHead(200, {
+    "Content-Type": mime,
+    "Content-Length": String(sizeBytes),
+    "Cache-Control": cacheControl,
+  });
+  if (req.method === "HEAD") {
+    res.end();
+    return;
+  }
+  fs.createReadStream(filePath).pipe(res);
+}
+
+function tryServeStatic(req: http.IncomingMessage, res: http.ServerResponse, pathname: string): boolean {
+  if (req.method !== "GET" && req.method !== "HEAD") return false;
+  if (pathname === "/api" || pathname.startsWith("/api/") || pathname === "/ws") return false;
+  if (!fs.existsSync(DIST_DIR)) return false;
+
+  let decodedPath: string;
+  try {
+    decodedPath = decodeURIComponent(pathname);
+  } catch {
+    res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Bad Request");
+    return true;
+  }
+
+  const relPath = decodedPath.replace(/^\/+/, "");
+  const candidate = path.resolve(DIST_DIR, relPath || "index.html");
+  if (candidate !== DIST_DIR && !candidate.startsWith(`${DIST_DIR}${path.sep}`)) {
+    res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Forbidden");
+    return true;
+  }
+
+  let resolved = candidate;
+  try {
+    const st = fs.statSync(resolved);
+    if (st.isDirectory()) {
+      resolved = path.join(resolved, "index.html");
+    }
+    const finalStat = fs.statSync(resolved);
+    if (finalStat.isFile()) {
+      sendStaticFile(req, res, resolved, finalStat.size);
+      return true;
+    }
+  } catch {
+    // Not a direct static file
+  }
+
+  // Never fall back to index.html for missing asset/GeoJSON/data files
+  const baseName = path.posix.basename(decodedPath);
+  if (baseName.includes(".") || decodedPath.startsWith("/assets/") || decodedPath.startsWith("/data/")) {
+    return false;
+  }
+
+  const indexPath = path.join(DIST_DIR, "index.html");
+  try {
+    const idxStat = fs.statSync(indexPath);
+    if (idxStat.isFile()) {
+      sendStaticFile(req, res, indexPath, idxStat.size);
+      return true;
+    }
+  } catch {
+    // Missing dist/index.html
+  }
+  return false;
 }
 
 const server = http.createServer(async (req, res) => {
@@ -153,6 +259,10 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (tryServeStatic(req, res, pathname)) {
+      return;
+    }
+
     sendJson(res, 404, { error: "Endpoint not found" });
   } catch (err) {
     sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
@@ -189,7 +299,11 @@ wss.on("connection", (ws) => {
           preferredRole: msg.preferredRole as ControllerRole | undefined,
           client,
         });
-        client.send({ type: "JOIN_RESULT", ...joined });
+        client.send({
+          type: "JOIN_RESULT",
+          role: joined.assignedRole ?? null,
+          ...joined,
+        });
         return;
       }
 
@@ -197,7 +311,7 @@ wss.on("connection", (ws) => {
         const res = roomService.claimRole(
           String(msg.roomCode ?? client.roomCode ?? ""),
           client.playerId,
-          String(msg.playerName ?? "Controller"),
+          msg.playerName ? String(msg.playerName) : "",
           msg.role as ControllerRole
         );
         client.send({ type: "ACTION_RESULT", action: "CLAIM_ROLE", ...res });
@@ -274,7 +388,9 @@ wss.on("connection", (ws) => {
           String(msg.roomCode ?? client.roomCode ?? ""),
           client.playerId
         );
-        client.send({ type: "SESSION_ENDED", ...res });
+        if (!res.ok) {
+          client.send({ type: "SESSION_ENDED", ...res });
+        }
         return;
       }
     } catch (err) {
@@ -290,6 +406,6 @@ wss.on("connection", (ws) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`[AirCommand Server] Listening on http://localhost:${PORT} (WS /ws)`);
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`[AirCommand Server] Listening on http://0.0.0.0:${PORT} (WS /ws)`);
 });

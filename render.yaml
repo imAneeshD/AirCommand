@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: aircommand
+    runtime: docker
+    repo: https://github.com/imAneeshD/AirCommand
+    branch: dev
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    envVars:
+      - key: PORT
+        value: 10000

@@ -127,6 +127,8 @@ export function createBaseSimulation(
     config.readbackErrorProbability = 0;
   } else if (scenarioId === "HEAVY" || scenarioId === "RUSH_HOUR") {
     config.readbackErrorProbability = 0.08;
+  } else if (scenarioId === "LOW_TRAFFIC") {
+    config.readbackErrorProbability = 0.01;
   } else if (scenarioId === "LIGHT") {
     config.readbackErrorProbability = 0.02;
   }
@@ -340,7 +342,36 @@ export function createScenarioSimulation(
   const g3 = ap.gateIds[0];
   const g4 = ap.gateIds[1] ?? ap.gateIds[0];
 
-  if (scenarioId === "NORMAL_OPS" || scenarioId === "MEDIUM" || scenarioId === "MIXED" || scenarioId === "LIGHT") {
+  if (scenarioId === "LOW_TRAFFIC") {
+    const ual = createDepartureAircraft(state, {
+      callsign: "UAL452",
+      spokenCallsign: "United 452",
+      airline: "United Airlines",
+      aircraftType: "B738",
+      gateId: g0,
+      targetRunway: rwyDep,
+      requiresPushback: true,
+      departureFix: ap.departureFixIds[0],
+    });
+    const finPt = runwayPoint(arrSpec, -6.5, 0);
+    createArrivalAircraft(state, {
+      callsign: "DAL814",
+      spokenCallsign: "Delta 814",
+      airline: "Delta Air Lines",
+      aircraftType: "B739",
+      x: finPt.x,
+      y: finPt.y,
+      heading: arrSpec.heading,
+      altitude: elev + 2100,
+      speed: 165,
+      targetRunway: rwyArr,
+      gateId: g3,
+      state: "APPROACH",
+      controller: "TOWER",
+      assignedApproach: rwyArr,
+    });
+    state.selectedAircraftId = ual.id;
+  } else if (scenarioId === "NORMAL_OPS" || scenarioId === "MEDIUM" || scenarioId === "MIXED" || scenarioId === "LIGHT") {
     const ual = createDepartureAircraft(state, {
       callsign: "UAL452",
       spokenCallsign: "United 452",
@@ -726,7 +757,13 @@ export function spawnRandomTraffic(
     return a && a.state !== "COMPLETED_ARRIVAL" && a.state !== "COMPLETED_DEPARTURE";
   }).length;
   const maxTraffic =
-    state.scenarioId === "LIGHT" ? 5 : state.scenarioId === "HEAVY" || state.scenarioId === "RUSH_HOUR" ? 13 : 11;
+    state.scenarioId === "LOW_TRAFFIC"
+      ? 3
+      : state.scenarioId === "LIGHT"
+      ? 5
+      : state.scenarioId === "HEAVY" || state.scenarioId === "RUSH_HOUR"
+      ? 13
+      : 11;
   if (activeCount >= maxTraffic) return null;
 
   const chooseKind: FlightKind =
@@ -917,7 +954,9 @@ export function stepSimulation(
 
     // 6. Auto-spawn periodic traffic if enabled
     const spawnPeriod =
-      state.scenarioId === "RUSH_HOUR" || state.scenarioId === "HEAVY"
+      state.scenarioId === "LOW_TRAFFIC"
+        ? 55
+        : state.scenarioId === "RUSH_HOUR" || state.scenarioId === "HEAVY"
         ? 13
         : state.scenarioId === "LIGHT"
         ? 34

@@ -5,6 +5,9 @@ import {
   Globe2,
   Lock,
   Moon,
+  PanelBottom,
+  PanelLeft,
+  PanelRight,
   Pause,
   Play,
   Radio,
@@ -20,6 +23,7 @@ import type { ControllerRole, PlayerRoleMode, ScenarioId } from "../types/atc.ts
 import { Accordion } from "./Accordion.tsx";
 import { LocalClockBadge } from "./LocalClockBadge.tsx";
 import { RadioVoiceMenu } from "./RadioVoiceMenu.tsx";
+import { VoicePttButton } from "./VoicePttButton.tsx";
 
 const STATIONS: Array<{
   role: PlayerRoleMode;
@@ -34,6 +38,7 @@ const STATIONS: Array<{
 ];
 
 const SCENARIOS: Array<{ id: ScenarioId; label: string }> = [
+  { id: "LOW_TRAFFIC", label: "Low Traffic (Very Few Planes)" },
   { id: "NORMAL_OPS", label: "Normal Operations" },
   { id: "LIGHT", label: "Light Traffic" },
   { id: "MEDIUM", label: "Medium Traffic" },
@@ -54,11 +59,13 @@ export const TopBar: React.FC = () => {
   const sfxEnabled = useAtcStore((s) => s.sfxEnabled);
   const voiceEnabled = useAtcStore((s) => s.voiceEnabled);
   const theme = useAtcStore((s) => s.theme);
+  const playerId = useAtcStore((s) => s.playerId);
   const roomState = useAtcStore((s) => s.roomState);
   const assignedRole = useAtcStore((s) => s.assignedRole);
   const isOnline = useAtcStore((s) => s.isOnline);
   const setAppMode = useAtcStore((s) => s.setAppMode);
   const endMultiplayerSession = useAtcStore((s) => s.endMultiplayerSession);
+  const leaveMultiplayerRoom = useAtcStore((s) => s.leaveMultiplayerRoom);
 
   const switchStation = useAtcStore((s) => s.switchStation);
   const toggleAutoAssist = useAtcStore((s) => s.toggleAutoAssist);
@@ -70,6 +77,8 @@ export const TopBar: React.FC = () => {
   const toggleSfx = useAtcStore((s) => s.toggleSfx);
   const toggleVoice = useAtcStore((s) => s.toggleVoice);
   const toggleTheme = useAtcStore((s) => s.toggleTheme);
+  const minimizedPanels = useAtcStore((s) => s.minimizedPanels);
+  const togglePanelMinimized = useAtcStore((s) => s.togglePanelMinimized);
 
   const isMpActive = Boolean(roomState && roomState.status === "ACTIVE");
 
@@ -228,6 +237,52 @@ export const TopBar: React.FC = () => {
           </span>
         </div>
 
+        {/* Panel Layout Toggles (Left / Bottom / Right) */}
+        <div
+          className="hidden sm:flex items-center bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] rounded-md p-0.5 gap-0.5 shadow-sm"
+          title="Show or minimize workbench panels"
+        >
+          <button
+            type="button"
+            onClick={() => togglePanelMinimized("left")}
+            aria-label={minimizedPanels.left ? "Show Flight Strips panel" : "Minimize Flight Strips panel"}
+            title={minimizedPanels.left ? "Show Flight Strips panel" : "Minimize Flight Strips panel"}
+            className={`p-1 rounded transition-colors ${
+              !minimizedPanels.left
+                ? "bg-[var(--atc-surface)] text-[var(--atc-text)] shadow-sm border border-[var(--atc-border)]"
+                : "text-[var(--atc-muted)] hover:text-[var(--atc-text)] border border-transparent"
+            }`}
+          >
+            <PanelLeft className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => togglePanelMinimized("bottom")}
+            aria-label={minimizedPanels.bottom ? "Show Radio Log panel" : "Minimize Radio Log panel"}
+            title={minimizedPanels.bottom ? "Show Radio Log panel" : "Minimize Radio Log panel"}
+            className={`p-1 rounded transition-colors ${
+              !minimizedPanels.bottom
+                ? "bg-[var(--atc-surface)] text-[var(--atc-text)] shadow-sm border border-[var(--atc-border)]"
+                : "text-[var(--atc-muted)] hover:text-[var(--atc-text)] border border-transparent"
+            }`}
+          >
+            <PanelBottom className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => togglePanelMinimized("right")}
+            aria-label={minimizedPanels.right ? "Show Flight Deck panel" : "Minimize Flight Deck panel"}
+            title={minimizedPanels.right ? "Show Flight Deck panel" : "Minimize Flight Deck panel"}
+            className={`p-1 rounded transition-colors ${
+              !minimizedPanels.right
+                ? "bg-[var(--atc-surface)] text-[var(--atc-text)] shadow-sm border border-[var(--atc-border)]"
+                : "text-[var(--atc-muted)] hover:text-[var(--atc-text)] border border-transparent"
+            }`}
+          >
+            <PanelRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
         {/* Light / Dark Theme Toggle */}
         <button
           onClick={toggleTheme}
@@ -244,6 +299,7 @@ export const TopBar: React.FC = () => {
         </button>
 
         <RadioVoiceMenu />
+        <VoicePttButton />
 
         {/* Workstation Settings Popover (Scenario, AI Auto-Assist, SFX, Verify) */}
         <div className="relative">
@@ -362,6 +418,15 @@ export const TopBar: React.FC = () => {
               <span className="hidden 2xl:inline">LIVE ADS-B</span>
             </button>
             <button
+              onClick={() => setAppMode("MULTIPLAYER_LOBBY")}
+              disabled={!isOnline}
+              title="Open 3-Player Multiplayer Lobby (Host or Join by Code)"
+              className="hidden md:flex px-2 py-1.5 rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface)] text-[var(--atc-accent-text)] text-xs font-mono font-semibold items-center gap-1 whitespace-nowrap disabled:opacity-40"
+            >
+              <Users className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden 2xl:inline">MULTIPLAYER</span>
+            </button>
+            <button
               onClick={() => setShowVerificationModal(true)}
               title="Run Mandatory ATC Rules Verification Suite"
               className="px-2 py-1.5 rounded-md bg-[var(--atc-emerald-bg)] hover:opacity-90 border border-[var(--atc-emerald-border)] text-[var(--atc-emerald)] text-xs font-mono font-semibold flex items-center gap-1 whitespace-nowrap"
@@ -370,7 +435,7 @@ export const TopBar: React.FC = () => {
               <span className="hidden 2xl:inline">VERIFY</span>
             </button>
           </>
-        ) : (
+        ) : roomState?.hostPlayerId === playerId ? (
           <button
             onClick={endMultiplayerSession}
             title="Finish Multiplayer Session & Generate Performance Report"
@@ -378,6 +443,15 @@ export const TopBar: React.FC = () => {
           >
             <Flag className="w-3.5 h-3.5 shrink-0" />
             <span>END SHIFT</span>
+          </button>
+        ) : (
+          <button
+            onClick={leaveMultiplayerRoom}
+            title="Leave Multiplayer Room"
+            className="px-2.5 py-1.5 rounded-md bg-[var(--atc-surface)] border border-[var(--atc-border-strong)] text-[var(--atc-text)] text-xs font-mono font-bold flex items-center gap-1 whitespace-nowrap"
+          >
+            <Users className="w-3.5 h-3.5 shrink-0" />
+            <span>LEAVE</span>
           </button>
         )}
 
