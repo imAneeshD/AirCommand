@@ -121,7 +121,9 @@ export function supersedeClearancesForNewInstruction(
       supersedeTypes.add("TAKEOFF");
       break;
     case "HOLD_POSITION":
-      supersedeTypes.add("TAXI");
+      if (!parameters.yieldToAircraftId) {
+        supersedeTypes.add("TAXI");
+      }
       supersedeTypes.add("CROSS_RUNWAY");
       supersedeTypes.add("LINE_UP");
       supersedeTypes.add("TAKEOFF");

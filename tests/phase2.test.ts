@@ -25,6 +25,11 @@ import { hitTestAircraftOrLabel, placeAircraftLabels } from "../src/utils/labelL
 import { getActiveCallingSignals } from "../src/utils/radioSignals.ts";
 import { computePilotSpeechProfile } from "../src/utils/radioAudio.ts";
 import { computeDepAppGuidance } from "../src/utils/depAppGuidance.ts";
+import {
+  buildResolutionCommands,
+  getDeadlockedAircraftIds,
+  inspectGroundConflict,
+} from "../src/utils/groundConflict.ts";
 import { normalizeSpokenNumbers, parseAtcVoiceCommand } from "../src/utils/voiceCommandParser.ts";
 import { convertAirportBundleToLayout } from "../src/utils/osmToAirport.ts";
 import { loadSavedVoiceEnabled, saveVoiceEnabled } from "../src/utils/storage.ts";
@@ -1507,4 +1512,147 @@ test("OpenSkyMetadataService enriches live ADS-B tracks, caches lookups, and Pla
   assert.equal(importedAc.icao24, "86951c");
   assert.equal(importedAc.registration, "JA873A");
   assert.equal(importedAc.airline, "All Nippon Airways");
+});
+
+test("Ground traffic deadlock detector and 1-click Wait & Pass, Push Back Step, and Change Route resolutions break taxiway jams", () => {
+  const sim = createScenarioSimulation("NORMAL_OPS", "GROUND", "KAST");
+  const dep = createDepartureAircraft(sim, {
+    callsign: "AIC973",
+    spokenCallsign: "Air India 973",
+    gateId: sim.airport.gateIds[0],
+    targetRunway: sim.airport.primaryDepartureRunway,
+    requiresPushback: false,
+    controller: "GROUND",
+  });
+  const arr = createArrivalAircraft(sim, {
+    callsign: "JBU618",
+    spokenCallsign: "JetBlue 618",
+    x: 0,
+    y: 0,
+    heading: 90,
+    altitude: sim.airport.elevationFt,
+    speed: 0,
+    targetRunway: sim.airport.primaryArrivalRunway,
+    gateId: sim.airport.gateIds[1],
+    state: "FINAL",
+    controller: "GROUND",
+  });
+
+  // Put both aircraft on a connected KAST taxiway route facing nose-to-nose
+  const r1 = getSuggestedTaxiRoutes(sim.airport, `GATE_${dep.gateId}`, sim.airport.primaryDepartureRunway, dep.gateId, false)[0];
+  assert.ok(r1 && r1.nodeIds.length >= 4);
+
+  const midPrev = sim.airport.nodes[r1.nodeIds[1]]!;
+  const midA = sim.airport.nodes[r1.nodeIds[2]]!;
+  const midB = sim.airport.nodes[r1.nodeIds[3]]!;
+  assert.ok(midPrev && midA && midB);
+
+  const dirDeg = ((Math.atan2(midB.x - midA.x, midB.y - midA.y) * 180) / Math.PI + 360) % 360;
+  const oppDeg = (dirDeg + 180) % 360;
+  const ux = Math.sin((dirDeg * Math.PI) / 180);
+  const uy = Math.cos((dirDeg * Math.PI) / 180);
+
+  dep.state = "TAXIING";
+  dep.currentNodeId = midA.id;
+  dep.x = midA.x;
+  dep.y = midA.y;
+  dep.heading = dirDeg;
+  dep.speed = 0;
+  dep.assignedRouteNodeIds = r1.nodeIds.slice(1);
+  dep.assignedRouteTaxiways = r1.taxiways;
+  dep.routeStepIndex = 1; // Currently at midA (index 1 of slice(1)), heading toward midB
+  assert.equal(
+    submitClearanceDecision(
+      sim,
+      {
+        aircraftId: dep.id,
+        controller: "GROUND",
+        type: "TAXI",
+        parameters: {
+          runway: dep.targetRunway,
+          routeTaxiways: r1.taxiways,
+          destinationNodeId: r1.destinationNodeId,
+          routeNodeIds: r1.nodeIds.slice(2),
+          immediate: true,
+        },
+      },
+      "PLAYER"
+    ).ok,
+    true
+  );
+
+  // Place blocker close ahead along the same vector facing opposite direction
+  arr.state = "TAXIING";
+  arr.currentNodeId = midB.id;
+  arr.x = midA.x + ux * 0.038;
+  arr.y = midA.y + uy * 0.038;
+  arr.heading = oppDeg;
+  arr.speed = 0;
+  const revSlice = [...r1.nodeIds].reverse();
+  arr.assignedRouteNodeIds = revSlice;
+  arr.assignedRouteTaxiways = r1.taxiways;
+  arr.routeStepIndex = 0;
+  assert.equal(
+    submitClearanceDecision(
+      sim,
+      {
+        aircraftId: arr.id,
+        controller: "GROUND",
+        type: "TAXI",
+        parameters: {
+          runway: arr.targetRunway,
+          routeTaxiways: r1.taxiways,
+          destinationNodeId: `GATE_${dep.gateId}`,
+          routeNodeIds: revSlice.slice(Math.max(0, revSlice.indexOf(midB.id))),
+          immediate: true,
+        },
+      },
+      "PLAYER"
+    ).ok,
+    true
+  );
+
+  // 1. Both flagged in mutual deadlock
+  const report = inspectGroundConflict(sim, dep);
+  assert.ok(report);
+  assert.equal(report.isBlocked, true);
+  assert.equal(report.mutualDeadlock, true);
+  assert.equal(report.blocker?.id, arr.id);
+  const deadlocked = getDeadlockedAircraftIds(sim);
+  assert.equal(deadlocked.has(dep.id), true);
+
+  // 2. Test WAIT_PASS holds yielding aircraft & preserves TAXI so it auto-resumes once clear
+  const waitCmds = buildResolutionCommands(sim, dep, "WAIT_PASS");
+  assert.equal(waitCmds.length, 1);
+  assert.equal(waitCmds[0].type, "HOLD_POSITION");
+  assert.equal(submitClearanceDecision(sim, waitCmds[0], "PLAYER").ok, true);
+  assert.equal(dep.state, "HOLD_POSITION");
+  assert.equal(dep.yieldToAircraftId, arr.id);
+
+  // Move blocker past dep cleanly -> dep auto-resumes TAXIING
+  arr.x = midA.x - ux * 0.12;
+  arr.y = midA.y - uy * 0.12;
+  stepSimulation(sim, 0.5);
+  assert.equal(dep.state, "TAXIING");
+  assert.equal(dep.yieldToAircraftId, undefined);
+
+  // 3. Test PUSHBACK_STEP backs stuck aircraft clear to previous/neighbor node
+  dep.assignedRouteNodeIds = [midPrev.id, midA.id, midB.id];
+  dep.routeStepIndex = 1;
+  dep.currentNodeId = midA.id;
+  dep.x = midA.x;
+  dep.y = midA.y;
+  dep.heading = dirDeg;
+  dep.speed = 0;
+  arr.x = midA.x + ux * 0.032;
+  arr.y = midA.y + uy * 0.032;
+  arr.heading = oppDeg;
+  arr.speed = 0;
+  const pushCmds = buildResolutionCommands(sim, dep, "PUSHBACK_STEP");
+  assert.ok(pushCmds.some((c) => c.type === "PUSHBACK"));
+  assert.equal(submitClearanceDecision(sim, pushCmds[0], "PLAYER").ok, true);
+  assert.equal(dep.state, "PUSHING_BACK");
+  assert.ok(dep.stepBackTargetNodeId);
+  for (let i = 0; i < 40; i++) stepSimulation(sim, 1.0);
+  assert.equal(dep.stepBackTargetNodeId, undefined);
 });

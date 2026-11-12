@@ -28,6 +28,11 @@ import {
 import { useAtcStore } from "../store/atcStore.ts";
 import type { ControllerRole, RunwayId } from "../types/atc.ts";
 import { computeDepAppGuidance } from "../utils/depAppGuidance.ts";
+import {
+  buildResolutionCommands,
+  inspectGroundConflict,
+  type GroundResolutionKind,
+} from "../utils/groundConflict.ts";
 import { formatAltitudeReadout } from "../utils/telemetry.ts";
 import { Accordion } from "./Accordion.tsx";
 
@@ -40,6 +45,7 @@ export const ClearanceControlDeck: React.FC = () => {
   const respondToHandoff = useAtcStore((s) => s.respondToHandoff);
 
   const issueClearance = useAtcStore((s) => s.issueClearance);
+  const selectAircraft = useAtcStore((s) => s.selectAircraft);
   const switchStation = useAtcStore((s) => s.switchStation);
   const armReadbackError = useAtcStore((s) => s.armReadbackError);
   const causeRadioFailure = useAtcStore((s) => s.causeRadioFailure);
@@ -173,6 +179,16 @@ export const ClearanceControlDeck: React.FC = () => {
         ac.id
       )
     : [];
+
+  const groundConflict = inspectGroundConflict(sim, ac);
+
+  const runGroundResolution = (kind: GroundResolutionKind) => {
+    setHoverPreviewRoute(null);
+    const cmds = buildResolutionCommands(sim, ac, kind);
+    for (const cmd of cmds) {
+      issueClearance(cmd);
+    }
+  };
 
   const movementReason = (() => {
     if (movable) return "Valid ATC clearance acknowledged";
@@ -314,6 +330,114 @@ export const ClearanceControlDeck: React.FC = () => {
             </div>
             <div className="mt-1 text-[var(--atc-text-secondary)]">
               Radio clearances disabled. Use Tower Light Gun signals (TOWER tab).
+            </div>
+          </div>
+        )}
+
+        {groundConflict && !nordoLocked && (
+          <div
+            className={`rounded-lg border p-2.5 space-y-2 font-mono ${
+              groundConflict.mutualDeadlock
+                ? "border-[var(--atc-red-border)] bg-[var(--atc-red-bg)]"
+                : "border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)]"
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div
+                className={`text-[10px] font-bold uppercase flex items-center gap-1 ${
+                  groundConflict.mutualDeadlock ? "text-[var(--atc-red)]" : "text-[var(--atc-amber)]"
+                }`}
+              >
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                <span>
+                  {groundConflict.isYieldWaiting
+                    ? "YIELDING FOR TRAFFIC"
+                    : groundConflict.mutualDeadlock
+                    ? "GROUND TRAFFIC DEADLOCK"
+                    : "TAXIWAY TRAFFIC BLOCKED"}
+                </span>
+              </div>
+              {groundConflict.blocker && (
+                <button
+                  type="button"
+                  onClick={() => selectAircraft(groundConflict.blocker!.id)}
+                  title={`Inspect blocking aircraft ${groundConflict.blocker.callsign}`}
+                  className="px-1.5 py-0.5 rounded bg-[var(--atc-surface)] border border-[var(--atc-border)] text-[9px] font-bold text-[var(--atc-text)] hover:border-[var(--atc-accent)]"
+                >
+                  {groundConflict.blocker.callsign}
+                </button>
+              )}
+            </div>
+
+            <div className="text-[11px] text-[var(--atc-text)] leading-snug">
+              {groundConflict.reason}
+            </div>
+
+            {!groundConflict.isYieldWaiting && groundConflict.recommendedAction && (
+              <button
+                type="button"
+                onClick={() => runGroundResolution("AUTO_RESOLVE")}
+                className="w-full py-1.5 px-2.5 rounded-md bg-[var(--atc-accent)] hover:opacity-90 text-slate-950 font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-sm transition-opacity"
+              >
+                <Wrench className="w-3.5 h-3.5" />
+                <span>
+                  AUTO-RESOLVE (
+                  {groundConflict.recommendedAction === "REROUTE"
+                    ? "BYPASS ROUTE"
+                    : groundConflict.recommendedAction === "PUSHBACK_STEP"
+                    ? "PUSH BACK & YIELD"
+                    : "WAIT & AUTO-RESUME"}
+                  )
+                </span>
+              </button>
+            )}
+
+            <div className="grid grid-cols-3 gap-1">
+              <button
+                type="button"
+                disabled={!groundConflict.blocker}
+                onClick={() => runGroundResolution("WAIT_PASS")}
+                title={
+                  groundConflict.blocker
+                    ? `Hold ${ac.callsign} and automatically resume once ${groundConflict.blocker.callsign} passes`
+                    : "Wait for traffic ahead to clear"
+                }
+                className="py-1.5 px-1.5 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)] hover:border-[var(--atc-amber-border)] hover:bg-[var(--atc-amber-bg)] text-[var(--atc-text)] text-[9px] font-bold disabled:opacity-35 disabled:cursor-not-allowed text-center leading-tight"
+              >
+                WAIT &amp; PASS
+              </button>
+              <button
+                type="button"
+                disabled={!groundConflict.stepBackNodeId}
+                onClick={() => runGroundResolution("PUSHBACK_STEP")}
+                title={
+                  groundConflict.stepBackLabel
+                    ? `Push back toward ${groundConflict.stepBackLabel} to clear intersection`
+                    : "No backward node available"
+                }
+                className="py-1.5 px-1.5 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)] hover:border-[var(--atc-cyan-border)] hover:bg-[var(--atc-cyan-bg)] text-[var(--atc-text)] text-[9px] font-bold disabled:opacity-35 disabled:cursor-not-allowed text-center leading-tight"
+              >
+                PUSH BACK
+              </button>
+              <button
+                type="button"
+                disabled={!groundConflict.bypassRoute}
+                onMouseEnter={() => {
+                  if (groundConflict.bypassRoute) {
+                    setHoverPreviewRoute(groundConflict.bypassRoute.nodeIds);
+                  }
+                }}
+                onMouseLeave={() => setHoverPreviewRoute(null)}
+                onClick={() => runGroundResolution("REROUTE")}
+                title={
+                  groundConflict.bypassRoute
+                    ? `Reroute via ${groundConflict.bypassRoute.taxiways.join(", ")}`
+                    : "No alternate bypass path available"
+                }
+                className="py-1.5 px-1.5 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)] hover:border-[var(--atc-emerald-border)] hover:bg-[var(--atc-emerald-bg)] text-[var(--atc-text)] text-[9px] font-bold disabled:opacity-35 disabled:cursor-not-allowed text-center leading-tight"
+              >
+                CHANGE ROUTE
+              </button>
             </div>
           </div>
         )}

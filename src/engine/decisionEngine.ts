@@ -246,14 +246,57 @@ export function submitClearanceDecision(
     }
 
     case "PUSHBACK": {
-      if (aircraft.state !== "AT_GATE" && aircraft.state !== "HOLD_POSITION") {
+      const isStepBack = Boolean(params.stepBack);
+      const allowTaxiStepBack =
+        isStepBack &&
+        aircraft.altitude <= state.airport.elevationFt + 50 &&
+        (aircraft.state === "TAXIING" ||
+          aircraft.state === "HOLD_POSITION" ||
+          aircraft.state === "HOLDING_SHORT" ||
+          aircraft.state === "CROSSING_RUNWAY");
+
+      if (!allowTaxiStepBack && aircraft.state !== "AT_GATE" && aircraft.state !== "HOLD_POSITION") {
         return {
           ok: false,
           reason: `${aircraft.callsign} is not at a gate for pushback (state: ${aircraft.state}).`,
         };
       }
-      phraseology = `${aircraft.spokenCallsign}, ${controllerCallsign(command.controller, state.airport)}, pushback approved.`;
-      expectedReadback = `Pushback approved, ${aircraft.spokenCallsign}.`;
+      if (allowTaxiStepBack) {
+        const reqTarget = typeof params.targetNodeId === "string" ? params.targetNodeId : undefined;
+        if (reqTarget && state.airport.nodes[reqTarget]) {
+          params.targetNodeId = reqTarget;
+        } else {
+          const curId = getCurrentSurfaceNodeId(state, aircraft);
+          const prevRouteNode =
+            aircraft.routeStepIndex > 0
+              ? aircraft.assignedRouteNodeIds[aircraft.routeStepIndex - 1]
+              : aircraft.assignedRouteNodeIds[0];
+          const fallbackTarget =
+            prevRouteNode && prevRouteNode !== curId && state.airport.nodes[prevRouteNode]
+              ? prevRouteNode
+              : curId
+              ? state.airport.edges.find(
+                  (e) =>
+                    e.from === curId &&
+                    state.airport.nodes[e.to] &&
+                    !state.airport.nodes[e.to].runwayId
+                )?.to
+              : undefined;
+          if (!fallbackTarget) {
+            return {
+              ok: false,
+              reason: `No clear backward node available for ${aircraft.callsign} to push back.`,
+            };
+          }
+          params.targetNodeId = fallbackTarget;
+        }
+        phraseology = `${aircraft.spokenCallsign}, ${controllerCallsign(command.controller, state.airport)}, push back clear of intersection for traffic.`;
+        expectedReadback = `Pushing back clear for traffic, ${aircraft.spokenCallsign}.`;
+        immediate = Boolean(params.immediate ?? true);
+      } else {
+        phraseology = `${aircraft.spokenCallsign}, ${controllerCallsign(command.controller, state.airport)}, pushback approved.`;
+        expectedReadback = `Pushback approved, ${aircraft.spokenCallsign}.`;
+      }
       break;
     }
 
@@ -270,7 +313,14 @@ export function submitClearanceDecision(
           reason: `${aircraft.callsign} is airborne and cannot accept taxi clearance.`,
         };
       }
-      const startNodeId = getCurrentSurfaceNodeId(state, aircraft);
+      const providedNodeIds = params.routeNodeIds as string[] | undefined;
+      let startNodeId = getCurrentSurfaceNodeId(state, aircraft);
+      if (Array.isArray(providedNodeIds) && providedNodeIds.length >= 2) {
+        const firstNode = state.airport.nodes[providedNodeIds[0]];
+        if (firstNode && Math.hypot(firstNode.x - aircraft.x, firstNode.y - aircraft.y) < 0.095) {
+          startNodeId = firstNode.id;
+        }
+      }
       if (!startNodeId) {
         return {
           ok: false,
@@ -306,7 +356,6 @@ export function submitClearanceDecision(
       }
 
       let routeNodeIds: string[] | null = null;
-      const providedNodeIds = params.routeNodeIds as string[] | undefined;
       if (
         Array.isArray(providedNodeIds) &&
         providedNodeIds.length >= 2 &&
@@ -354,6 +403,9 @@ export function submitClearanceDecision(
           : `runway ${runwaySpokenName(targetRunway)}`;
       phraseology = `${aircraft.spokenCallsign}, ${controllerCallsign(command.controller, state.airport)}, taxi to ${destLabel} via taxiway ${spokenTw}.`;
       expectedReadback = `Taxi ${destLabel} via taxiway ${spokenTw}, ${aircraft.spokenCallsign}.`;
+      if (params.immediate === true) {
+        immediate = true;
+      }
       break;
     }
 
@@ -463,8 +515,13 @@ export function submitClearanceDecision(
           reason: `HOLD_POSITION is a ground surface instruction and cannot stop an airborne aircraft.`,
         };
       }
-      phraseology = `${aircraft.spokenCallsign}, hold position.`;
-      expectedReadback = `Holding position, ${aircraft.spokenCallsign}.`;
+      const yieldCallsign = typeof params.yieldToCallsign === "string" ? params.yieldToCallsign : "";
+      phraseology = yieldCallsign
+        ? `${aircraft.spokenCallsign}, hold position, give way to ${yieldCallsign}.`
+        : `${aircraft.spokenCallsign}, hold position.`;
+      expectedReadback = yieldCallsign
+        ? `Holding position for ${yieldCallsign}, ${aircraft.spokenCallsign}.`
+        : `Holding position, ${aircraft.spokenCallsign}.`;
       immediate = true;
       break;
     }
@@ -715,6 +772,23 @@ function applyClearanceImmediateEffects(
     case "HOLD_POSITION": {
       aircraft.state = "HOLD_POSITION";
       aircraft.stateEnteredAt = state.time;
+      if (typeof clearance.parameters.yieldToAircraftId === "string" && clearance.parameters.yieldToAircraftId) {
+        aircraft.yieldToAircraftId = clearance.parameters.yieldToAircraftId;
+        aircraft.holdingShortReason = "TRAFFIC";
+      } else {
+        aircraft.yieldToAircraftId = undefined;
+      }
+      break;
+    }
+    case "PUSHBACK": {
+      if (clearance.parameters.stepBack) {
+        applyAcknowledgedClearance(state, aircraft, clearance);
+        aircraft.state = "PUSHING_BACK";
+      }
+      break;
+    }
+    case "TAXI": {
+      applyAcknowledgedClearance(state, aircraft, clearance);
       break;
     }
     case "CANCEL_TAKEOFF": {
@@ -810,6 +884,15 @@ function applyAcknowledgedClearance(
       if (aircraft.pendingRequest?.type === "PUSHBACK") {
         aircraft.pendingRequest.resolved = true;
       }
+      if (clearance.parameters.stepBack && typeof clearance.parameters.targetNodeId === "string") {
+        aircraft.stepBackTargetNodeId = clearance.parameters.targetNodeId;
+        aircraft.yieldToAircraftId =
+          typeof clearance.parameters.yieldToAircraftId === "string"
+            ? clearance.parameters.yieldToAircraftId
+            : undefined;
+      } else {
+        aircraft.stepBackTargetNodeId = undefined;
+      }
       aircraft.state = "PUSHBACK_APPROVED";
       aircraft.stateEnteredAt = state.time;
       break;
@@ -832,6 +915,8 @@ function applyAcknowledgedClearance(
       aircraft.routeStepIndex = 0;
       aircraft.holdingAtRunway = undefined;
       aircraft.holdingShortReason = undefined;
+      aircraft.yieldToAircraftId = undefined;
+      aircraft.stepBackTargetNodeId = undefined;
       aircraft.state = "TAXIING";
       aircraft.stateEnteredAt = state.time;
       break;

@@ -17,6 +17,7 @@ import { canAircraftMove } from "../engine/validationEngine.ts";
 import { useAtcStore } from "../store/atcStore.ts";
 import type { Aircraft, ControllerRole } from "../types/atc.ts";
 import { formatAltitudeReadout } from "../utils/telemetry.ts";
+import { getDeadlockedAircraftIds } from "../utils/groundConflict.ts";
 import { radioAudio } from "../utils/radioAudio.ts";
 import { getActiveCallingSignals } from "../utils/radioSignals.ts";
 import { Accordion } from "./Accordion.tsx";
@@ -133,6 +134,7 @@ export const FlightStripRack: React.FC = () => {
   const activeCallerIds = new Set(
     getActiveCallingSignals(sim, radioAudio.getActiveTransmission()).map((c) => c.aircraftId)
   );
+  const deadlockedIds = getDeadlockedAircraftIds(sim);
 
   if (minimized) {
     return (
@@ -328,6 +330,14 @@ export const FlightStripRack: React.FC = () => {
                       >
                         <Crosshair className="w-2.5 h-2.5" />
                         SEL
+                      </span>
+                    )}
+                    {deadlockedIds.has(ac.id) && (
+                      <span
+                        title="Blocked on taxiway — click strip and use 1-click Auto-Resolve / Push Back / Wait & Pass"
+                        className="px-1.5 py-0.5 rounded bg-[var(--atc-red-bg)] text-[var(--atc-red)] border border-[var(--atc-red-border)] text-[8px] font-mono font-extrabold animate-pulse"
+                      >
+                        BLK
                       </span>
                     )}
                     {isCalling && (

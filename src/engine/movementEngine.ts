@@ -9,6 +9,7 @@ import { completeClearancesOfType } from "./clearanceEngine.ts";
 import {
   canAircraftExecuteAction,
   canAircraftMove,
+  findBlockingTrafficAhead,
   isTrafficAheadOnPath,
 } from "./validationEngine.ts";
 
@@ -88,6 +89,35 @@ export function updateAircraftMovement(
     const ac = state.aircraft[id];
     if (!ac) continue;
 
+    // Auto-resume traffic yield once the yielded aircraft has passed clear
+    if (ac.state === "HOLD_POSITION" && ac.yieldToAircraftId && ac.altitude <= elev + 50) {
+      const blocker = state.aircraft[ac.yieldToAircraftId];
+      const distToBlocker = blocker ? Math.hypot(blocker.x - ac.x, blocker.y - ac.y) : Infinity;
+      const blockerGone =
+        !blocker ||
+        blocker.state === "COMPLETED_ARRIVAL" ||
+        blocker.state === "COMPLETED_DEPARTURE" ||
+        blocker.altitude > elev + 50;
+      const blockerPassed =
+        blockerGone ||
+        distToBlocker >= 0.085 ||
+        (distToBlocker >= 0.06 &&
+          !findBlockingTrafficAhead(ac, state, 0.068) &&
+          state.time - ac.stateEnteredAt >= 2.0);
+      if (blockerPassed) {
+        ac.yieldToAircraftId = undefined;
+        ac.holdingShortReason = undefined;
+        if (
+          ac.assignedRouteNodeIds.length >= 2 &&
+          ac.routeStepIndex < ac.assignedRouteNodeIds.length - 1 &&
+          canAircraftExecuteAction(ac, "TAXI", state).allowed
+        ) {
+          ac.state = "TAXIING";
+          ac.stateEnteredAt = state.time;
+        }
+      }
+    }
+
     // HARD SAFETY INVARIANT: No movement without valid clearance (or braking stop)
     if (!canAircraftMove(ac, state)) {
       ac.speed = 0;
@@ -102,6 +132,52 @@ export function updateAircraftMovement(
       case "PUSHING_BACK": {
         ac.altitude = elev;
         ac.verticalSpeed = 0;
+
+        // Taxiway step-back / pull-back resolution (clearing an intersection deadlock)
+        if (ac.stepBackTargetNodeId) {
+          const targetNode = state.airport.nodes[ac.stepBackTargetNodeId];
+          if (!targetNode) {
+            ac.stepBackTargetNodeId = undefined;
+            ac.speed = 0;
+            ac.state = "HOLD_POSITION";
+            ac.stateEnteredAt = state.time;
+            break;
+          }
+          ac.speed = 7;
+          const dx = targetNode.x - ac.x;
+          const dy = targetNode.y - ac.y;
+          const dist = Math.hypot(dx, dy);
+          const step = (ac.speed / 3600) * dt;
+          if (dist <= Math.max(step, 0.003)) {
+            ac.x = targetNode.x;
+            ac.y = targetNode.y;
+            ac.currentNodeId = targetNode.id;
+            ac.speed = 0;
+            ac.stepBackTargetNodeId = undefined;
+            completeClearancesOfType(ac, "PUSHBACK");
+            const idxInRoute = ac.assignedRouteNodeIds.indexOf(targetNode.id);
+            if (idxInRoute >= 0) {
+              ac.routeStepIndex = idxInRoute;
+            } else if (ac.assignedRouteNodeIds.length > 0) {
+              const firstNext = ac.assignedRouteNodeIds[0];
+              const edgeExists = state.airport.edges.some(
+                (e) => e.from === targetNode.id && e.to === firstNext
+              );
+              if (edgeExists) {
+                ac.assignedRouteNodeIds = [targetNode.id, ...ac.assignedRouteNodeIds];
+                ac.routeStepIndex = 0;
+              }
+            }
+            ac.state = "HOLD_POSITION";
+            ac.holdingShortReason = "TRAFFIC";
+            ac.stateEnteredAt = state.time;
+          } else {
+            ac.x += (dx / dist) * step;
+            ac.y += (dy / dist) * step;
+          }
+          break;
+        }
+
         const spotId = ac.pushbackSpotId ?? (ac.gateId ? `PB_${ac.gateId}` : undefined);
         const spot = spotId ? state.airport.nodes[spotId] : undefined;
         if (!spot) {

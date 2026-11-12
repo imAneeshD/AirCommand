@@ -198,6 +198,8 @@ export interface Aircraft {
   routeStepIndex: number;
   holdingAtRunway?: RunwayId;
   holdingShortReason?: "DEPARTURE_RUNWAY" | "CROSSING_REQUIRED" | "ATC_INSTRUCTION" | "ROUTE_END" | "TRAFFIC";
+  yieldToAircraftId?: string;
+  stepBackTargetNodeId?: string;
   crossRunwayCleared: Record<string, boolean>;
   lightGunAuthorized?: LightGunSignal;
   vacatingExitNodeId?: string;
