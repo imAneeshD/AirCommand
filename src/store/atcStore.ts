@@ -422,7 +422,11 @@ async function resolveAirportBundle(
   const icao = record.icao.toUpperCase();
   const cachedGeom = !forceRefresh ? await offlineDb.getCachedGeometry(icao) : undefined;
 
-  if (cachedGeom && (cachedGeom.dataQuality === "Manually edited" || !isOnline)) {
+  if (
+    cachedGeom &&
+    ((cachedGeom.dataQuality === "Manually edited" && cachedGeom.geojson.features.length >= 20) ||
+      !isOnline)
+  ) {
     return {
       airport: {
         ...record,

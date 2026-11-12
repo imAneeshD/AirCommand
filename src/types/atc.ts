@@ -297,6 +297,11 @@ export interface AirportTaxiwayChain {
   dashed?: boolean;
 }
 
+export interface AirportVisualTaxiway {
+  taxiway: TaxiwayName;
+  points: Array<{ x: number; y: number }>;
+}
+
 export interface AirportLayout {
   id: AirportId;
   icao: AirportId;
@@ -325,6 +330,7 @@ export interface AirportLayout {
   apronPolygons?: Array<Array<{ x: number; y: number }>>;
   terminalBuildings?: AirportTerminalBuilding[];
   taxiwayChains?: AirportTaxiwayChain[];
+  visualTaxiways?: AirportVisualTaxiway[];
   controlTower?: { x: number; y: number };
   // Phase 2 Real-World Geodetic & Infrastructure Fields
   lat?: number;

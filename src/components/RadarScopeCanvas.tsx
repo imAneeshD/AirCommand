@@ -212,6 +212,27 @@ function traceRoundedPolylinePath(
 }
 
 /**
+ * Traces a C1-smooth quadratic midpoint spline directly through dense real-world
+ * OpenStreetMap taxiway vertices so curves, rapid-exits, and bent fillets render fluidly.
+ */
+function traceSmoothSplinePath(ctx: CanvasRenderingContext2D, pts: ScreenPt[]): void {
+  if (pts.length < 2) return;
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  if (pts.length === 2) {
+    ctx.lineTo(pts[1].x, pts[1].y);
+    return;
+  }
+  for (let i = 1; i < pts.length - 1; i++) {
+    const midX = (pts[i].x + pts[i + 1].x) / 2;
+    const midY = (pts[i].y + pts[i + 1].y) / 2;
+    ctx.quadraticCurveTo(pts[i].x, pts[i].y, midX, midY);
+  }
+  const tail = pts[pts.length - 1];
+  ctx.lineTo(tail.x, tail.y);
+}
+
+/**
  * Extracts ordered polyline chains per taxiway when explicit chains aren't supplied.
  */
 function resolveTaxiwayChains(airport: AirportLayout): Array<{ taxiway: TaxiwayName; nodeIds: string[]; dashed?: boolean }> {
@@ -1075,30 +1096,54 @@ function drawScope(
     }
 
     // Curved Continuous Taxiways (Layer 1: Outer Shoulder, Layer 2: Pavement, Layer 3: Continuous Golden Centerlines)
-    const widthScale = sim.airport.isRealWorld ? 0.017 : 0.024;
-    const twWidthPx = Math.max(2.5, Math.min(18, widthScale * cam.pixelsPerNm));
-    const cornerRadiusPx = Math.max(4, twWidthPx * 1.15);
-    const chains = resolveTaxiwayChains(sim.airport);
+    const widthScale = sim.airport.isRealWorld ? 0.020 : 0.024;
+    const twWidthPx = Math.max(3.5, Math.min(20, widthScale * cam.pixelsPerNm));
+    const cornerRadiusPx = Math.max(5, twWidthPx * 1.25);
+    const hasLosslessVisual =
+      Boolean(sim.airport.visualTaxiways && sim.airport.visualTaxiways.length > 0);
 
-    const chainPts = chains
-      .map((ch) => ({
-        ...ch,
-        pts: ch.nodeIds
-          .map((id) => sim.airport.nodes[id])
-          .filter((n): n is NonNullable<typeof n> => Boolean(n))
-          .map((n) => {
-            const [x, y] = toScreen(n.x, n.y);
-            return { x, y };
-          }),
-      }))
-      .filter((ch) => ch.pts.length >= 2);
+    const chainPts: Array<{
+      taxiway: TaxiwayName;
+      dashed?: boolean;
+      pts: ScreenPt[];
+    }> = hasLosslessVisual
+      ? sim.airport.visualTaxiways!
+          .map((vt) => ({
+            taxiway: vt.taxiway,
+            dashed: false,
+            pts: vt.points.map((p) => {
+              const [x, y] = toScreen(p.x, p.y);
+              return { x, y };
+            }),
+          }))
+          .filter((ch) => ch.pts.length >= 2)
+      : resolveTaxiwayChains(sim.airport)
+          .map((ch) => ({
+            ...ch,
+            pts: ch.nodeIds
+              .map((id) => sim.airport.nodes[id])
+              .filter((n): n is NonNullable<typeof n> => Boolean(n))
+              .map((n) => {
+                const [x, y] = toScreen(n.x, n.y);
+                return { x, y };
+              }),
+          }))
+          .filter((ch) => ch.pts.length >= 2);
+
+    const traceTaxiway = (pts: ScreenPt[]) => {
+      if (hasLosslessVisual) {
+        traceSmoothSplinePath(ctx, pts);
+      } else {
+        traceRoundedPolylinePath(ctx, pts, cornerRadiusPx, false);
+      }
+    };
 
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
     // Layer 1: Taxiway Outer Shoulder Edge (subtle over satellite tiles)
     for (const ch of chainPts) {
-      traceRoundedPolylinePath(ctx, ch.pts, cornerRadiusPx, false);
+      traceTaxiway(ch.pts);
       ctx.strokeStyle = isSatOnly
         ? "rgba(15, 23, 42, 0.28)"
         : isLight
@@ -1106,13 +1151,13 @@ function drawScope(
           ? "#cbc3b0"
           : "#bcb39e"
         : "#0e1726";
-      ctx.lineWidth = ch.taxiway === "APRON" ? twWidthPx * 0.72 + 1.5 : twWidthPx + 2.2;
+      ctx.lineWidth = ch.taxiway === "APRON" ? twWidthPx * 0.72 + 1.5 : twWidthPx + 2.4;
       ctx.stroke();
     }
 
     // Layer 2: Taxiway Inner Asphalt / Concrete
     for (const ch of chainPts) {
-      traceRoundedPolylinePath(ctx, ch.pts, cornerRadiusPx, false);
+      traceTaxiway(ch.pts);
       ctx.strokeStyle = isSatOnly
         ? ch.taxiway === "APRON"
           ? "rgba(30, 41, 59, 0.22)"
@@ -1138,7 +1183,7 @@ function drawScope(
 
     // Layer 3: Continuous Golden Taxiway Centerlines across all intersections
     for (const ch of chainPts) {
-      traceRoundedPolylinePath(ctx, ch.pts, cornerRadiusPx, false);
+      traceTaxiway(ch.pts);
       ctx.strokeStyle = isSatOnly
         ? ch.dashed || ch.taxiway === "APRON"
           ? "rgba(250, 204, 21, 0.55)"

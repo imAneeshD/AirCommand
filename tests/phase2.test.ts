@@ -496,6 +496,17 @@ test("Real bundled OpenStreetMap VIDP GeoJSON converts to connected curved airpo
     assert.ok(layout.runwayIds.length >= 4, `Expected >= 4 runways at VIDP, got ${layout.runwayIds.length}`);
     assert.ok(layout.gateIds.length >= 20, `Expected >= 20 real gates/stands at VIDP, got ${layout.gateIds.length}`);
     assert.ok((layout.taxiwayChains?.length ?? 0) >= 50, "Expected rich curved taxiway chains");
+    assert.ok((layout.visualTaxiways?.length ?? 0) >= 50, "Expected lossless visualTaxiways for VIDP");
+    const totalVisualVertices = (layout.visualTaxiways ?? []).reduce((sum, seg) => sum + seg.points.length, 0);
+    assert.ok(
+      totalVisualVertices > 5000,
+      `Expected lossless VIDP visualTaxiways (>5000 vertices from 5789 OSM verts), got ${totalVisualVertices}`
+    );
+    const curvedMultiVertPolylines = (layout.visualTaxiways ?? []).filter((seg) => seg.points.length >= 10).length;
+    assert.ok(
+      curvedMultiVertPolylines >= 20,
+      `Expected >= 20 multi-vertex (>=10 pts) curved OSM taxiway polylines at VIDP, got ${curvedMultiVertPolylines}`
+    );
     assert.ok((layout.apronPolygons?.length ?? 0) >= 10, "Expected real OSM apron polygons");
     assert.ok((layout.terminalBuildings?.length ?? 0) >= 5, "Expected real OSM terminal buildings");
 

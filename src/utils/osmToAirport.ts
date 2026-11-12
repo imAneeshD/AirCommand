@@ -8,6 +8,7 @@ import type {
   AirportRecord,
   AirportTaxiwayChain,
   AirportTerminalBuilding,
+  AirportVisualTaxiway,
   NavFix,
   RunwayId,
   RunwaySpec,
@@ -16,6 +17,63 @@ import type {
   TaxiwayName,
 } from "../types/atc.ts";
 import { bearingBetweenLatLon, haversineNm, latLonToLocalNm } from "./geo.ts";
+
+function mergeContinuousVisualTaxiways(
+  segments: AirportVisualTaxiway[]
+): AirportVisualTaxiway[] {
+  const SNAP = 0.0004; // ~2.4 ft exact OSM shared node tolerance
+  const used = new Array<boolean>(segments.length).fill(false);
+  const merged: AirportVisualTaxiway[] = [];
+
+  const ptEq = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+    Math.hypot(a.x - b.x, a.y - b.y) <= SNAP;
+
+  for (let i = 0; i < segments.length; i++) {
+    if (used[i]) continue;
+    used[i] = true;
+    const tw = segments[i].taxiway;
+    const pts = [...segments[i].points];
+
+    let extended = true;
+    while (extended) {
+      extended = false;
+      const head = pts[0];
+      const tail = pts[pts.length - 1];
+      for (let j = 0; j < segments.length; j++) {
+        if (used[j] || segments[j].taxiway !== tw) continue;
+        const cand = segments[j].points;
+        const cHead = cand[0];
+        const cTail = cand[cand.length - 1];
+
+        if (ptEq(tail, cHead)) {
+          pts.push(...cand.slice(1));
+          used[j] = true;
+          extended = true;
+          break;
+        } else if (ptEq(tail, cTail)) {
+          pts.push(...[...cand].reverse().slice(1));
+          used[j] = true;
+          extended = true;
+          break;
+        } else if (ptEq(head, cTail)) {
+          pts.unshift(...cand.slice(0, -1));
+          used[j] = true;
+          extended = true;
+          break;
+        } else if (ptEq(head, cHead)) {
+          pts.unshift(...[...cand].reverse().slice(0, -1));
+          used[j] = true;
+          extended = true;
+          break;
+        }
+      }
+    }
+
+    merged.push({ taxiway: tw, points: pts });
+  }
+
+  return merged;
+}
 
 function makeRunway(opts: {
   id: RunwayId;
@@ -187,6 +245,7 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
   const apronPolygons: Array<Array<{ x: number; y: number }>> = [];
   const terminalBuildings: AirportTerminalBuilding[] = [];
   const taxiwayChains: AirportTaxiwayChain[] = [];
+  const rawVisualSegments: AirportVisualTaxiway[] = [];
   const taxiwayLabels: Array<{ label: string; x: number; y: number }> = [];
   const labeledTw = new Set<string>();
   let controlTower: { x: number; y: number } | undefined;
@@ -271,7 +330,7 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
   // Construct connected taxiway graph when rich OSM taxiways exist (>4 ways)
   const usedRealOsmGraph = osmTaxiways.length >= 4;
   if (usedRealOsmGraph) {
-    for (const twFeat of osmTaxiways.slice(0, 750)) {
+    for (const twFeat of osmTaxiways) {
       const coords = twFeat.geometry.coordinates as Array<[number, number]>;
       if (coords.length < 2) continue;
       let twRef = String(twFeat.properties.ref ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -279,19 +338,23 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
         twRef = "LINK";
       }
 
-      // Preserve curved rapid-exit & bent taxiway geometry with high detail (~0.015 NM resolution)
+      const rawPts = coords.map(([lon, lat]) => latLonToLocalNm(lat, lon, record.lat, record.lon));
+      if (rawPts.length >= 2) {
+        rawVisualSegments.push({ taxiway: twRef, points: rawPts });
+      }
+
+      // Preserve curved rapid-exit & bent taxiway geometry with high detail (~0.006 NM navigation resolution)
       const chainNodeIds: string[] = [];
       let prevPt: { x: number; y: number } | null = null;
 
-      for (let i = 0; i < coords.length; i++) {
-        const [lon, lat] = coords[i];
-        const pt = latLonToLocalNm(lat, lon, record.lat, record.lon);
-        const isEnd = i === 0 || i === coords.length - 1;
-        if (!isEnd && prevPt && Math.hypot(pt.x - prevPt.x, pt.y - prevPt.y) < 0.015) {
+      for (let i = 0; i < rawPts.length; i++) {
+        const pt = rawPts[i];
+        const isEnd = i === 0 || i === rawPts.length - 1;
+        if (!isEnd && prevPt && Math.hypot(pt.x - prevPt.x, pt.y - prevPt.y) < 0.006) {
           continue;
         }
         prevPt = pt;
-        const n = findOrCreateSnappedNode(pt.x, pt.y, 0.012, "TAXIWAY", twRef);
+        const n = findOrCreateSnappedNode(pt.x, pt.y, 0.005, "TAXIWAY", twRef);
         if (chainNodeIds[chainNodeIds.length - 1] !== n.id) {
           chainNodeIds.push(n.id);
         }
@@ -545,13 +608,6 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
               ? edges.find((e) => e.from === bestU!.id || e.from === bestV!.id)?.taxiway ?? "APRON"
               : "APRON";
           addEdge(bestU.id, bestV.id, neighborTw, crossingRwy);
-          if (bestDist > 0.03) {
-            taxiwayChains.push({
-              taxiway: neighborTw,
-              nodeIds: [bestU.id, bestV.id],
-              dashed: true,
-            });
-          }
           mergedRoots.add(bestOtherRoot);
         }
       }
@@ -860,6 +916,8 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
     apronPolygons: apronPolygons.length > 0 ? apronPolygons : undefined,
     terminalBuildings,
     taxiwayChains: taxiwayChains.length > 0 ? taxiwayChains : undefined,
+    visualTaxiways:
+      rawVisualSegments.length > 0 ? mergeContinuousVisualTaxiways(rawVisualSegments) : undefined,
     controlTower,
     taxiwayLabels,
     frequencies: record.frequencies,
