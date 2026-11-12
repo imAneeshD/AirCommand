@@ -11,7 +11,9 @@ import type {
 } from "../../src/types/atc.ts";
 
 const DATA_DIR = path.resolve("server/data");
-const DB_PATH = path.join(DATA_DIR, "aircommand.db");
+const DB_PATH = process.env.AIRCOMMAND_DB_PATH
+  ? path.resolve(process.env.AIRCOMMAND_DB_PATH)
+  : path.join(DATA_DIR, "aircommand.db");
 
 export class DatabaseService {
   private db: DatabaseSync;

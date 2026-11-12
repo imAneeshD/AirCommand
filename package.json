@@ -3,9 +3,13 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
   "scripts": {
     "dev": "vite",
     "server": "node --no-warnings server/index.ts",
+    "start": "node --no-warnings server/index.ts",
     "seed": "node --no-warnings server/scripts/buildSeed.ts",
     "build": "tsc && vite build",
     "preview": "vite preview",

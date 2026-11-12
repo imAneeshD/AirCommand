@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.git/
+forgotten-island/
+server/data/*.db
+server/data/*.db-*
+server/data/raw/
+*.log
+.env
+.env.*

@@ -243,12 +243,15 @@ test("MultiplayerRoomService enforces role lock, command dedup, explicit handoff
 
     // Ground player joins with mock socket client
     let groundPackets = 0;
+    const groundTypes: string[] = [];
     const groundClient = {
       clientId: "sock_g1",
       playerId: "p_ground",
       roomCode: null as string | null,
-      send: () => {
+      send: (payload: unknown) => {
         groundPackets += 1;
+        const p = payload as { type?: string };
+        if (p?.type) groundTypes.push(p.type);
       },
     };
     const joinG = env.rooms.joinRoom({
@@ -357,12 +360,20 @@ test("MultiplayerRoomService enforces role lock, command dedup, explicit handoff
     assert.equal(snap.room.slots.GROUND.aiTakeover, false);
     assert.equal(snap.sim.config.stationControl.GROUND, "PLAYER");
 
-    // 5. Post-session performance report generation
+    // 4b. Switching roles without resending playerName preserves existing callsign
+    const switchedDep = env.rooms.claimRole(code, "p_ground", "", "DEPARTURE");
+    assert.equal(switchedDep.ok, true);
+    assert.equal(snap.room.slots.DEPARTURE.playerName, "GroundCtrl");
+    assert.equal(env.rooms.claimRole(code, "p_ground", "", "GROUND").ok, true);
+    assert.equal(snap.room.slots.GROUND.playerName, "GroundCtrl");
+
+    // 5. Post-session performance report generation & broadcast to all connected clients
     const ended = env.rooms.endSession(code, "p_tower");
     assert.equal(ended.ok, true);
     assert.ok(ended.report);
     assert.equal(ended.report.airportIcao, "VIDP");
     assert.ok(ended.report.roleScores.GROUND.clearancesIssued >= 1);
+    assert.ok(groundTypes.includes("SESSION_ENDED"), "Non-host client must receive SESSION_ENDED broadcast");
   } finally {
     env.cleanup();
   }

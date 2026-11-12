@@ -672,6 +672,11 @@ export const GlobalAirportMap: React.FC = () => {
               type="text"
               value={joinCode}
               onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && joinCode.trim() && isOnline) {
+                  joinMultiplayerRoom(joinCode);
+                }
+              }}
               placeholder="ROOM CODE"
               maxLength={8}
               className="w-20 bg-transparent text-xs font-mono uppercase focus:outline-none"
@@ -1136,12 +1141,19 @@ export const GlobalAirportMap: React.FC = () => {
                 <button
                   onClick={async () => {
                     setConvertingLive(true);
-                    await launchSimulationFromLiveTraffic(
+                    const res = await launchSimulationFromLiveTraffic(
                       selectedAirportRecord,
                       undefined,
                       selectedStartRole
                     );
                     setConvertingLive(false);
+                    if (!res.ok) {
+                      setStatusNote(
+                        `Live flight conversion failed for ${selectedAirportRecord.icao}: ${
+                          res.error ?? "Backend unavailable."
+                        }`
+                      );
+                    }
                   }}
                   disabled={!isOnline || airportDetailLoading || convertingLive}
                   className="w-full py-2.5 px-3 rounded-lg border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] font-bold text-xs flex items-center justify-center gap-2 hover:brightness-105 disabled:opacity-45"

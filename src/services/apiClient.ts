@@ -117,7 +117,14 @@ export interface WsClientHandlers {
   onOpen?: () => void;
   onClose?: () => void;
   onRoomSync?: (room: MultiplayerRoomState, sim: SimulationState) => void;
-  onJoinResult?: (payload: { ok: boolean; error?: string; role?: ControllerRole | null; room?: MultiplayerRoomState }) => void;
+  onJoinResult?: (payload: {
+    ok: boolean;
+    error?: string;
+    role?: ControllerRole | null;
+    assignedRole?: ControllerRole | null;
+    room?: MultiplayerRoomState;
+    sim?: SimulationState;
+  }) => void;
   onCommandResult?: (payload: {
     ok: boolean;
     commandId: string;
@@ -126,8 +133,8 @@ export interface WsClientHandlers {
     role: ControllerRole;
     pendingHandoff?: boolean;
   }) => void;
-  onActionResult?: (payload: { action: string; ok: boolean; reason?: string }) => void;
-  onSessionEnded?: (report: SessionPerformanceReport) => void;
+  onActionResult?: (payload: { action: string; ok: boolean; reason?: string; error?: string }) => void;
+  onSessionEnded?: (report?: SessionPerformanceReport, error?: string) => void;
   onError?: (error: string) => void;
 }
 
@@ -181,7 +188,10 @@ export class MultiplayerWsClient {
         } else if (type === "ACTION_RESULT") {
           this.handlers.onActionResult?.(msg as unknown as Parameters<NonNullable<WsClientHandlers["onActionResult"]>>[0]);
         } else if (type === "SESSION_ENDED") {
-          this.handlers.onSessionEnded?.(msg.report as SessionPerformanceReport);
+          this.handlers.onSessionEnded?.(
+            msg.report as SessionPerformanceReport | undefined,
+            msg.error ? String(msg.error) : undefined
+          );
         } else if (type === "ERROR") {
           this.handlers.onError?.(String(msg.error ?? "Server error"));
         }
@@ -207,8 +217,8 @@ export class MultiplayerWsClient {
     this.send({ type: "JOIN_ROOM", ...payload });
   }
 
-  claimRole(role: ControllerRole): void {
-    this.send({ type: "CLAIM_ROLE", role });
+  claimRole(role: ControllerRole, playerName?: string): void {
+    this.send({ type: "CLAIM_ROLE", role, ...(playerName ? { playerName } : {}) });
   }
 
   setReady(ready: boolean): void {

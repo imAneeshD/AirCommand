@@ -91,7 +91,8 @@ export class MultiplayerRoomService {
           this.scoring.collectCompletedHandlingTimes(ir.tracker, ir.sim);
         }
         this.syncStationControlWithSlots(ir);
-        this.broadcastRoomState(ir);
+        // Omit static sim.airport on 5 Hz ticks to keep deltas tiny (~15 KB vs ~1.6 MB)
+        this.broadcastRoomState(ir, false);
       }
     }, 200);
   }
@@ -230,17 +231,20 @@ export class MultiplayerRoomService {
     let assignedRole: ControllerRole | null = null;
     for (const r of ROLES) {
       if (ir.room.slots[r].playerId === opts.playerId) {
+        const wasDisconnected = !ir.room.slots[r].connected || ir.room.slots[r].aiTakeover;
         ir.room.slots[r].connected = true;
         ir.room.slots[r].aiTakeover = false;
         ir.room.slots[r].lastSeenMs = Date.now();
         ir.room.slots[r].playerName = opts.playerName;
         assignedRole = r;
-        this.comms.addMessage(ir.room, {
-          senderPlayerId: "SYSTEM",
-          senderName: "SYSTEM",
-          senderRole: "SYSTEM",
-          text: `${opts.playerName} reconnected to ${r} (AI handed control back).`,
-        });
+        if (wasDisconnected) {
+          this.comms.addMessage(ir.room, {
+            senderPlayerId: "SYSTEM",
+            senderName: "SYSTEM",
+            senderRole: "SYSTEM",
+            text: `${opts.playerName} reconnected to ${r} (AI handed control back).`,
+          });
+        }
         break;
       }
     }
@@ -316,8 +320,10 @@ export class MultiplayerRoomService {
       return { ok: false, error: `${targetRole} is currently occupied by ${slot.playerName}.` };
     }
 
+    let previousName: string | null = null;
     for (const r of ROLES) {
       if (ir.room.slots[r].playerId === playerId) {
+        previousName = previousName ?? ir.room.slots[r].playerName;
         ir.room.slots[r] = {
           role: r,
           playerId: null,
@@ -333,7 +339,7 @@ export class MultiplayerRoomService {
     ir.room.slots[targetRole] = {
       role: targetRole,
       playerId,
-      playerName,
+      playerName: playerName.trim() || previousName || "Controller",
       connected: true,
       ready: ir.room.hostPlayerId === playerId,
       aiTakeover: false,
@@ -495,7 +501,7 @@ export class MultiplayerRoomService {
               ? `Handoff ${ac.callsign} → ${targetCtrl} accepted automatically.`
               : `Handoff initiated: ${ac.callsign} (${playerRole} → ${targetCtrl}). Awaiting ${targetCtrl} accept.`,
         });
-        this.broadcastRoomState(ir);
+        this.broadcastRoomState(ir, false);
         return {
           ok: true,
           reason:
@@ -513,7 +519,7 @@ export class MultiplayerRoomService {
 
     const res = submitClearanceDecision(ir.sim, opts.cmd, "PLAYER");
     this.scoring.recordCommandResult(ir.tracker, playerRole, res.ok, responseSec);
-    this.broadcastRoomState(ir);
+    this.broadcastRoomState(ir, false);
     return { ok: res.ok, reason: res.reason };
   }
 
@@ -550,7 +556,7 @@ export class MultiplayerRoomService {
       });
     }
 
-    this.broadcastRoomState(ir);
+    this.broadcastRoomState(ir, false);
     return { ok: true };
   }
 
@@ -568,7 +574,7 @@ export class MultiplayerRoomService {
       senderRole: role ?? "SYSTEM",
       text: opts.text,
     });
-    this.broadcastRoomState(ir);
+    this.broadcastRoomState(ir, false);
     return { ok: true };
   }
 
@@ -584,7 +590,14 @@ export class MultiplayerRoomService {
     ir.room.report = report;
     this.db.saveRoomSession(ir.room);
     this.db.saveSessionScore(report);
-    this.broadcastRoomState(ir);
+    this.broadcastRoomState(ir, true);
+    for (const client of ir.clients.values()) {
+      try {
+        client.send({ type: "SESSION_ENDED", ok: true, report });
+      } catch {
+        // Ignore broken sockets; close handler cleans up
+      }
+    }
     return { ok: true, report };
   }
 
@@ -594,11 +607,17 @@ export class MultiplayerRoomService {
     return this.scoring.buildReport(ir.room, ir.sim, ir.tracker);
   }
 
-  private broadcastRoomState(ir: InternalRoom): void {
+  private broadcastRoomState(ir: InternalRoom, includeAirport = true): void {
+    const simPayload: SimulationState = includeAirport
+      ? ir.sim
+      : ({
+          ...ir.sim,
+          airport: undefined as unknown as AirportLayout,
+        } as SimulationState);
     const payload = {
       type: "ROOM_SYNC",
       room: ir.room,
-      sim: ir.sim,
+      sim: simPayload,
     };
     for (const client of ir.clients.values()) {
       try {

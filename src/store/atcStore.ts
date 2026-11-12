@@ -266,11 +266,13 @@ function dispatchRadioMessagesAudio(
 function getOrCreatePlayerId(): string {
   if (typeof window === "undefined") return `ctrl_${Math.random().toString(36).slice(2, 8)}`;
   try {
-    const key = "aircommand_player_id_v1";
-    const existing = window.localStorage.getItem(key);
+    // Use sessionStorage so multiple tabs in the same browser represent distinct controllers,
+    // while refreshing the same tab preserves the playerId for seamless seat reconnection.
+    const key = "aircommand_tab_player_id_v1";
+    const existing = window.sessionStorage.getItem(key);
     if (existing) return existing;
     const generated = `ctrl_${Math.random().toString(36).slice(2, 10)}`;
-    window.localStorage.setItem(key, generated);
+    window.sessionStorage.setItem(key, generated);
     return generated;
   } catch {
     return `ctrl_${Math.random().toString(36).slice(2, 8)}`;
@@ -315,18 +317,38 @@ function ensureWsClient(set: (fn: (s: AtcStore) => Partial<AtcStore>) => void, g
         set(() => ({ multiplayerError: payload.error ?? "Failed to join room" }));
         return;
       }
+      const curState = get();
+      const joinedRole = payload.assignedRole ?? payload.role ?? curState.assignedRole;
+      const incomingSim = payload.sim;
+      if (incomingSim) {
+        if (!incomingSim.airport && curState.sim.airport.icao === payload.room?.airportIcao) {
+          incomingSim.airport = curState.sim.airport;
+        }
+        if (joinedRole) {
+          incomingSim.config.activePlayerStation = joinedRole;
+        }
+      }
+      const isNowActive = payload.room?.status === "ACTIVE";
       set((s) => ({
         multiplayerError: null,
         roomState: payload.room ?? s.roomState,
-        assignedRole: payload.role ?? s.assignedRole,
-        appMode: payload.room?.status === "ACTIVE" ? "SIMULATION" : "MULTIPLAYER_LOBBY",
+        assignedRole: joinedRole,
+        sim: incomingSim ?? s.sim,
+        tickVersion: incomingSim ? s.tickVersion + 1 : s.tickVersion,
+        appMode: isNowActive ? "SIMULATION" : "MULTIPLAYER_LOBBY",
+        camera:
+          isNowActive && (incomingSim ?? s.sim).airport
+            ? getPresetCameraForStation(joinedRole ?? "TOWER", (incomingSim ?? s.sim).airport)
+            : s.camera,
       }));
     },
     onActionResult: (payload) => {
-      if (!payload.ok && payload.reason) {
+      const errText = payload.error ?? payload.reason;
+      if (!payload.ok && errText) {
+        radioAudio.playRadioClick("ERROR");
         set((s) => ({
-          multiplayerError: payload.reason ?? null,
-          lastFeedback: { ok: false, text: payload.reason!, at: s.sim.time },
+          multiplayerError: errText,
+          lastFeedback: { ok: false, text: errText, at: s.sim.time },
         }));
       }
     },
@@ -342,6 +364,11 @@ function ensureWsClient(set: (fn: (s: AtcStore) => Partial<AtcStore>) => void, g
       const state = get();
       const prevSelected = state.sim.selectedAircraftId;
       const prevLastMsg = state.sim.radioLog[state.sim.radioLog.length - 1]?.id ?? null;
+
+      // Merge cached static airport layout when 5 Hz tick deltas omit unchanged geometry
+      if (!remoteSim.airport) {
+        remoteSim.airport = state.sim.airport;
+      }
 
       // Determine this client's role in the multiplayer room
       const myRole =
@@ -365,12 +392,21 @@ function ensureWsClient(set: (fn: (s: AtcStore) => Partial<AtcStore>) => void, g
       }
 
       const switchedToActive = room.status === "ACTIVE" && state.appMode === "MULTIPLAYER_LOBBY";
+      const sessionCompleted = room.status === "COMPLETED" && Boolean(room.report);
+      if (sessionCompleted) {
+        radioAudio.stopAllSpeech();
+      }
       set((s) => ({
         roomState: room,
         assignedRole: myRole ?? null,
         sim: remoteSim,
         tickVersion: s.tickVersion + 1,
-        appMode: switchedToActive ? "SIMULATION" : s.appMode,
+        postSessionReport: sessionCompleted ? room.report : s.postSessionReport,
+        appMode: sessionCompleted
+          ? "MULTIPLAYER_LOBBY"
+          : switchedToActive
+          ? "SIMULATION"
+          : s.appMode,
         camera: switchedToActive
           ? getPresetCameraForStation(myRole ?? "TOWER", remoteSim.airport)
           : s.camera,
@@ -378,10 +414,18 @@ function ensureWsClient(set: (fn: (s: AtcStore) => Partial<AtcStore>) => void, g
           remoteSim.radioLog[remoteSim.radioLog.length - 1]?.id ?? s.lastSpokenRadioId,
       }));
     },
-    onSessionEnded: (report) => {
+    onSessionEnded: (report, error) => {
+      if (error && !report) {
+        radioAudio.playRadioClick("ERROR");
+        set((s) => ({
+          multiplayerError: error,
+          lastFeedback: { ok: false, text: error, at: s.sim.time },
+        }));
+        return;
+      }
       radioAudio.stopAllSpeech();
       set(() => ({
-        postSessionReport: report,
+        postSessionReport: report ?? null,
         appMode: "MULTIPLAYER_LOBBY",
       }));
     },
@@ -880,7 +924,7 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
   },
 
   claimMultiplayerRole: (role) => {
-    ensureWsClient(set, get).claimRole(role);
+    ensureWsClient(set, get).claimRole(role, get().playerName);
   },
 
   setMultiplayerReady: (ready) => {

@@ -54,11 +54,13 @@ export const TopBar: React.FC = () => {
   const sfxEnabled = useAtcStore((s) => s.sfxEnabled);
   const voiceEnabled = useAtcStore((s) => s.voiceEnabled);
   const theme = useAtcStore((s) => s.theme);
+  const playerId = useAtcStore((s) => s.playerId);
   const roomState = useAtcStore((s) => s.roomState);
   const assignedRole = useAtcStore((s) => s.assignedRole);
   const isOnline = useAtcStore((s) => s.isOnline);
   const setAppMode = useAtcStore((s) => s.setAppMode);
   const endMultiplayerSession = useAtcStore((s) => s.endMultiplayerSession);
+  const leaveMultiplayerRoom = useAtcStore((s) => s.leaveMultiplayerRoom);
 
   const switchStation = useAtcStore((s) => s.switchStation);
   const toggleAutoAssist = useAtcStore((s) => s.toggleAutoAssist);
@@ -362,6 +364,15 @@ export const TopBar: React.FC = () => {
               <span className="hidden 2xl:inline">LIVE ADS-B</span>
             </button>
             <button
+              onClick={() => setAppMode("MULTIPLAYER_LOBBY")}
+              disabled={!isOnline}
+              title="Open 3-Player Multiplayer Lobby (Host or Join by Code)"
+              className="hidden md:flex px-2 py-1.5 rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface)] text-[var(--atc-accent-text)] text-xs font-mono font-semibold items-center gap-1 whitespace-nowrap disabled:opacity-40"
+            >
+              <Users className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden 2xl:inline">MULTIPLAYER</span>
+            </button>
+            <button
               onClick={() => setShowVerificationModal(true)}
               title="Run Mandatory ATC Rules Verification Suite"
               className="px-2 py-1.5 rounded-md bg-[var(--atc-emerald-bg)] hover:opacity-90 border border-[var(--atc-emerald-border)] text-[var(--atc-emerald)] text-xs font-mono font-semibold flex items-center gap-1 whitespace-nowrap"
@@ -370,7 +381,7 @@ export const TopBar: React.FC = () => {
               <span className="hidden 2xl:inline">VERIFY</span>
             </button>
           </>
-        ) : (
+        ) : roomState?.hostPlayerId === playerId ? (
           <button
             onClick={endMultiplayerSession}
             title="Finish Multiplayer Session & Generate Performance Report"
@@ -378,6 +389,15 @@ export const TopBar: React.FC = () => {
           >
             <Flag className="w-3.5 h-3.5 shrink-0" />
             <span>END SHIFT</span>
+          </button>
+        ) : (
+          <button
+            onClick={leaveMultiplayerRoom}
+            title="Leave Multiplayer Room"
+            className="px-2.5 py-1.5 rounded-md bg-[var(--atc-surface)] border border-[var(--atc-border-strong)] text-[var(--atc-text)] text-xs font-mono font-bold flex items-center gap-1 whitespace-nowrap"
+          >
+            <Users className="w-3.5 h-3.5 shrink-0" />
+            <span>LEAVE</span>
           </button>
         )}
 

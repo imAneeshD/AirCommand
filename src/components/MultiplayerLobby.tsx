@@ -151,6 +151,11 @@ export const MultiplayerLobby: React.FC = () => {
                   type="text"
                   value={joinCode}
                   onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && joinCode.trim() && isOnline) {
+                      joinMultiplayerRoom(joinCode);
+                    }
+                  }}
                   placeholder="e.g. A7K92M"
                   maxLength={8}
                   className="w-full px-3 py-1.5 text-sm font-mono uppercase rounded border border-[var(--atc-border)] bg-[var(--atc-surface)]"
@@ -331,7 +336,10 @@ export const MultiplayerLobby: React.FC = () => {
                   </button>
                 ) : (
                   <span className="text-xs text-[var(--atc-cyan)] font-medium">
-                    Waiting for host ({roomState.slots[assignedRole ?? "TOWER"]?.playerName ?? "Host"}) to start...
+                    Waiting for host (
+                    {Object.values(roomState.slots).find((s) => s.playerId === roomState.hostPlayerId)
+                      ?.playerName ?? "Host"}
+                    ) to start...
                   </span>
                 )}
               </div>
