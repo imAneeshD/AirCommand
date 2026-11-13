@@ -986,24 +986,96 @@ export function getAirlineLivery(ac: Pick<Aircraft, "callsign" | "airline">): Ai
   };
 }
 
+export const AIRLINE_PRIMARY_HUBS: Record<string, HubAirportInfo> = {
+  BAW: { icao: "EGLL", city: "London", name: "London Heathrow (LHR)" },
+  UAE: { icao: "OMDB", city: "Dubai", name: "Dubai Intl (DXB)" },
+  FDB: { icao: "OMDB", city: "Dubai", name: "Dubai Intl (DXB)" },
+  ETD: { icao: "OMAA", city: "Abu Dhabi", name: "Zayed Intl (AUH)" },
+  QTR: { icao: "OTHH", city: "Doha", name: "Hamad Intl (DOH)" },
+  SIA: { icao: "WSSS", city: "Singapore", name: "Singapore Changi (SIN)" },
+  DLH: { icao: "EDDF", city: "Frankfurt", name: "Frankfurt Main (FRA)" },
+  AFR: { icao: "LFPG", city: "Paris", name: "Paris Charles de Gaulle (CDG)" },
+  KLM: { icao: "EHAM", city: "Amsterdam", name: "Amsterdam Schiphol (AMS)" },
+  THY: { icao: "LTFM", city: "Istanbul", name: "Istanbul Airport (IST)" },
+  SVA: { icao: "OERK", city: "Riyadh", name: "King Khalid Intl (RUH)" },
+  ABY: { icao: "OMSJ", city: "Sharjah", name: "Sharjah Intl (SHJ)" },
+  JZR: { icao: "OKBK", city: "Kuwait", name: "Kuwait Intl (KWI)" },
+  KAC: { icao: "OKBK", city: "Kuwait", name: "Kuwait Intl (KWI)" },
+  GFA: { icao: "OBBI", city: "Manama", name: "Bahrain Intl (BAH)" },
+  OMA: { icao: "OOMS", city: "Muscat", name: "Muscat Intl (MCT)" },
+  MAS: { icao: "WMKK", city: "Kuala Lumpur", name: "Kuala Lumpur Intl (KUL)" },
+  THA: { icao: "VTBS", city: "Bangkok", name: "Suvarnabhumi (BKK)" },
+  CPA: { icao: "VHHH", city: "Hong Kong", name: "Hong Kong Intl (HKG)" },
+  ANA: { icao: "RJTT", city: "Tokyo", name: "Tokyo Haneda (HND)" },
+  JAL: { icao: "RJTT", city: "Tokyo", name: "Tokyo Haneda (HND)" },
+  QFA: { icao: "YSSY", city: "Sydney", name: "Sydney Kingsford Smith (SYD)" },
+  KAL: { icao: "RKSI", city: "Seoul", name: "Incheon Intl (ICN)" },
+  FDX: { icao: "KMEM", city: "Memphis, TN", name: "Memphis SuperHub (MEM)" },
+  UPS: { icao: "KSDF", city: "Louisville, KY", name: "Louisville Worldport (SDF)" },
+  BOX: { icao: "EDDP", city: "Leipzig", name: "Leipzig/Halle (LEJ)" },
+  CLX: { icao: "ELLX", city: "Luxembourg", name: "Luxembourg Findel (LUX)" },
+};
+
 export function pickRemoteHub(
   seed: number,
   excludeAirportIcao: string,
-  carrierPrefix = ""
+  carrierPrefix = "",
+  bearingDeg?: number
 ): HubAirportInfo {
   const p = carrierPrefix.toUpperCase();
+
+  // If carrier has an authoritative international home hub (and current airport is not that hub)
+  if (AIRLINE_PRIMARY_HUBS[p] && AIRLINE_PRIMARY_HUBS[p].icao !== excludeAirportIcao) {
+    return AIRLINE_PRIMARY_HUBS[p];
+  }
+
   const isIndianCarrier =
-    p === "AIC" || p === "IGO" || p === "AXB" || p === "VTI" || p === "SEJ" || p === "AKJ";
+    p === "AIC" || p === "IGO" || p === "AXB" || p === "VTI" || p === "SEJ" || p === "AKJ" || p === "LLR" || p === "SDG" || p === "BZP";
   const isMiddleEast =
-    p === "UAE" || p === "FDB" || p === "ETD" || p === "QTR" || p === "SVA" || p === "ABY" || p === "JZR" || p === "KAC" || p === "OMS";
-  const isEuropean = p === "BAW" || p === "DLH" || p === "AFR" || p === "KLM" || p === "THY" || p === "BOX";
-  const isAsian = p === "SIA" || p === "MXD" || p === "BBC";
+    p === "UAE" || p === "FDB" || p === "ETD" || p === "QTR" || p === "SVA" || p === "ABY" || p === "JZR" || p === "KAC" || p === "OMS" || p === "GFA";
+  const isEuropean = p === "BAW" || p === "DLH" || p === "AFR" || p === "KLM" || p === "THY" || p === "BOX" || p === "CLX";
+  const isAsian = p === "SIA" || p === "MXD" || p === "BBC" || p === "MAS" || p === "THA" || p === "CPA" || p === "ANA" || p === "JAL";
 
   let pool: HubAirportInfo[];
   if (isMiddleEast || isEuropean || isAsian) {
     pool = REGIONAL_HUBS.INTERNATIONAL;
   } else if (isIndianCarrier || excludeAirportIcao.startsWith("V")) {
-    pool = REGIONAL_HUBS.INDIA;
+    // If geographic bearing is provided, match realistic domestic flight corridors
+    if (bearingDeg !== undefined) {
+      const b = ((bearingDeg % 360) + 360) % 360;
+      if (b >= 315 || b < 45) {
+        // North corridors: Delhi, Jaipur, Lucknow, Chandigarh
+        pool = [
+          { icao: "VIDP", city: "Delhi", name: "Indira Gandhi Intl (DEL)" },
+          { icao: "VIJP", city: "Jaipur", name: "Jaipur Intl (JAI)" },
+          { icao: "VILK", city: "Lucknow", name: "Chaudhary Charan Singh Intl (LKO)" },
+        ];
+      } else if (b >= 45 && b < 135) {
+        // East / Northeast corridors: Kolkata, Hyderabad, Chennai
+        pool = [
+          { icao: "VECC", city: "Kolkata", name: "Netaji Subhash Chandra Bose Intl (CCU)" },
+          { icao: "VOHS", city: "Hyderabad", name: "Rajiv Gandhi Intl (HYD)" },
+          { icao: "VOMM", city: "Chennai", name: "Chennai Intl (MAA)" },
+        ];
+      } else if (b >= 135 && b < 225) {
+        // South corridors: Kochi, Trivandrum, Chennai
+        pool = [
+          { icao: "VOCI", city: "Kochi", name: "Cochin Intl (COK)" },
+          { icao: "VOTV", city: "Thiruvananthapuram", name: "Trivandrum Intl (TRV)" },
+          { icao: "VOMM", city: "Chennai", name: "Chennai Intl (MAA)" },
+        ];
+      } else {
+        // West / Northwest corridors: Mumbai, Pune, Ahmedabad, Goa
+        pool = [
+          { icao: "VABB", city: "Mumbai", name: "Chhatrapati Shivaji Maharaj Intl (BOM)" },
+          { icao: "VAPO", city: "Pune", name: "Pune Intl (PNQ)" },
+          { icao: "VAAH", city: "Ahmedabad", name: "Sardar Vallabhbhai Patel Intl (AMD)" },
+          { icao: "VAGO", city: "Goa", name: "Dabolim Intl (GOI)" },
+        ];
+      }
+    } else {
+      pool = REGIONAL_HUBS.INDIA;
+    }
   } else {
     pool = REGIONAL_HUBS.US;
   }
@@ -1015,8 +1087,9 @@ export function pickRemoteHub(
 export function deriveFlightMetadata(
   callsign: string,
   flightKind: Aircraft["flightKind"],
-  airport: { id: AirportId; icao: string; name: string; city: string },
-  aircraftType: string
+  airport: { id: AirportId; icao: string; name: string; city: string; country?: string },
+  aircraftType: string,
+  bearingDeg?: number
 ): {
   originIcao: string;
   originName: string;
@@ -1029,7 +1102,7 @@ export function deriveFlightMetadata(
 } {
   const h = hashCallsign(callsign);
   const prefix = callsign.slice(0, 3).toUpperCase();
-  const remote = pickRemoteHub(h, airport.icao, prefix);
+  const remote = pickRemoteHub(h, airport.icao, prefix, bearingDeg);
   const digits = callsign.replace(/\D/g, "") || String(100 + (h % 899));
 
   // Determine realistic tail registration based on country/carrier prefix

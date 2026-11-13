@@ -118,14 +118,17 @@ class OfflineDataService {
       try {
         const res = await fetch("/data/worldAirportsSeed.json");
         if (res.ok) {
-          const full = (await res.json()) as AirportRecord[];
-          if (Array.isArray(full) && full.length > 0) {
-            for (const item of full) {
-              if (!this.memoryAirports.has(item.icao)) {
-                this.memoryAirports.set(item.icao, item);
+          const text = await res.text();
+          if (text && text.trim().length > 0) {
+            const full = JSON.parse(text) as AirportRecord[];
+            if (Array.isArray(full) && full.length > 0) {
+              for (const item of full) {
+                if (!this.memoryAirports.has(item.icao)) {
+                  this.memoryAirports.set(item.icao, item);
+                }
               }
+              void this.cacheAirports(full);
             }
-            void this.cacheAirports(full);
           }
         }
       } catch {

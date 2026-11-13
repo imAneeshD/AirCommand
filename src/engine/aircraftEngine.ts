@@ -657,6 +657,7 @@ export function updateAircraftStates(state: SimulationState): void {
         if (ac.altitude >= elev + 1200) {
           ac.state = "MISSED_APPROACH";
           ac.stateEnteredAt = state.time;
+          ac.assignedHeading = null;
         }
         break;
       }
@@ -704,6 +705,8 @@ export function updateAircraftStates(state: SimulationState): void {
           ac.state = "APPROACH";
           ac.stateEnteredAt = state.time;
           ac.minimumsGoAroundTriggered = false;
+          ac.assignedHeading = null;
+          ac.assignedApproach = null;
           completeClearancesOfType(ac, "GO_AROUND");
         }
         break;

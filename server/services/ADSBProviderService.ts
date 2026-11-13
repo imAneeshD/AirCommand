@@ -40,7 +40,11 @@ export class OpenSkyProvider implements ADSBProvider {
       throw new Error(`OpenSky HTTP ${res.status}`);
     }
 
-    const json = (await res.json()) as {
+    const raw = await res.text();
+    if (!raw || raw.trim().length === 0) {
+      return [];
+    }
+    const json = JSON.parse(raw) as {
       time?: number;
       states?: Array<
         [

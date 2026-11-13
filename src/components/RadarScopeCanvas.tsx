@@ -1505,27 +1505,6 @@ function drawRadioTransmissionSignal(
     ctx.stroke();
     ctx.restore();
   }
-
-  // 2. Concentric propagating radio wave arcs ((( ✈ ))) radiating from the calling aircraft
-  ctx.save();
-  for (let i = 0; i < 3; i++) {
-    const phase = ((nowMs % 1450) / 1450 + i / 3) % 1;
-    const waveR = 13 + phase * 26;
-    const waveAlpha = (1 - phase) * 0.85 * fade;
-    ctx.strokeStyle = `rgba(${rC}, ${gC}, ${bC}, ${waveAlpha.toFixed(2)})`;
-    ctx.lineWidth = 1.8 - phase * 0.6;
-
-    // Right-facing wave arc
-    ctx.beginPath();
-    ctx.arc(ax, ay, waveR, -0.72, 0.72);
-    ctx.stroke();
-
-    // Left-facing wave arc
-    ctx.beginPath();
-    ctx.arc(ax, ay, waveR, Math.PI - 0.72, Math.PI + 0.72);
-    ctx.stroke();
-  }
-  ctx.restore();
 }
 
 function drawScope(
@@ -2277,11 +2256,31 @@ function drawScope(
       ctx.stroke();
       ctx.restore();
     } else if (isHovered || isError || isEmerg) {
-      ctx.strokeStyle = isError || isEmerg ? "#ef4444" : "#94a3b8";
-      ctx.lineWidth = 1.5;
+      const hColor = isError || isEmerg ? "#ef4444" : isLight ? "#0284c7" : "#94a3b8";
+      ctx.save();
+      const r = 16;
+      const tick = 4;
+      ctx.strokeStyle = hColor;
+      ctx.lineWidth = isError || isEmerg ? 2.0 : 1.2;
       ctx.beginPath();
-      ctx.arc(ax, ay, 11, 0, Math.PI * 2);
+      // Top-Left
+      ctx.moveTo(ax - r, ay - r + tick);
+      ctx.lineTo(ax - r, ay - r);
+      ctx.lineTo(ax - r + tick, ay - r);
+      // Top-Right
+      ctx.moveTo(ax + r - tick, ay - r);
+      ctx.lineTo(ax + r, ay - r);
+      ctx.lineTo(ax + r, ay - r + tick);
+      // Bottom-Right
+      ctx.moveTo(ax + r, ay + r - tick);
+      ctx.lineTo(ax + r, ay + r);
+      ctx.lineTo(ax + r - tick, ay + r);
+      // Bottom-Left
+      ctx.moveTo(ax - r + tick, ay + r);
+      ctx.lineTo(ax - r, ay + r);
+      ctx.lineTo(ax - r, ay + r - tick);
       ctx.stroke();
+      ctx.restore();
     }
 
     // Aircraft Symbol (rotated by world heading + chart rotation)

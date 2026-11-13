@@ -1,5 +1,5 @@
 import { AIRCRAFT_TYPE_SPECS } from "../data/aircraftCatalog.ts";
-import { headingDiffDeg } from "../data/asteriaAirport.ts";
+import { getSuggestedTaxiRoutes, headingDiffDeg } from "../data/asteriaAirport.ts";
 import { createClearanceObject } from "../engine/clearanceEngine.ts";
 import { addRadioMessage } from "../engine/decisionEngine.ts";
 import {
@@ -7,6 +7,9 @@ import {
   createBaseSimulation,
   createDepartureAircraft,
   findBestGateForAircraft,
+  isCargoAircraft,
+  isMilitaryAircraft,
+  resolveWakeCategory,
   spawnRandomTraffic,
 } from "../engine/simulation.ts";
 import { updateAircraftStates } from "../engine/aircraftEngine.ts";
@@ -256,12 +259,32 @@ export function convertLiveTracksToSimulation(opts: {
 
     const altFtRaw = track.baroAltFt ?? elev + (track.onGround ? 0 : 6000);
     const agl = altFtRaw - elev;
-    const isGround = track.onGround || (distNm < 1.8 && agl < 250 && (track.groundSpeedKts ?? 0) < 45);
+    const vRate = track.verticalRateFpm ?? 0;
+    const isClimbingDeparture = vRate >= 450 && distNm < 22 && agl < 11000;
+    const rawIsGround = track.onGround || (distNm < 1.8 && agl < 250 && (track.groundSpeedKts ?? 0) < 45);
+    const isGround =
+      rawIsGround ||
+      (!isClimbingDeparture && distNm < 2.2 && agl < 350 && (track.groundSpeedKts ?? 0) < 60);
 
     if (isGround && layout.gateIds.length > 0 && groundCount < Math.max(2, layout.gateIds.length)) {
       groundCount += 1;
-      const gateId = pickClosestUnusedGate(layout, localPt.x, localPt.y, usedGates, idx);
+      const isCargo = isCargoAircraft(callsign, acType);
+      const isMilitary = isMilitaryAircraft(callsign, acType);
+      const wakeCategory = resolveWakeCategory(acType);
+      const gateId = pickClosestUnusedGate(layout, localPt.x, localPt.y, usedGates, idx, {
+        aircraftType: acType,
+        callsign,
+        isCargo,
+        isMilitary,
+        wakeCategory,
+      });
       const rwyId = layout.primaryDepartureRunway;
+
+      // When multiple ground flights are populated, make one actively being taxied so Ground controller has both parked & taxiing traffic
+      const shouldBeTaxied =
+        groundCount === 2 ||
+        (track.groundSpeedKts !== null && track.groundSpeedKts >= 8 && track.groundSpeedKts < 40);
+
       const depAc = createDepartureAircraft(sim, {
         id: callsign,
         callsign,
@@ -270,12 +293,49 @@ export function convertLiveTracksToSimulation(opts: {
         aircraftType: acType,
         gateId,
         targetRunway: rwyId,
-        requiresPushback: true,
+        requiresPushback: !shouldBeTaxied && !gateId.startsWith("S") && !gateId.toUpperCase().includes("REMOTE"),
         departureFix: layout.departureFixIds[idx % layout.departureFixIds.length],
         controller: "GROUND",
+        originIcao: opts.airportRecord.icao,
+        originName: `${opts.airportRecord.city} (${opts.airportRecord.name})`,
       });
       depAc.icao24 = track.icao24;
       if (track.registration) depAc.registration = track.registration;
+
+      if (shouldBeTaxied) {
+        const routes = getSuggestedTaxiRoutes(layout, `GATE_${gateId}`, rwyId, gateId);
+        if (routes.length > 0 && routes[0].nodeIds.length >= 3) {
+          const route = routes[0];
+          const midNode = layout.nodes[route.nodeIds[1]];
+          const nextNode = layout.nodes[route.nodeIds[2]];
+          if (midNode && nextNode) {
+            depAc.x = midNode.x;
+            depAc.y = midNode.y;
+            depAc.currentNodeId = midNode.id;
+            depAc.assignedRouteNodeIds = [...route.nodeIds];
+            depAc.assignedRouteTaxiways = [...route.taxiways];
+            depAc.routeStepIndex = 1;
+            depAc.speed = 14;
+            depAc.heading = Math.round(
+              ((Math.atan2(nextNode.x - midNode.x, nextNode.y - midNode.y) * 180) / Math.PI + 360) % 360
+            );
+            depAc.state = "TAXIING";
+            depAc.requiresPushback = false;
+            depAc.clearances.push(
+              createClearanceObject(sim, {
+                aircraft: depAc,
+                controller: "GROUND",
+                issuedBy: "AUTONOMOUS",
+                type: "TAXI",
+                parameters: { routeNodeIds: depAc.assignedRouteNodeIds, targetRunway: rwyId },
+                phraseology: `${meta.spokenCallsign}, taxi to runway ${rwyId} via ${depAc.assignedRouteTaxiways.join(" ")}.`,
+                expectedReadbackText: `Taxi to runway ${rwyId} via ${depAc.assignedRouteTaxiways.join(" ")}, ${meta.spokenCallsign}.`,
+                immediate: true,
+              })
+            );
+          }
+        }
+      }
       return;
     }
 
@@ -290,11 +350,14 @@ export function convertLiveTracksToSimulation(opts: {
       simY = Math.sin(idx) * 2.0;
     }
 
-    const vRate = track.verticalRateFpm ?? 0;
-    const isClimbingDeparture = vRate >= 450 && distNm < 22 && agl < 11000;
+    const bearingFromField = Math.round(((Math.atan2(simX, simY) * 180) / Math.PI + 360) % 360);
+    const inboundTowardField = Math.round(((Math.atan2(-simX, -simY) * 180) / Math.PI + 360) % 360);
+    const realHdg = track.trackDeg ?? (isClimbingDeparture ? bearingFromField : inboundTowardField);
+    const angleOffInbound = Math.abs(headingDiffDeg(realHdg, inboundTowardField));
+    const isOutboundDeparture = isClimbingDeparture || angleOffInbound > 95;
 
-    if (isClimbingDeparture) {
-      const heading = track.trackDeg ?? Math.round(((Math.atan2(simX, simY) * 180) / Math.PI + 360) % 360);
+    if (isOutboundDeparture) {
+      const heading = realHdg;
       const rwyId = pickBestRunway(layout, heading, "DEPARTURE");
       const gateId = pickClosestUnusedGate(layout, 0, 0, usedGates, idx);
       const alt = clamp(Math.round(altFtRaw / 100) * 100, elev + 900, elev + 9500);
@@ -311,6 +374,9 @@ export function convertLiveTracksToSimulation(opts: {
         targetRunway: rwyId,
         requiresPushback: false,
         controller: "DEPARTURE",
+        originIcao: opts.airportRecord.icao,
+        originName: `${opts.airportRecord.city} (${opts.airportRecord.name})`,
+        bearingDeg: heading,
       });
       depAc.icao24 = track.icao24;
       if (track.registration) depAc.registration = track.registration;
@@ -321,7 +387,7 @@ export function convertLiveTracksToSimulation(opts: {
       depAc.heading = heading;
       depAc.altitude = alt;
       depAc.speed = spd;
-      depAc.verticalSpeed = clamp(vRate, 800, 2200);
+      depAc.verticalSpeed = clamp(vRate, 600, 2400);
       depAc.assignedHeading = heading;
       depAc.assignedAltitude = targetAlt;
       depAc.assignedSpeed = spd;
@@ -352,11 +418,8 @@ export function convertLiveTracksToSimulation(opts: {
       return;
     }
 
-    // Inbound Arrival: preserve true track heading or point toward airport center
-    const inboundTowardField = Math.round(((Math.atan2(-simX, -simY) * 180) / Math.PI + 360) % 360);
-    const realHdg = track.trackDeg ?? inboundTowardField;
-    // If real track points roughly toward field (within 110 deg), use real track; else aim toward IAF/airport
-    const heading = headingDiffDeg(realHdg, inboundTowardField) <= 105 ? realHdg : inboundTowardField;
+    // Inbound Arrival: flying toward the airfield, heading preserved
+    const heading = realHdg;
     const targetRwy = pickBestRunway(layout, heading, "ARRIVAL");
     const gateId = pickClosestUnusedGate(layout, 0, 0, usedGates, idx);
     const alt = clamp(Math.round(altFtRaw / 100) * 100, elev + 1600, elev + 9000);
@@ -378,6 +441,9 @@ export function convertLiveTracksToSimulation(opts: {
       state: "APPROACH",
       controller: "DEPARTURE",
       assignedApproach: null,
+      destinationIcao: opts.airportRecord.icao,
+      destinationName: `${opts.airportRecord.city} (${opts.airportRecord.name})`,
+      bearingDeg: bearingFromField,
     });
     arrAc.icao24 = track.icao24;
     if (track.registration) arrAc.registration = track.registration;
@@ -405,6 +471,51 @@ export function convertLiveTracksToSimulation(opts: {
     const need = Math.max(0, targetCount - sim.aircraftOrder.length);
     for (let i = 0; i < need; i++) {
       spawnRandomTraffic(sim);
+    }
+  }
+
+  // Ensure ground operations always features both a parked plane (AT_GATE) and an actively taxiing plane (TAXIING)
+  const groundAcs = sim.aircraftOrder
+    .map((id) => sim.aircraft[id])
+    .filter((a): a is NonNullable<typeof a> => Boolean(a && a.controller === "GROUND" && a.state !== "COMPLETED_ARRIVAL" && a.state !== "COMPLETED_DEPARTURE"));
+
+  const hasTaxiing = groundAcs.some((a) => a.state === "TAXIING");
+  if (!hasTaxiing && groundAcs.length >= 2) {
+    const candidate = groundAcs[1];
+    if (candidate.state === "AT_GATE" && candidate.gateId) {
+      const rwyId = candidate.targetRunway || layout.primaryDepartureRunway;
+      const routes = getSuggestedTaxiRoutes(layout, `GATE_${candidate.gateId}`, rwyId, candidate.gateId);
+      if (routes.length > 0 && routes[0].nodeIds.length >= 3) {
+        const route = routes[0];
+        const midNode = layout.nodes[route.nodeIds[1]];
+        const nextNode = layout.nodes[route.nodeIds[2]];
+        if (midNode && nextNode) {
+          candidate.x = midNode.x;
+          candidate.y = midNode.y;
+          candidate.currentNodeId = midNode.id;
+          candidate.assignedRouteNodeIds = [...route.nodeIds];
+          candidate.assignedRouteTaxiways = [...route.taxiways];
+          candidate.routeStepIndex = 1;
+          candidate.speed = 14;
+          candidate.heading = Math.round(
+            ((Math.atan2(nextNode.x - midNode.x, nextNode.y - midNode.y) * 180) / Math.PI + 360) % 360
+          );
+          candidate.state = "TAXIING";
+          candidate.requiresPushback = false;
+          candidate.clearances.push(
+            createClearanceObject(sim, {
+              aircraft: candidate,
+              controller: "GROUND",
+              issuedBy: "AUTONOMOUS",
+              type: "TAXI",
+              parameters: { routeNodeIds: candidate.assignedRouteNodeIds, targetRunway: rwyId },
+              phraseology: `${candidate.spokenCallsign}, taxi to runway ${rwyId} via ${candidate.assignedRouteTaxiways.join(" ")}.`,
+              expectedReadbackText: `Taxi to runway ${rwyId} via ${candidate.assignedRouteTaxiways.join(" ")}, ${candidate.spokenCallsign}.`,
+              immediate: true,
+            })
+          );
+        }
+      }
     }
   }
 

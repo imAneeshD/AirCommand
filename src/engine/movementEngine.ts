@@ -5,6 +5,7 @@ import {
   runwayPoint,
 } from "../data/asteriaAirport.ts";
 import type { Aircraft, RunwayId, SimulationState } from "../types/atc.ts";
+import { computeDepAppGuidance } from "../utils/depAppGuidance.ts";
 import { completeClearancesOfType } from "./clearanceEngine.ts";
 import {
   canAircraftExecuteAction,
@@ -607,19 +608,45 @@ function integrateAirborneFlight(
     const outboundHdg = rwy?.heading ?? ac.heading;
     ac.heading = turnTowardHeading(ac.heading, outboundHdg, 4 * dt, "NEAREST");
   } else if (
-    (ac.state === "GO_AROUND" || ac.state === "MISSED_APPROACH") &&
+    (ac.state === "GO_AROUND" || ac.state === "MISSED_APPROACH" || ac.state === "APPROACH") &&
     ac.assignedHeading === null &&
     !ac.assignedDirectFix
   ) {
-    // Standard missed approach climb track: climb straight out along runway heading
     const missedFix = state.airport.fixes["MISSED"];
     const agl = Math.max(0, ac.altitude - elev);
-    if (missedFix && agl >= 1200) {
+    if (ac.state === "GO_AROUND" && agl < 1200) {
+      // Initial straight-out TOGA climb on runway centerline
+      const gaHdg = rwy?.heading ?? ac.heading;
+      ac.heading = turnTowardHeading(ac.heading, gaHdg, 4 * dt, "NEAREST");
+    } else if (missedFix && ac.state === "MISSED_APPROACH" && agl < 1800) {
       const tgtHdg = bearingDeg(ac.x, ac.y, missedFix.x, missedFix.y);
       ac.heading = turnTowardHeading(ac.heading, tgtHdg, 4 * dt, "NEAREST");
     } else {
-      const gaHdg = rwy?.heading ?? ac.heading;
-      ac.heading = turnTowardHeading(ac.heading, gaHdg, 4 * dt, "NEAREST");
+      // Re-sequencing or pattern recovery toward downwind gate or IAF
+      const guidance = computeDepAppGuidance(state.airport, ac, rwyId);
+      ac.heading = turnTowardHeading(
+        ac.heading,
+        guidance.recommendedHeading,
+        4 * dt,
+        guidance.recommendedTurnDirection
+      );
+    }
+  }
+
+  // Intercept and lock onto ILS localizer when returning on approach
+  if (ac.flightKind === "ARRIVAL" && ac.state === "APPROACH" && rwy) {
+    const alongApp = alongRunwayNm(rwy, ac.x, ac.y);
+    const crossApp = crossTrackRunwayNm(rwy, ac.x, ac.y);
+    if (
+      alongApp >= -12.0 &&
+      alongApp <= -0.8 &&
+      Math.abs(crossApp) <= 0.45 &&
+      headingDiffDeg(ac.heading, rwy.heading) <= 45
+    ) {
+      ac.assignedApproach = rwy.id;
+      ac.state = "FINAL";
+      ac.stateEnteredAt = state.time;
+      ac.assignedHeading = null;
     }
   }
 

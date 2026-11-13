@@ -488,7 +488,7 @@ export const LiveTrafficView: React.FC = () => {
                       )}
                     </div>
                     <div className="text-[10px] text-[var(--atc-muted)]">
-                      ICAO24 {a.icao24} · {a.originCountry ?? "Unknown origin"}
+                      ICAO24 {a.icao24} · Flag: {a.originCountry ?? "Intl Registry"}
                     </div>
                   </div>
                   <div className="text-right font-mono text-[11px]">
@@ -553,8 +553,8 @@ export const LiveTrafficView: React.FC = () => {
                       {effOperator &&
                       selectedTrack.originCountry &&
                       effOperator !== selectedTrack.originCountry
-                        ? `${effOperator} • ${selectedTrack.originCountry}`
-                        : effOperator || selectedTrack.originCountry || "Unknown registry"}
+                        ? `${effOperator} • Flag: ${selectedTrack.originCountry}`
+                        : effOperator ? `${effOperator} • Flag: ${selectedTrack.originCountry ?? "Intl"}` : `Flag: ${selectedTrack.originCountry ?? "Unknown registry"}`}
                     </p>
                   </div>
 
