@@ -1383,15 +1383,36 @@ export function evaluateTaxiRouteConflicts(
   }
 
   const elev = airport.elevationFt;
-  const checkNodes = nodeIds.slice(1);
   const myNodeIdx = new Map<string, number>();
-  for (let i = 1; i < nodeIds.length; i++) {
+  for (let i = 0; i < nodeIds.length; i++) {
     myNodeIdx.set(nodeIds[i], i);
   }
 
+  const myAc = excludeAircraftId ? sim.aircraft[excludeAircraftId] : null;
+  const firstNode = airport.nodes[nodeIds[0]];
+  const secondNode = airport.nodes[nodeIds[1]];
+
+  const myX = myAc ? myAc.x : firstNode ? firstNode.x : 0;
+  const myY = myAc ? myAc.y : firstNode ? firstNode.y : 0;
+
+  let routeHeadingDeg = 0;
+  if (firstNode && secondNode) {
+    const rdx = secondNode.x - firstNode.x;
+    const rdy = secondNode.y - firstNode.y;
+    routeHeadingDeg = ((Math.atan2(rdx, rdy) * 180) / Math.PI + 360) % 360;
+  }
+  const myHeadingDeg = myAc && myAc.speed > 1.5 ? myAc.heading : routeHeadingDeg;
+
+  // User rules:
+  // 1. Strictly show traffic in taxiway ONLY when planes are coming in opposite direction to one another.
+  // 2. Distance must be less than 100-200m (<= 0.108 NM).
+  // 3. Do NOT show traffic if planes are moving in same direction with proper distance (> 75m / 0.04 NM).
+  const DIST_100M_NM = 100 / 1852; // ~0.05399 NM (100 meters)
+  const DIST_200M_NM = 200 / 1852; // ~0.10799 NM (200 meters)
+  const PROPER_FOLLOWING_DIST_NM = 75 / 1852; // ~0.0405 NM (75 meters)
+
   const blockedSet = new Set<string>();
   const congestedSet = new Set<string>();
-  let headOnFound = false;
 
   for (const otherId of sim.aircraftOrder) {
     if (otherId === excludeAircraftId) continue;
@@ -1400,54 +1421,82 @@ export function evaluateTaxiRouteConflicts(
       !other ||
       other.altitude > elev + 50 ||
       other.state === "COMPLETED_ARRIVAL" ||
-      other.state === "COMPLETED_DEPARTURE"
+      other.state === "COMPLETED_DEPARTURE" ||
+      other.state === "AT_GATE"
     ) {
       continue;
     }
 
-    // 1. Check physical presence along candidate path (within ~0.055 NM of path nodes/segments)
-    let minD = Infinity;
-    let closestIdx = -1;
-    for (let i = 0; i < checkNodes.length; i++) {
-      const n = airport.nodes[checkNodes[i]];
+    // Physical distance between aircraft
+    const distNm = Math.hypot(other.x - myX, other.y - myY);
+
+    // Check interaction with candidate route path (distance to nodes or path segments)
+    let minDToRoute = Infinity;
+    for (let i = 0; i < nodeIds.length; i++) {
+      const n = airport.nodes[nodeIds[i]];
       if (!n) continue;
       const d = Math.hypot(n.x - other.x, n.y - other.y);
-      if (d < minD) {
-        minD = d;
-        closestIdx = i + 1;
+      if (d < minDToRoute) {
+        minDToRoute = d;
+      }
+      if (i < nodeIds.length - 1) {
+        const nextN = airport.nodes[nodeIds[i + 1]];
+        if (nextN) {
+          const segDx = nextN.x - n.x;
+          const segDy = nextN.y - n.y;
+          const lenSq = segDx * segDx + segDy * segDy;
+          if (lenSq > 0.0000001) {
+            const t = Math.max(0, Math.min(1, ((other.x - n.x) * segDx + (other.y - n.y) * segDy) / lenSq));
+            const projX = n.x + t * segDx;
+            const projY = n.y + t * segDy;
+            const segD = Math.hypot(other.x - projX, other.y - projY);
+            if (segD < minDToRoute) {
+              minDToRoute = segD;
+            }
+          }
+        }
       }
     }
 
-    if (minD <= 0.055 && closestIdx >= 1) {
-      const prevN = airport.nodes[nodeIds[closestIdx - 1]];
-      const curN = airport.nodes[nodeIds[closestIdx]];
-      let facingOpposing = false;
-      if (prevN && curN) {
-        const vx = curN.x - prevN.x;
-        const vy = curN.y - prevN.y;
-        const vLen = Math.hypot(vx, vy);
-        if (vLen > 0.0001) {
-          const rad = (other.heading * Math.PI) / 180;
-          const dot = ((vx / vLen) * Math.sin(rad)) + ((vy / vLen) * Math.cos(rad));
-          facingOpposing = dot < -0.25;
-        }
-      }
-      if (
-        facingOpposing ||
-        other.speed <= 1.5 ||
-        other.state === "HOLD_POSITION" ||
-        other.state === "HOLDING_SHORT" ||
-        other.state === "PUSHBACK_COMPLETE"
-      ) {
-        blockedSet.add(other.callsign);
-        if (facingOpposing) headOnFound = true;
-      } else {
-        congestedSet.add(other.callsign);
-      }
+    // If an aircraft is stationary and physically occupying a node/segment of this route,
+    // that segment is physically impassable.
+    const isStationaryOnRoute =
+      minDToRoute <= 0.025 &&
+      other.speed <= 1.5 &&
+      (other.state === "HOLD_POSITION" || other.state === "HOLDING_SHORT");
+
+    if (isStationaryOnRoute) {
+      blockedSet.add(other.callsign);
       continue;
     }
 
-    // 2. Check remaining active taxi route overlap (head-on opposing vs same-direction sharing)
+    // Dynamic taxiway traffic rules (User requirement):
+    // Strictly show traffic in taxiway only when planes are coming in opposite direction to one another,
+    // and distance is less than 100-200m.
+    if (distNm > DIST_200M_NM) {
+      continue;
+    }
+
+    const sharesAssignedNode = other.assignedRouteNodeIds.some((nid) => myNodeIdx.has(nid));
+    if (minDToRoute > 0.055 && !sharesAssignedNode) {
+      continue;
+    }
+
+    // Direction calculations
+    const headingDiff = Math.abs(((myHeadingDeg - other.heading + 540) % 360) - 180);
+    const dx = other.x - myX;
+    const dy = other.y - myY;
+    const radOther = (other.heading * Math.PI) / 180;
+    const radMy = (myHeadingDeg * Math.PI) / 180;
+    const ux = distNm > 0.0001 ? dx / distNm : 0;
+    const uy = distNm > 0.0001 ? dy / distNm : 0;
+
+    const otherFacingMe = ((-ux) * Math.sin(radOther)) + ((-uy) * Math.cos(radOther));
+    const myFacingOther = (ux * Math.sin(radMy)) + (uy * Math.cos(radMy));
+
+    // Route order analysis
+    let routeIsOpposing = false;
+    let routeIsSameDirection = false;
     if (other.assignedRouteNodeIds.length > 0 && other.routeStepIndex < other.assignedRouteNodeIds.length) {
       const otherRem = other.assignedRouteNodeIds.slice(other.routeStepIndex);
       const sharedPairs: Array<{ myI: number; otherI: number }> = [];
@@ -1460,15 +1509,46 @@ export function evaluateTaxiRouteConflicts(
       if (sharedPairs.length >= 2) {
         const first = sharedPairs[0];
         const last = sharedPairs[sharedPairs.length - 1];
-        if ((first.myI < last.myI && first.otherI > last.otherI) || (first.myI > last.myI && first.otherI < last.otherI)) {
-          blockedSet.add(other.callsign);
-          headOnFound = true;
-        } else {
-          congestedSet.add(other.callsign);
+        if (
+          (first.myI < last.myI && first.otherI > last.otherI) ||
+          (first.myI > last.myI && first.otherI < last.otherI)
+        ) {
+          routeIsOpposing = true;
+        } else if (
+          (first.myI < last.myI && first.otherI < last.otherI) ||
+          (first.myI > last.myI && first.otherI > last.otherI)
+        ) {
+          routeIsSameDirection = true;
         }
-      } else if (sharedPairs.length === 1 && sharedPairs[0].myI <= 10) {
-        congestedSet.add(other.callsign);
       }
+    }
+
+    // 1. Same direction traffic check (requires similar headings and non-opposing routes)
+    const isSameDirection = (routeIsSameDirection && headingDiff < 70) || (headingDiff < 70 && !routeIsOpposing);
+    if (isSameDirection) {
+      // Planes are moving in same direction with proper distance -> do NOT show traffic
+      if (distNm >= PROPER_FOLLOWING_DIST_NM) {
+        continue;
+      }
+      // If moving in same direction, queueing or following is normal: do not show opposing conflict
+      continue;
+    }
+
+    // 2. Opposing direction traffic check
+    const isOppositeDirection =
+      routeIsOpposing ||
+      (headingDiff > 100 && (otherFacingMe > 0.1 || myFacingOther > 0.1 || minDToRoute <= 0.025));
+
+    if (!isOppositeDirection) {
+      // Not coming in opposite direction -> do not show traffic
+      continue;
+    }
+
+    // Opposing traffic within 200m
+    if (distNm <= DIST_100M_NM) {
+      blockedSet.add(other.callsign);
+    } else {
+      congestedSet.add(other.callsign);
     }
   }
 
@@ -1477,9 +1557,7 @@ export function evaluateTaxiRouteConflicts(
     return {
       conflictLevel: "BLOCKED",
       conflictCallsigns: calls,
-      conflictReason: headOnFound
-        ? `Head-on / opposing traffic with ${calls.join(", ")}`
-        : `Blocked on taxiway by ${calls.join(", ")}`,
+      conflictReason: `Opposing traffic head-on within 100m (${calls.join(", ")})`,
     };
   }
   if (congestedSet.size > 0) {
@@ -1487,7 +1565,7 @@ export function evaluateTaxiRouteConflicts(
     return {
       conflictLevel: "CONGESTED",
       conflictCallsigns: calls,
-      conflictReason: `Same taxiway traffic ahead (${calls.join(", ")})`,
+      conflictReason: `Opposing traffic approaching within 200m (${calls.join(", ")})`,
     };
   }
   return { conflictLevel: "CLEAR", conflictCallsigns: [] };

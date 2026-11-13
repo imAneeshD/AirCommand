@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createScenarioSimulation, stepSimulation } from "../src/engine/simulation.ts";
 import { submitClearanceDecision, controllerCallsign, controllerFrequency } from "../src/engine/decisionEngine.ts";
 import { getAglAltitudeFt, isSurfaceAircraft } from "../src/utils/telemetry.ts";
+import { evaluateTaxiRouteConflicts } from "../src/data/asteriaAirport.ts";
 
 function stepUntilCondition(sim: ReturnType<typeof createScenarioSimulation>, pred: () => boolean, maxSteps = 30): void {
   for (let i = 0; i < maxSteps; i++) {
@@ -323,4 +324,81 @@ test("Single active role with other roles autonomous: auto controllers progress 
       dep.clearances.some((c) => c.type === "TAKEOFF" || c.type === "LINE_UP"),
     `Auto Tower must issue LINE_UP or TAKEOFF, current state: ${dep.state}`
   );
+});
+
+test("Taxiway traffic detection strictly enforces opposing directions and 100-200m thresholds, ignoring same-direction queues", () => {
+  const sim = createScenarioSimulation("LIGHT");
+  const airport = sim.airport;
+
+  // Find two connected nodes on a taxiway
+  const edge = airport.edges.find((e) => !e.runwayCrossing && airport.nodes[e.from] && airport.nodes[e.to])!;
+  assert.ok(edge);
+  const nodeFrom = airport.nodes[edge.from]!;
+  const nodeTo = airport.nodes[edge.to]!;
+
+  const rdx = nodeTo.x - nodeFrom.x;
+  const rdy = nodeTo.y - nodeFrom.y;
+  const rlen = Math.hypot(rdx, rdy);
+  const ux = rdx / rlen;
+  const uy = rdy / rlen;
+  const fwdDeg = ((Math.atan2(ux, uy) * 180) / Math.PI + 360) % 360;
+  const revDeg = (fwdDeg + 180) % 360;
+
+  // Route candidate: nodeFrom -> nodeTo spanning 300 meters
+  nodeTo.x = nodeFrom.x + ux * (300 / 1852);
+  nodeTo.y = nodeFrom.y + uy * (300 / 1852);
+  const routeCandidate = [nodeFrom.id, nodeTo.id];
+
+  const ac1 = Object.values(sim.aircraft)[0];
+  const ac2 = Object.values(sim.aircraft)[1];
+  ac1.altitude = airport.elevationFt;
+  ac2.altitude = airport.elevationFt;
+  ac1.x = nodeFrom.x;
+  ac1.y = nodeFrom.y;
+  ac1.heading = fwdDeg;
+  ac1.speed = 10;
+  ac1.state = "TAXIING";
+
+  // Case 1: Same direction, 120m apart (~0.065 NM, > 75m proper distance)
+  // MUST BE CLEAR (do NOT show traffic if moving in same direction with proper distance)
+  ac2.x = nodeFrom.x + ux * (120 / 1852);
+  ac2.y = nodeFrom.y + uy * (120 / 1852);
+  ac2.heading = fwdDeg; // same direction
+  ac2.speed = 10;
+  ac2.state = "TAXIING";
+  ac2.assignedRouteNodeIds = [nodeFrom.id, nodeTo.id];
+  ac2.routeStepIndex = 0;
+
+  const sameDirRes = evaluateTaxiRouteConflicts(airport, routeCandidate, sim, ac1.id);
+  assert.equal(sameDirRes.conflictLevel, "CLEAR", "Same direction traffic with proper distance must be CLEAR");
+
+  // Case 2: Greater than 200m apart (e.g. 250m = 0.135 NM) facing opposite direction
+  // MUST BE CLEAR (distance > 200m strictly ignores traffic)
+  ac2.x = nodeFrom.x + ux * (250 / 1852);
+  ac2.y = nodeFrom.y + uy * (250 / 1852);
+  ac2.heading = revDeg; // opposing
+  const farOppRes = evaluateTaxiRouteConflicts(airport, routeCandidate, sim, ac1.id);
+  assert.equal(farOppRes.conflictLevel, "CLEAR", "Opposing traffic farther than 200m must be CLEAR");
+
+  // Case 3: Opposing direction between 100m and 200m (e.g. 150m = 0.081 NM)
+  // MUST BE CONGESTED (shows TRAFFIC badge)
+  ac2.x = nodeFrom.x + ux * (150 / 1852);
+  ac2.y = nodeFrom.y + uy * (150 / 1852);
+  ac2.heading = revDeg; // opposing head-on
+  ac2.assignedRouteNodeIds = [nodeTo.id, nodeFrom.id];
+  ac2.routeStepIndex = 0;
+  const opp150Res = evaluateTaxiRouteConflicts(airport, routeCandidate, sim, ac1.id);
+  assert.equal(opp150Res.conflictLevel, "CONGESTED", "Opposing traffic between 100m-200m must be CONGESTED (TRAFFIC)");
+  assert.ok(opp150Res.conflictCallsigns.includes(ac2.callsign));
+
+  // Case 4: Opposing direction less than 100m (e.g. 60m = 0.032 NM)
+  // MUST BE BLOCKED
+  ac2.x = nodeFrom.x + ux * (60 / 1852);
+  ac2.y = nodeFrom.y + uy * (60 / 1852);
+  ac2.heading = revDeg; // opposing head-on
+  ac2.assignedRouteNodeIds = [nodeTo.id, nodeFrom.id];
+  ac2.routeStepIndex = 0;
+  const opp60Res = evaluateTaxiRouteConflicts(airport, routeCandidate, sim, ac1.id);
+  assert.equal(opp60Res.conflictLevel, "BLOCKED", "Opposing traffic within 100m must be BLOCKED");
+  assert.ok(opp60Res.conflictCallsigns.includes(ac2.callsign));
 });
