@@ -300,7 +300,7 @@ export const ClearanceControlDeck: React.FC = () => {
                 {hasConflicts && firstConflict && (
                   <div
                     className={`rounded px-2 py-1.5 text-[10px] font-mono border flex items-start gap-1.5 ${
-                      !hasClearBypass || firstConflict.conflictLevel === "BLOCKED"
+                      firstConflict.conflictLevel === "BLOCKED"
                         ? "bg-[var(--atc-red-bg)] border-[var(--atc-red-border)] text-[var(--atc-red)]"
                         : "bg-[var(--atc-amber-bg)] border-[var(--atc-amber-border)] text-[var(--atc-amber)]"
                     }`}
@@ -310,7 +310,7 @@ export const ClearanceControlDeck: React.FC = () => {
                       <strong>Route Traffic Warning:</strong> {firstConflict.conflictReason}.{" "}
                       {hasClearBypass
                         ? "Select a CLEAR bypass route below."
-                        : "All paths share traffic — hold position or pick least congested route."}
+                        : "Hold position or pick alternate route."}
                     </span>
                   </div>
                 )}
@@ -318,20 +318,8 @@ export const ClearanceControlDeck: React.FC = () => {
                 <div className="space-y-1">
                   {taxiRoutes.slice(0, 5).map((rt, idx) => {
                     const isClear = rt.conflictLevel === "CLEAR";
-                    const firstOpposingCallsign = rt.conflictCallsigns[0];
-                    const opposingAc = firstOpposingCallsign ? sim.aircraft[firstOpposingCallsign] : null;
-                    const distNm = opposingAc ? Math.hypot(opposingAc.x - ac.x, opposingAc.y - ac.y) : Infinity;
-                    let comingStraightAtUs = false;
-                    if (opposingAc && distNm <= 0.054) {
-                      const dx = opposingAc.x - ac.x;
-                      const dy = opposingAc.y - ac.y;
-                      const rad = (opposingAc.heading * Math.PI) / 180;
-                      const fwdX = Math.sin(rad);
-                      const fwdY = Math.cos(rad);
-                      const dot = ((-dx * fwdX) + (-dy * fwdY)) / distNm;
-                      comingStraightAtUs = dot > 0.45;
-                    }
-                    const isBlocked = rt.conflictLevel === "BLOCKED" && distNm <= 0.054 && comingStraightAtUs;
+                    const isBlocked = rt.conflictLevel === "BLOCKED";
+                    const isTraffic = rt.conflictLevel === "CONGESTED";
                     return (
                       <button
                         key={idx}
@@ -356,7 +344,7 @@ export const ClearanceControlDeck: React.FC = () => {
                         className={`w-full text-left px-2.5 py-1.5 rounded border text-[11px] font-mono flex items-center justify-between gap-2 disabled:opacity-35 transition-colors ${
                           isBlocked
                             ? "border-[var(--atc-red-border)] bg-[var(--atc-red-bg)]/60 hover:bg-[var(--atc-red-bg)] text-[var(--atc-text)]"
-                            : !isClear
+                            : isTraffic
                             ? "border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)]/50 hover:bg-[var(--atc-amber-bg)] text-[var(--atc-text)]"
                             : "border-[var(--atc-border)] hover:border-[var(--atc-emerald-border)] bg-[var(--atc-surface)] hover:bg-[var(--atc-emerald-bg)] text-[var(--atc-text)]"
                         }`}
@@ -367,14 +355,14 @@ export const ClearanceControlDeck: React.FC = () => {
                             className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${
                               isBlocked
                                 ? "bg-[var(--atc-red-bg)] border-[var(--atc-red-border)] text-[var(--atc-red)]"
-                                : !isClear
+                                : isTraffic
                                 ? "bg-[var(--atc-amber-bg)] border-[var(--atc-amber-border)] text-[var(--atc-amber)]"
                                 : "bg-[var(--atc-emerald-bg)] border-[var(--atc-emerald-border)] text-[var(--atc-emerald)]"
                             }`}
                           >
                             {isBlocked
                               ? `BLOCKED · ${rt.conflictCallsigns.slice(0, 2).join(",")}`
-                              : !isClear
+                              : isTraffic
                               ? `TRAFFIC · ${rt.conflictCallsigns.slice(0, 2).join(",")}`
                               : "CLEAR"}
                           </span>

@@ -207,15 +207,43 @@ export function inspectGroundConflict(
   }
 
   const distToBlocker = blocker ? Math.hypot(blocker.x - ac.x, blocker.y - ac.y) : Infinity;
+
+  // Strict User Rules:
+  // 1. Only show traffic in taxiway when planes are coming in opposite direction to one another.
+  // 2. Distance must be less than 100-200m (<= 0.108 NM).
+  // 3. Do NOT show traffic if planes are moving in same direction with proper distance.
+  const DIST_200M_NM = 200 / 1852; // ~0.108 NM
+  const PROPER_FOLLOWING_DIST_NM = 75 / 1852; // ~0.04 NM
+
+  if (distToBlocker > DIST_200M_NM && !isYieldWaiting) {
+    return null;
+  }
+
+  const headingDiff = blocker
+    ? Math.abs(((ac.heading - blocker.heading + 540) % 360) - 180)
+    : 0;
+
+  if (blocker && headingDiff < 70 && !isYieldWaiting) {
+    // Same direction traffic with proper distance or normal holding
+    if (distToBlocker >= PROPER_FOLLOWING_DIST_NM || ac.state === "HOLD_POSITION") {
+      return null;
+    }
+  }
+
   let isComingStraightAtUs = false;
-  if (blocker && distToBlocker <= 0.054) {
+  if (blocker && distToBlocker <= DIST_200M_NM) {
     const dx = blocker.x - ac.x;
     const dy = blocker.y - ac.y;
     const radOther = (blocker.heading * Math.PI) / 180;
     const otherFwdX = Math.sin(radOther);
     const otherFwdY = Math.cos(radOther);
     const dotOtherTowardsUs = ((-dx * otherFwdX) + (-dy * otherFwdY)) / distToBlocker;
-    isComingStraightAtUs = dotOtherTowardsUs > 0.65;
+    isComingStraightAtUs = (dotOtherTowardsUs > 0.45 && headingDiff > 90) || headingDiff > 120;
+  }
+
+  // If not yield-waiting and not coming in opposite direction, suppress alert
+  if (!isYieldWaiting && blocker && !isComingStraightAtUs && headingDiff <= 90) {
+    return null;
   }
 
   const mutualDeadlock = Boolean(
