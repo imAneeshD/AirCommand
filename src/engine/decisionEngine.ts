@@ -1172,6 +1172,14 @@ export function processPilotReadbacks(state: SimulationState): void {
       if (clearance.cancelled || clearance.lifecycle !== "READBACK_PENDING") {
         continue;
       }
+      // In single role mode, wait for spoken voice exchange to complete before moving
+      if (clearance.syncGated) {
+        // Safety fallback: if voice somehow stalled for > 7.5s, auto-release so plane is not stuck
+        if (state.time < clearance.issuedAt + 7.5) {
+          continue;
+        }
+        clearance.syncGated = false;
+      }
       if (state.time < clearance.readbackDueAt) {
         continue;
       }
@@ -1238,6 +1246,79 @@ export function processPilotReadbacks(state: SimulationState): void {
       });
     }
   }
+}
+
+/**
+ * Acknowledges a sync-gated clearance immediately upon pilot voice completion in single-role mode,
+ * executing its movement effects on the aircraft.
+ */
+export function acknowledgeSyncClearance(
+  state: SimulationState,
+  clearanceId: string
+): boolean {
+  for (const id of state.aircraftOrder) {
+    const aircraft = state.aircraft[id];
+    if (!aircraft) continue;
+    const clearance = aircraft.clearances.find((c) => c.id === clearanceId);
+    if (!clearance || clearance.cancelled) continue;
+
+    if (clearance.lifecycle === "READBACK_PENDING") {
+      clearance.syncGated = false;
+      clearance.actualReadbackText = clearance.expectedReadbackText;
+      if (aircraft.hasReadbackError) {
+        state.metrics.readbackErrorsCaught += 1;
+      }
+      applyAcknowledgedClearance(state, aircraft, clearance);
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Triggers a readback error on a sync-gated clearance in single-role mode once spoken by pilot,
+ * placing the aircraft into holding state.
+ */
+export function triggerSyncReadbackError(
+  state: SimulationState,
+  clearanceId: string
+): boolean {
+  for (const id of state.aircraftOrder) {
+    const aircraft = state.aircraft[id];
+    if (!aircraft) continue;
+    const clearance = aircraft.clearances.find((c) => c.id === clearanceId);
+    if (!clearance || clearance.cancelled) continue;
+
+    if (clearance.lifecycle === "READBACK_PENDING") {
+      clearance.syncGated = false;
+      aircraft.armNextReadbackError = false;
+      const { errorText } = formatRunwayOrAltitudeError(clearance, state);
+      clearance.actualReadbackText = errorText;
+      transitionClearanceLifecycle(clearance, "READBACK_ERROR");
+      aircraft.hasReadbackError = true;
+      aircraft.readbackErrorClearanceId = clearance.id;
+
+      addRadioMessage(state, {
+        sender: aircraft.callsign,
+        recipient: controllerCallsign(clearance.controller, state.airport),
+        controller: clearance.controller,
+        aircraftId: aircraft.id,
+        category: "READBACK_ERROR",
+        text: `${errorText} [READBACK ERROR — EXPECTED: "${clearance.expectedReadbackText}"]`,
+      });
+
+      state.incidents.push({
+        id: nextId(state, "inc"),
+        timestamp: state.time,
+        severity: "WARNING",
+        code: "READBACK_ERROR",
+        message: `Readback error by ${aircraft.callsign}: read back "${errorText}" instead of "${clearance.expectedReadbackText}". Holding pending correction.`,
+        aircraftIds: [aircraft.id],
+      });
+      return true;
+    }
+  }
+  return false;
 }
 
 function pseudoDeterministicRoll(

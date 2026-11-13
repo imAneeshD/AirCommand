@@ -1,9 +1,13 @@
 import { create } from "zustand";
 import {
+  acknowledgeSyncClearance,
+  addRadioMessage,
   clearStoppedRunwayEmergency,
+  controllerCallsign,
   submitClearanceDecision,
   triggerEmergency,
   triggerRadioFailure,
+  triggerSyncReadbackError,
 } from "../engine/decisionEngine.ts";
 import {
   createScenarioSimulation,
@@ -243,14 +247,24 @@ export function collectNewMessagesSince(
   return radioLog;
 }
 
+const spokenRadioMsgIds = new Set<string>();
+
 function dispatchRadioMessagesAudio(
   sim: SimulationState,
-  messages: SimulationState["radioLog"]
+  messages: SimulationState["radioLog"],
+  onUpdate?: () => void
 ): void {
+  // Sync radio audio mode: single role mode is synchronous, ALL mode is async with ducking
+  radioAudio.syncMode = sim.config.activePlayerStation !== "ALL";
+
   for (const msg of messages) {
+    if (spokenRadioMsgIds.has(msg.id)) {
+      continue;
+    }
     if (!shouldHearControllerAudio(sim.config.activePlayerStation, msg.controller)) {
       continue;
     }
+    spokenRadioMsgIds.add(msg.id);
 
     if (msg.category === "READBACK_ERROR") {
       radioAudio.playRadioClick("ERROR");
@@ -266,7 +280,68 @@ function dispatchRadioMessagesAudio(
       radioAudio.speakRadio(msg.text, "PILOT", msg.aircraftId ?? msg.sender, false);
     } else if (msg.category === "ATC_CLEARANCE") {
       radioAudio.playRadioClick("ATC");
-      radioAudio.speakRadio(msg.text, "CONTROLLER", msg.controller, true);
+
+      const ac = msg.aircraftId ? sim.aircraft[msg.aircraftId] : undefined;
+      const clr = ac?.clearances.find((c) => c.syncGated && c.lifecycle === "READBACK_PENDING");
+
+      if (clr && sim.config.activePlayerStation !== "ALL" && ac) {
+        // Single role mode: speak ATC command synchronously, then pilot reads back, then execute!
+        radioAudio.speakRadio(msg.text, "CONTROLLER", msg.controller, true, () => {
+          // Check for readback error:
+          const shouldError =
+            ac.armNextReadbackError ||
+            (sim.config.readbackErrorProbability > 0 &&
+              Math.random() < sim.config.readbackErrorProbability);
+
+          if (shouldError) {
+            triggerSyncReadbackError(sim, clr.id);
+            const errMsg = sim.radioLog[sim.radioLog.length - 1];
+            if (errMsg) {
+              spokenRadioMsgIds.add(errMsg.id);
+              radioAudio.playRadioClick("ERROR");
+              radioAudio.speakRadio(errMsg.text, "PILOT", ac.id, true);
+            }
+            if (onUpdate) onUpdate();
+            else useAtcStore.setState((s) => ({ tickVersion: s.tickVersion + 1 }));
+          } else {
+            // Valid pilot readback: log it and speak it!
+            addRadioMessage(sim, {
+              sender: ac.callsign,
+              recipient: controllerCallsign(clr.controller, sim.airport),
+              controller: clr.controller,
+              aircraftId: ac.id,
+              category: "PILOT_READBACK",
+              text: clr.expectedReadbackText,
+            });
+            const pilotMsg = sim.radioLog[sim.radioLog.length - 1];
+            if (pilotMsg) spokenRadioMsgIds.add(pilotMsg.id);
+
+            radioAudio.playRadioClick("PILOT");
+            radioAudio.speakRadio(clr.expectedReadbackText, "PILOT", ac.id, true, () => {
+              // Pilot readback done -> acknowledge clearance -> plane moves!
+              acknowledgeSyncClearance(sim, clr.id);
+              if (onUpdate) onUpdate();
+              else {
+                useAtcStore.setState((s) => ({
+                  tickVersion: s.tickVersion + 1,
+                  lastSpokenRadioId:
+                    sim.radioLog[sim.radioLog.length - 1]?.id ?? s.lastSpokenRadioId,
+                }));
+              }
+            });
+            if (onUpdate) onUpdate();
+            else {
+              useAtcStore.setState((s) => ({
+                tickVersion: s.tickVersion + 1,
+                lastSpokenRadioId:
+                  sim.radioLog[sim.radioLog.length - 1]?.id ?? s.lastSpokenRadioId,
+              }));
+            }
+          }
+        });
+      } else {
+        radioAudio.speakRadio(msg.text, "CONTROLLER", msg.controller, true);
+      }
     }
   }
 }
@@ -1043,6 +1118,7 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
     }
 
     radioAudio.stopAllSpeech();
+    radioAudio.syncMode = role !== "ALL";
     switchPlayerStation(sim, role);
     set((s) => ({
       tickVersion: s.tickVersion + 1,
@@ -1225,7 +1301,9 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
 
     if (res.ok) {
       const newMessages = collectNewMessagesSince(sim.radioLog, prevLastMsg);
-      dispatchRadioMessagesAudio(sim, newMessages);
+      dispatchRadioMessagesAudio(sim, newMessages, () => {
+        set((s) => ({ tickVersion: s.tickVersion + 1 }));
+      });
     } else {
       radioAudio.playRadioClick("ERROR");
     }

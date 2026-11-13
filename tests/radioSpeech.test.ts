@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createBaseSimulation, createDepartureAircraft, stepSimulation } from "../src/engine/simulation.ts";
-import { submitClearanceDecision } from "../src/engine/decisionEngine.ts";
+import { submitClearanceDecision, acknowledgeSyncClearance } from "../src/engine/decisionEngine.ts";
 import { collectNewMessagesSince } from "../src/store/atcStore.ts";
 import {
   ICAO_PHONETIC_TABLE,
@@ -146,4 +146,35 @@ test("Both ATC commands and pilot replies are captured cleanly for immediate and
   for (let i = 0; i < 10; i++) stepSimulation(s, 0.2);
   const pbReplyMsgs = collectNewMessagesSince(s.radioLog, beforeTick);
   assert.equal(pbReplyMsgs.some((m) => m.category === "PILOT_READBACK"), true);
+});
+
+test("Single-role synchronous clearance waits for acknowledgeSyncClearance before plane begins movement", () => {
+  const s = createBaseSimulation("SANDBOX", "GROUND");
+  s.config.autoSpawnTraffic = false;
+  s.config.readbackErrorProbability = 0;
+  const ual = createDepartureAircraft(s, {
+    callsign: "UAL452",
+    spokenCallsign: "United 452",
+    gateId: "B12",
+    targetRunway: "09L",
+    requiresPushback: true,
+  });
+
+  const res = submitClearanceDecision(s, { aircraftId: ual.id, controller: "GROUND", type: "PUSHBACK" }, "PLAYER");
+  assert.equal(res.ok, true);
+  assert.ok(res.clearance);
+
+  // In sync-gated mode, mark syncGated = true
+  res.clearance.syncGated = true;
+
+  // Step simulation for 3 seconds — plane must stay at gate waiting!
+  for (let i = 0; i < 15; i++) stepSimulation(s, 0.2);
+  assert.equal(ual.state, "AT_GATE");
+  assert.equal(res.clearance.lifecycle, "READBACK_PENDING");
+
+  // On pilot voice completion, acknowledgeSyncClearance fires:
+  const ok = acknowledgeSyncClearance(s, res.clearance.id);
+  assert.equal(ok, true);
+  assert.equal(res.clearance.lifecycle, "ACTIVE");
+  assert.equal(ual.state, "PUSHBACK_APPROVED");
 });

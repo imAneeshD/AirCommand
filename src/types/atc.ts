@@ -88,6 +88,7 @@ export interface ATCClearance {
   phraseology: string;
   expectedReadbackText: string;
   actualReadbackText?: string;
+  syncGated?: boolean;
 }
 
 export type OperationalAction =
