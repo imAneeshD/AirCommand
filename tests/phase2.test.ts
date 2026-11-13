@@ -1280,6 +1280,27 @@ test("Voice PTT command parser and per-pilot speech profile handle spoken ATC ph
     assert.equal(landCmd.command.type, "LAND");
     assert.equal(landCmd.command.parameters?.runway, "09R");
   }
+
+  // Spoken variations: "take off" with space and "switch to tower"
+  const toCmd = parseAtcVoiceCommand("cleared for take off runway zero niner left", sim);
+  assert.equal(toCmd.ok, true);
+  if (toCmd.ok) {
+    assert.equal(toCmd.command.type, "TAKEOFF");
+    assert.equal(toCmd.command.parameters?.runway, "09L");
+  }
+
+  const hoCmd = parseAtcVoiceCommand("switch to tower", sim);
+  assert.equal(hoCmd.ok, true);
+  if (hoCmd.ok) {
+    assert.equal(hoCmd.command.type, "HANDOFF");
+    assert.equal(hoCmd.command.parameters?.targetController, "TOWER");
+  }
+
+  const holdCmd = parseAtcVoiceCommand("hold position", sim);
+  assert.equal(holdCmd.ok, true);
+  if (holdCmd.ok) {
+    assert.equal(holdCmd.command.type, "HOLD_POSITION");
+  }
 });
 
 test("LOW_TRAFFIC scenario spawns only 2 aircraft initially and caps active traffic at 3 planes", () => {

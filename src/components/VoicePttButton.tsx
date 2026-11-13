@@ -22,6 +22,8 @@ export const VoicePttButton: React.FC = () => {
   const [toast, setToast] = useState<{ ok: boolean; text: string } | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const pttHeldRef = useRef(false);
+  const currentTranscriptRef = useRef("");
+  const executedThisTurnRef = useRef(false);
 
   const supported = isBrowserSpeechRecognitionSupported();
 
@@ -33,16 +35,27 @@ export const VoicePttButton: React.FC = () => {
     toastTimerRef.current = window.setTimeout(() => {
       setToast(null);
       toastTimerRef.current = null;
-    }, 3600);
+    }, 4000);
   }, []);
 
   const executeTranscript = useCallback(
     (rawText: string) => {
-      if (!rawText.trim()) {
+      if (executedThisTurnRef.current) return;
+      executedThisTurnRef.current = true;
+
+      const trimmed = rawText.trim();
+      if (!trimmed) {
         showToast(false, "No voice command heard — hold V clearly while speaking.");
         return;
       }
-      const parsed = parseAtcVoiceCommand(rawText, useAtcStore.getState().sim);
+      try {
+        window.dispatchEvent(
+          new CustomEvent("atc:voice-transcript", { detail: trimmed })
+        );
+      } catch {
+        // Safe ignore
+      }
+      const parsed = parseAtcVoiceCommand(trimmed, useAtcStore.getState().sim);
       if (!parsed.ok) {
         showToast(false, parsed.reason);
         return;
@@ -57,26 +70,39 @@ export const VoicePttButton: React.FC = () => {
   const startPtt = useCallback(() => {
     if (pttHeldRef.current) return;
     pttHeldRef.current = true;
+    executedThisTurnRef.current = false;
+    currentTranscriptRef.current = "";
     radioAudio.stopAllSpeech();
     radioAudio.playRadioClick("ATC");
     radioAudio.startCarrierStatic();
     setInterimText("");
 
     const started = speechPtt.start({
-      onInterim: (text) => setInterimText(text),
+      onInterim: (text) => {
+        currentTranscriptRef.current = text;
+        setInterimText(text);
+      },
       onFinal: (finalText) => {
         radioAudio.stopCarrierStatic();
         setListening(false);
         setInterimText("");
         pttHeldRef.current = false;
-        executeTranscript(finalText);
+        const toRun = (finalText || currentTranscriptRef.current).trim();
+        if (toRun && !executedThisTurnRef.current) {
+          executeTranscript(toRun);
+        }
       },
       onError: (err) => {
         radioAudio.stopCarrierStatic();
         setListening(false);
         setInterimText("");
         pttHeldRef.current = false;
-        showToast(false, err);
+        const captured = currentTranscriptRef.current.trim();
+        if (captured && !executedThisTurnRef.current) {
+          executeTranscript(captured);
+        } else if (!executedThisTurnRef.current) {
+          showToast(false, err);
+        }
       },
     });
     if (started) {
@@ -88,10 +114,24 @@ export const VoicePttButton: React.FC = () => {
   }, [executeTranscript, showToast]);
 
   const stopPtt = useCallback(() => {
-    if (!pttHeldRef.current && !speechPtt.isListening()) return;
+    if (!pttHeldRef.current && !speechPtt.isListening() && !listening) return;
     pttHeldRef.current = false;
-    speechPtt.stop();
-  }, []);
+    radioAudio.stopCarrierStatic();
+    setListening(false);
+
+    const captured = currentTranscriptRef.current.trim();
+    setInterimText("");
+
+    // Stop speech recognition controller immediately and fetch accumulated transcript
+    const fromPtt = speechPtt.stop().trim();
+    const candidate = fromPtt || captured;
+
+    if (candidate && !executedThisTurnRef.current) {
+      executeTranscript(candidate);
+    } else if (!candidate && !executedThisTurnRef.current) {
+      showToast(false, "No voice command heard — hold V clearly while speaking.");
+    }
+  }, [executeTranscript, listening, showToast]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {

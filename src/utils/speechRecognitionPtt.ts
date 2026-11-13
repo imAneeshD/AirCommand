@@ -51,6 +51,10 @@ class SpeechRecognitionPttController {
     return this.active;
   }
 
+  public getLatestTranscript(): string {
+    return this.lastTranscript.trim();
+  }
+
   public start(callbacks: PttCallbacks): boolean {
     const Ctor = getSpeechRecognitionCtor();
     if (!Ctor) {
@@ -60,7 +64,7 @@ class SpeechRecognitionPttController {
       return false;
     }
 
-    if (this.active) return true;
+    if (this.active && this.recognition) return true;
 
     this.callbacks = callbacks;
     this.lastTranscript = "";
@@ -89,7 +93,9 @@ class SpeechRecognitionPttController {
 
       rec.onerror = (ev) => {
         const err = ev?.error ?? "speech-error";
-        if (err === "no-speech") return;
+        // Ignore expected benign teardown events when microphone is released
+        if (err === "no-speech" || err === "aborted") return;
+        if (this.finalized) return;
         this.active = false;
         this.callbacks.onError?.(
           err === "not-allowed"
@@ -117,19 +123,30 @@ class SpeechRecognitionPttController {
     }
   }
 
-  public stop(): void {
-    if (!this.recognition) return;
+  /**
+   * Stops recording and returns the captured transcript immediately.
+   * Calls onFinal(transcript) synchronously so release triggers instant execution.
+   */
+  public stop(): string {
+    const transcript = this.lastTranscript.trim();
     const rec = this.recognition;
     this.recognition = null;
     this.active = false;
-    try {
-      rec.stop();
-    } catch {
-      if (!this.finalized) {
-        this.finalized = true;
-        this.callbacks.onFinal?.(this.lastTranscript.trim());
+
+    if (rec) {
+      try {
+        rec.stop();
+      } catch {
+        // Safe ignore
       }
     }
+
+    if (!this.finalized) {
+      this.finalized = true;
+      this.callbacks.onFinal?.(transcript);
+    }
+
+    return transcript;
   }
 }
 

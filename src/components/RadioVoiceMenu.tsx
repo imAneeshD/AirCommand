@@ -28,7 +28,19 @@ export const RadioVoiceMenu: React.FC = () => {
       setVoices([...radioAudio.getAvailableVoices()]);
     });
     setVoices([...radioAudio.getAvailableVoices()]);
-    return unsub;
+
+    const onVoiceTranscript = (e: Event) => {
+      const detail = (e as CustomEvent<string>).detail;
+      if (typeof detail === "string" && detail) {
+        setPhraseInput(detail);
+      }
+    };
+    window.addEventListener("atc:voice-transcript", onVoiceTranscript);
+
+    return () => {
+      unsub();
+      window.removeEventListener("atc:voice-transcript", onVoiceTranscript);
+    };
   }, []);
 
   const activeCtrl = radioAudio.getEffectiveControllerVoice();
