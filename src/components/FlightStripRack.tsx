@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   Activity,
   AlertTriangle,
+  CheckCircle,
   Crosshair,
   Layers,
   PanelLeftClose,
@@ -446,8 +447,9 @@ export const FlightStripRack: React.FC = () => {
                           e.stopPropagation();
                           respondToHandoff(ho.id, true);
                         }}
-                        className="px-2 py-0.5 rounded bg-[var(--atc-emerald)] hover:opacity-90 text-slate-950 font-bold text-[9px] shadow-sm transition-all shrink-0"
+                        className="px-2 py-0.5 rounded border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:bg-[var(--atc-surface)] hover:border-[var(--atc-emerald)] text-[var(--atc-emerald)] font-mono font-bold text-[9px] transition-colors shrink-0 flex items-center gap-1"
                       >
+                        <CheckCircle className="w-2.5 h-2.5" />
                         ACCEPT
                       </button>
                     </div>
