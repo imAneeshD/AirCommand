@@ -967,6 +967,7 @@ export function stepSimulation(
         : 22;
     if (
       state.config.autoSpawnTraffic &&
+      !state.liveSnapshotMeta?.liveSyncEnabled &&
       state.time - state.lastTrafficSpawnAt >= spawnPeriod
     ) {
       state.lastTrafficSpawnAt = state.time;

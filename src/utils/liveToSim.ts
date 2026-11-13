@@ -229,20 +229,14 @@ export function convertLiveTracksToSimulation(opts: {
     }
 
     airborneCount += 1;
-    // Scale distant aircraft cleanly inside TRACON radar scope while preserving exact real bearing!
-    const maxScopeNm = 12.8;
+    // Retain exact real-world radar coordinates relative to airport reference
     let simX = localPt.x;
     let simY = localPt.y;
     const r = Math.hypot(simX, simY);
-    if (r > maxScopeNm) {
-      const targetRing = 8.5 + ((idx % 4) * 1.1);
-      const ratio = targetRing / r;
-      simX *= ratio;
-      simY *= ratio;
-    } else if (r < 0.8) {
-      // Avoid spawning directly on top of center if coordinates snapped tight
-      simX = Math.cos(idx) * 4.5;
-      simY = Math.sin(idx) * 4.5;
+    if (r < 0.35) {
+      // If coordinate snapped right onto center runway origin, offset slightly
+      simX = Math.cos(idx) * 2.0;
+      simY = Math.sin(idx) * 2.0;
     }
 
     const vRate = track.verticalRateFpm ?? 0;
@@ -357,11 +351,17 @@ export function convertLiveTracksToSimulation(opts: {
       sim.aircraftOrder[0];
   }
 
+  sim.config.autoSpawnTraffic = chosen.length === 0;
+
   sim.liveSnapshotMeta = {
     airportIcao: opts.airportRecord.icao,
     fetchedAtMs: opts.fetchedAtMs ?? Date.now(),
     convertedCount: chosen.length,
-    source: "OpenSky Live Snapshot",
+    source: "OpenSky Network (Live ADS-B)",
+    lastLivePollAtMs: opts.fetchedAtMs ?? Date.now(),
+    activeLiveCount: chosen.length,
+    liveSyncEnabled: true,
+    lastSyncStatus: "SYNCED",
   };
 
   addRadioMessage(sim, {
@@ -383,4 +383,228 @@ export function convertLiveTracksToSimulation(opts: {
     groundCount,
     airborneCount,
   };
+}
+
+/**
+ * Periodically merges fresh real-world ADS-B telemetry into the active simulation state.
+ * Smoothly updates positions and velocities of existing real aircraft,
+ * and seamlessly adds newly detected live arrivals and departures into the airspace.
+ */
+export function mergeLiveTracksIntoSimulation(opts: {
+  sim: SimulationState;
+  airportRecord: AirportRecord;
+  tracks: LiveAdsbTrack[];
+  maxRangeNm?: number;
+}): { addedCount: number; updatedCount: number } {
+  const { sim, airportRecord, tracks } = opts;
+  const layout = sim.airport;
+  const elev = layout.elevationFt;
+  const maxRangeNm = opts.maxRangeNm ?? 55;
+
+  const byIcao = new Map<string, (typeof sim.aircraft)[string]>();
+  const byCallsign = new Map<string, (typeof sim.aircraft)[string]>();
+  for (const id of sim.aircraftOrder) {
+    const ac = sim.aircraft[id];
+    if (!ac) continue;
+    if (ac.icao24) byIcao.set(ac.icao24.toLowerCase(), ac);
+    byCallsign.set(ac.callsign.toUpperCase(), ac);
+  }
+
+  let updatedCount = 0;
+  let addedCount = 0;
+  const usedGates = new Set<string>();
+  for (const ac of Object.values(sim.aircraft)) {
+    if (ac.gateId) usedGates.add(ac.gateId);
+  }
+
+  for (const track of tracks) {
+    if (track.lat === null || track.lon === null || typeof track.lat !== "number" || typeof track.lon !== "number") continue;
+    const localPt = latLonToLocalNm(track.lat, track.lon, airportRecord.lat, airportRecord.lon);
+    const distNm = Math.hypot(localPt.x, localPt.y);
+    if (distNm > maxRangeNm) continue;
+
+    const icaoKey = track.icao24?.trim().toLowerCase();
+    const csRaw = (track.callsign || track.icao24).trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (!csRaw && !icaoKey) continue;
+
+    const existing = (icaoKey ? byIcao.get(icaoKey) : null) || (csRaw ? byCallsign.get(csRaw) : null);
+
+    if (existing) {
+      // Existing real aircraft: update real position & live telemetry
+      if (
+        existing.state !== "COMPLETED_ARRIVAL" &&
+        existing.state !== "COMPLETED_DEPARTURE" &&
+        existing.state !== "CRASHED"
+      ) {
+        if (
+          existing.state === "APPROACH" ||
+          existing.state === "CLIMB" ||
+          existing.state === "CRUISE_OUTBOUND" ||
+          existing.state === "FINAL" ||
+          existing.state === "CLEARED_TO_LAND" ||
+          existing.state === "GO_AROUND"
+        ) {
+          existing.x = localPt.x;
+          existing.y = localPt.y;
+          if (track.baroAltFt !== null) {
+            existing.altitude = track.baroAltFt;
+          }
+          if (track.groundSpeedKts !== null && track.groundSpeedKts > 50) {
+            existing.speed = track.groundSpeedKts;
+          }
+          if (track.trackDeg !== null) {
+            existing.heading = track.trackDeg;
+            if (existing.assignedHeading === null || Math.abs(existing.assignedHeading - existing.heading) < 15) {
+              existing.assignedHeading = track.trackDeg;
+            }
+          }
+          if (track.verticalRateFpm !== null) {
+            existing.verticalSpeed = track.verticalRateFpm;
+          }
+        }
+        if (track.registration && !existing.registration) {
+          existing.registration = track.registration;
+        }
+        if (track.aircraftType && (!existing.aircraftType || existing.aircraftType === "A320")) {
+          existing.aircraftType = normalizeAircraftType(track.aircraftType, existing.aircraftType);
+        }
+        if (track.operator && (!existing.airline || existing.airline.includes("Airlines"))) {
+          existing.airline = track.operator;
+        }
+        if (!existing.trail) existing.trail = [];
+        existing.trail.push({ x: localPt.x, y: localPt.y });
+        if (existing.trail.length > 25) existing.trail.shift();
+        updatedCount++;
+      }
+    } else {
+      // New incoming live flight entering TRACON airspace
+      const activeCount = sim.aircraftOrder.filter((id) => {
+        const a = sim.aircraft[id];
+        return a && a.state !== "COMPLETED_ARRIVAL" && a.state !== "COMPLETED_DEPARTURE" && a.state !== "CRASHED";
+      }).length;
+      if (activeCount >= 18) continue; // Safety cap to maintain playable ATC workload
+
+      const callsign = csRaw || (icaoKey ? icaoKey.toUpperCase() : `LIVE${Math.floor(Math.random() * 9000 + 1000)}`);
+      if (sim.aircraft[callsign]) continue;
+
+      const meta = parseLiveCallsignMeta(callsign);
+      const acType = normalizeAircraftType(track.aircraftType, meta.defaultType);
+      const airlineName = track.operator?.trim() || meta.airline;
+      const altFtRaw = track.baroAltFt ?? elev + (track.onGround ? 0 : 6000);
+      const agl = altFtRaw - elev;
+      const isGround = track.onGround || (distNm < 2.0 && agl < 250 && (track.groundSpeedKts ?? 0) < 45);
+
+      if (isGround && layout.gateIds.length > 0) {
+        const gateId = pickClosestUnusedGate(layout, localPt.x, localPt.y, usedGates, sim.aircraftOrder.length);
+        const rwyId = layout.primaryDepartureRunway;
+        const depAc = createDepartureAircraft(sim, {
+          id: callsign,
+          callsign,
+          spokenCallsign: meta.spokenCallsign,
+          airline: airlineName,
+          aircraftType: acType,
+          gateId,
+          targetRunway: rwyId,
+          requiresPushback: true,
+          controller: "GROUND",
+        });
+        depAc.icao24 = track.icao24;
+        if (track.registration) depAc.registration = track.registration;
+        byIcao.set(depAc.icao24.toLowerCase(), depAc);
+        byCallsign.set(callsign, depAc);
+        addedCount++;
+      } else if (!isGround) {
+        const vRate = track.verticalRateFpm ?? 0;
+        const isClimbingDeparture = vRate >= 450 && distNm < 22 && agl < 11000;
+
+        if (isClimbingDeparture) {
+          const heading = track.trackDeg ?? Math.round(((Math.atan2(localPt.x, localPt.y) * 180) / Math.PI + 360) % 360);
+          const rwyId = pickBestRunway(layout, heading, "DEPARTURE");
+          const gateId = pickClosestUnusedGate(layout, 0, 0, usedGates, sim.aircraftOrder.length);
+          const alt = clamp(Math.round(altFtRaw / 100) * 100, elev + 900, elev + 12000);
+          const targetAlt = Math.max(elev + 7000, Math.round((alt + 4000) / 1000) * 1000);
+          const spd = clamp(track.groundSpeedKts ?? 220, 175, 300);
+
+          const depAc = createDepartureAircraft(sim, {
+            id: callsign,
+            callsign,
+            spokenCallsign: meta.spokenCallsign,
+            airline: airlineName,
+            aircraftType: acType,
+            gateId,
+            targetRunway: rwyId,
+            requiresPushback: false,
+            controller: "DEPARTURE",
+          });
+          depAc.icao24 = track.icao24;
+          if (track.registration) depAc.registration = track.registration;
+          depAc.state = "CLIMB";
+          depAc.x = localPt.x;
+          depAc.y = localPt.y;
+          depAc.currentNodeId = undefined;
+          depAc.heading = heading;
+          depAc.altitude = alt;
+          depAc.speed = spd;
+          depAc.verticalSpeed = clamp(vRate, 600, 2500);
+          depAc.assignedHeading = heading;
+          depAc.assignedAltitude = targetAlt;
+          depAc.assignedSpeed = spd;
+          depAc.trail = [{ x: localPt.x, y: localPt.y }];
+
+          byIcao.set(depAc.icao24.toLowerCase(), depAc);
+          byCallsign.set(callsign, depAc);
+          addedCount++;
+        } else {
+          // Inbound Arrival
+          const inboundTowardField = Math.round(((Math.atan2(-localPt.x, -localPt.y) * 180) / Math.PI + 360) % 360);
+          const realHdg = track.trackDeg ?? inboundTowardField;
+          const heading = headingDiffDeg(realHdg, inboundTowardField) <= 105 ? realHdg : inboundTowardField;
+          const targetRwy = pickBestRunway(layout, heading, "ARRIVAL");
+          const gateId = pickClosestUnusedGate(layout, 0, 0, usedGates, sim.aircraftOrder.length);
+          const alt = clamp(Math.round(altFtRaw / 100) * 100, elev + 1600, elev + 14000);
+          const spd = clamp(track.groundSpeedKts ?? 210, 155, 300);
+
+          const arrAc = createArrivalAircraft(sim, {
+            id: callsign,
+            callsign,
+            spokenCallsign: meta.spokenCallsign,
+            airline: airlineName,
+            aircraftType: acType,
+            x: localPt.x,
+            y: localPt.y,
+            heading,
+            altitude: alt,
+            speed: spd,
+            targetRunway: targetRwy,
+            gateId,
+            state: "APPROACH",
+            controller: "DEPARTURE",
+            assignedApproach: null,
+          });
+          arrAc.icao24 = track.icao24;
+          if (track.registration) arrAc.registration = track.registration;
+          arrAc.verticalSpeed = track.verticalRateFpm ?? -600;
+
+          byIcao.set(arrAc.icao24.toLowerCase(), arrAc);
+          byCallsign.set(callsign, arrAc);
+          addedCount++;
+        }
+      }
+    }
+  }
+
+  sim.liveSnapshotMeta = {
+    airportIcao: airportRecord.icao,
+    fetchedAtMs: Date.now(),
+    convertedCount: sim.aircraftOrder.length,
+    source: "OpenSky Network (Live ADS-B)",
+    lastLivePollAtMs: Date.now(),
+    activeLiveCount: sim.aircraftOrder.filter((id) => Boolean(sim.aircraft[id]?.icao24)).length,
+    liveSyncEnabled: true,
+    lastSyncStatus: "SYNCED",
+  };
+
+  updateAircraftStates(sim);
+
+  return { addedCount, updatedCount };
 }

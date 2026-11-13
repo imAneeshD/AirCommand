@@ -23,6 +23,8 @@ export function App() {
   const setOnline = useAtcStore((s) => s.setOnline);
   const hydrateSavedRealAirport = useAtcStore((s) => s.hydrateSavedRealAirport);
   const syncPendingOfflineEdits = useAtcStore((s) => s.syncPendingOfflineEdits);
+  const isOnline = useAtcStore((s) => s.isOnline);
+  const pollLiveTraffic = useAtcStore((s) => s.pollLiveTraffic);
 
   // Sync data-theme attribute onto <html>
   useEffect(() => {
@@ -45,6 +47,24 @@ export function App() {
       window.removeEventListener("offline", handleOffline);
     };
   }, [hydrateSavedRealAirport, setOnline, syncPendingOfflineEdits]);
+
+  // Periodic background live ADS-B traffic sync ("in between as well")
+  useEffect(() => {
+    if (appMode !== "SIMULATION" || !isOnline || (roomState && roomState.status === "ACTIVE")) return;
+
+    const initialTimeout = setTimeout(() => {
+      void pollLiveTraffic();
+    }, 1500);
+
+    const intervalId = setInterval(() => {
+      void pollLiveTraffic();
+    }, 18000);
+
+    return () => {
+      clearTimeout(initialTimeout);
+      clearInterval(intervalId);
+    };
+  }, [appMode, isOnline, roomState?.status, pollLiveTraffic]);
 
   // Simulation Animation Loop (solo only; multiplayer runs authoritatively on server at 5 Hz)
   useEffect(() => {
