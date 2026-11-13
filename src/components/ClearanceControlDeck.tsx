@@ -681,7 +681,7 @@ export const ClearanceControlDeck: React.FC = () => {
             {pendingHandoffsForUser.slice(0, 4).map((h) => (
               <div
                 key={h.id}
-                className="rounded-lg border-2 border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] p-2.5 text-[11px] font-mono space-y-1.5 shadow-md animate-pulse-subtle"
+                className="rounded-lg border border-[var(--atc-cyan-border)] bg-[var(--atc-surface-alt)] p-2.5 text-[11px] font-mono space-y-1.5 shadow-sm"
               >
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-[var(--atc-cyan)]">
@@ -698,7 +698,7 @@ export const ClearanceControlDeck: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => respondToHandoff(h.id, true)}
-                    className="flex-1 py-1.5 rounded bg-[var(--atc-emerald)] hover:opacity-90 text-slate-950 font-bold text-xs transition-opacity flex items-center justify-center gap-1 shadow-sm"
+                    className="flex-1 py-1.5 px-3 rounded-md border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:bg-[var(--atc-surface)] hover:border-[var(--atc-emerald)] text-[var(--atc-emerald)] font-mono font-bold text-xs transition-colors flex items-center justify-center gap-1.5"
                   >
                     <CheckCircle className="w-3.5 h-3.5" />
                     ACCEPT
@@ -706,7 +706,7 @@ export const ClearanceControlDeck: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => respondToHandoff(h.id, false)}
-                    className="py-1.5 px-3 rounded bg-[var(--atc-red-bg)] hover:opacity-90 border border-[var(--atc-red-border)] text-[var(--atc-red)] font-bold text-xs transition-opacity"
+                    className="py-1.5 px-3 rounded-md border border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] hover:bg-[var(--atc-surface)] text-[var(--atc-red)] font-mono text-xs font-semibold transition-colors"
                   >
                     REJECT
                   </button>
@@ -851,11 +851,11 @@ export const ClearanceControlDeck: React.FC = () => {
             </div>
           </div>
         ) : roleLocked && ac.controller !== lockedRole ? (
-          <div className="rounded-lg border-2 border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] p-3 text-[11px] font-mono text-[var(--atc-text)] space-y-2.5 shadow-sm">
+          <div className="rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] p-3 text-[11px] font-mono text-[var(--atc-text)] space-y-2.5 shadow-sm">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-[var(--atc-emerald)] shrink-0 animate-ping" />
               <div>
-                <span className="font-bold text-[var(--atc-emerald)]">{ac.callsign}</span> is on{" "}
+                <span className="font-bold text-[var(--atc-accent-text)]">{ac.callsign}</span> is on{" "}
                 <span className="font-bold">{controllerCallsign(ac.controller, sim.airport, ac.flightKind)}</span> (auto-managed while operating{" "}
                 <span className="font-bold">{lockedRole === "DEPARTURE" ? "DEP/APP" : lockedRole}</span>).
               </div>
@@ -871,7 +871,7 @@ export const ClearanceControlDeck: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => respondToHandoff(pendingForSelectedAc.id, true)}
-                  className="flex-1 py-2 px-3 rounded-md bg-[var(--atc-emerald)] hover:opacity-90 text-slate-950 font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5"
+                  className="flex-1 py-1.5 px-3 rounded-md border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:bg-[var(--atc-surface)] hover:border-[var(--atc-emerald)] text-[var(--atc-emerald)] font-mono font-bold text-xs transition-colors flex items-center justify-center gap-1.5"
                 >
                   <CheckCircle className="w-4 h-4" />
                   ACCEPT HANDOFF ({ac.callsign} → {lockedRole})
@@ -879,7 +879,7 @@ export const ClearanceControlDeck: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => respondToHandoff(pendingForSelectedAc.id, false)}
-                  className="py-2 px-3 rounded-md bg-[var(--atc-red-bg)] hover:opacity-90 border border-[var(--atc-red-border)] text-[var(--atc-red)] font-bold text-xs transition-all"
+                  className="py-1.5 px-3 rounded-md border border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] hover:bg-[var(--atc-surface)] text-[var(--atc-red)] font-mono text-xs font-semibold transition-colors"
                 >
                   REJECT
                 </button>
@@ -895,7 +895,7 @@ export const ClearanceControlDeck: React.FC = () => {
                     parameters: { targetController: lockedRole, bypassPending: true },
                   });
                 }}
-                className="w-full py-2 px-3 rounded-md bg-[var(--atc-cyan-bg)] hover:opacity-90 border border-[var(--atc-cyan-border)] text-[var(--atc-cyan)] font-bold text-xs transition-all flex items-center justify-center gap-1.5"
+                className="w-full py-1.5 px-3 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:bg-[var(--atc-surface)] hover:border-[var(--atc-cyan)] text-[var(--atc-cyan)] font-mono text-xs font-bold transition-colors flex items-center justify-center gap-1.5"
               >
                 <Radio className="w-3.5 h-3.5" />
                 ACCEPT / TAKE OVER TO {lockedRole}
@@ -1000,7 +1000,7 @@ export const ClearanceControlDeck: React.FC = () => {
                 <div className="space-y-2.5">
                   {isCrossingRequired ? (
                     /* Case 1: Holding short for runway crossing */
-                    <div className="rounded-lg border-2 border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] p-3 space-y-2.5 shadow-sm">
+                    <div className="rounded-lg border border-[var(--atc-emerald-border)] bg-[var(--atc-surface-alt)] p-3 space-y-2.5 shadow-sm">
                       <div className="flex items-center justify-between">
                         <span className="font-bold text-xs text-[var(--atc-emerald)] flex items-center gap-1.5">
                           <CheckCircle className="w-3.5 h-3.5" />
@@ -1024,7 +1024,7 @@ export const ClearanceControlDeck: React.FC = () => {
                             parameters: { runway: heldRunway ?? ac.targetRunway },
                           })
                         }
-                        className="w-full py-2.5 px-3 rounded-md bg-[var(--atc-emerald)] hover:opacity-90 text-slate-950 font-mono font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5"
+                        className="w-full py-2 px-3 rounded-md border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:bg-[var(--atc-surface)] hover:border-[var(--atc-emerald)] text-[var(--atc-emerald)] font-mono font-bold text-xs transition-colors flex items-center justify-center gap-1.5 disabled:opacity-35"
                       >
                         <CheckCircle className="w-4 h-4" />
                         CLEAR TO CROSS RWY {heldRunway ?? ac.targetRunway}
@@ -1062,7 +1062,7 @@ export const ClearanceControlDeck: React.FC = () => {
                     </div>
                   ) : (
                     /* Case 2: Departure holding short for takeoff -> Transfer to Tower */
-                    <div className="rounded-lg border-2 border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] p-3 space-y-2.5 shadow-sm">
+                    <div className="rounded-lg border border-[var(--atc-cyan-border)] bg-[var(--atc-surface-alt)] p-3 space-y-2.5 shadow-sm">
                       <div className="flex items-center justify-between">
                         <span className="font-bold text-xs text-[var(--atc-cyan)] flex items-center gap-1.5">
                           <Radio className="w-3.5 h-3.5" />
@@ -1086,7 +1086,7 @@ export const ClearanceControlDeck: React.FC = () => {
                             parameters: { targetController: "TOWER" },
                           })
                         }
-                        className="w-full py-2.5 px-3 rounded-md bg-[var(--atc-cyan)] hover:opacity-90 text-slate-950 font-mono font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5"
+                        className="w-full py-2 px-3 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:bg-[var(--atc-surface)] hover:border-[var(--atc-cyan)] text-[var(--atc-cyan)] font-mono font-bold text-xs transition-colors flex items-center justify-center gap-1.5 disabled:opacity-35"
                       >
                         <Radio className="w-4 h-4" />
                         HANDOFF → TOWER ({controllerFrequency("TOWER", sim.airport)} MHz)
