@@ -507,25 +507,34 @@ export const ClearanceControlDeck: React.FC = () => {
             </button>{" "}
             or ask {deckTab} controller in Coordination Chat.
           </div>
-        ) : activeRole !== "ALL" &&
-          ac.controller !== activeRole &&
-          sim.config.stationControl[ac.controller] === "AUTONOMOUS" ? (
-          <div className="rounded-lg border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] p-2.5 text-[11px] font-mono text-[var(--atc-text)] space-y-1.5">
-            <div>
-              <span className="font-bold text-[var(--atc-emerald)]">{ac.callsign}</span> is on{" "}
-              <span className="font-bold">{ac.controller}</span> (auto-managed while operating{" "}
-              <span className="font-bold">{activeRole}</span>).
-            </div>
-            <button
-              onClick={() => switchStation(ac.controller)}
-              className="w-full py-1 rounded bg-[var(--atc-surface)] hover:bg-[var(--atc-surface-alt)] border border-[var(--atc-emerald-border)] text-[var(--atc-emerald)] font-bold text-[10px]"
-            >
-              SWITCH ROLE TO {ac.controller}
-            </button>
-          </div>
         ) : null}
 
-        {/* ACCORDION 1: Clearances & Actions (Open by default) */}
+        {roleLocked && ac.controller !== lockedRole ? (
+          <div className="rounded-lg border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] p-3 text-[11px] font-mono text-[var(--atc-text)] space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-[var(--atc-emerald)] shrink-0" />
+              <div>
+                <span className="font-bold text-[var(--atc-emerald)]">{ac.callsign}</span> is on{" "}
+                <span className="font-bold">{ac.controller}</span> (auto-managed while operating{" "}
+                <span className="font-bold">{lockedRole === "DEPARTURE" ? "DEP/APP" : lockedRole}</span>).
+              </div>
+            </div>
+            <p className="text-[10px] text-[var(--atc-text-secondary)] leading-relaxed">
+              Clearance controls belong to <strong>{ac.controller}</strong>. As{" "}
+              <strong>{lockedRole === "DEPARTURE" ? "DEP/APP" : lockedRole}</strong>, controls for{" "}
+              {ac.callsign} will become available once the aircraft is transferred / handed off to your station.
+            </p>
+            {activeRole !== "ALL" && !assignedRole && (
+              <button
+                onClick={() => switchStation(ac.controller)}
+                className="w-full py-1.5 rounded bg-[var(--atc-surface)] hover:bg-[var(--atc-surface-alt)] border border-[var(--atc-emerald-border)] text-[var(--atc-emerald)] font-bold text-[10px] transition-colors"
+              >
+                SWITCH ROLE TO {ac.controller}
+              </button>
+            )}
+          </div>
+        ) : (
+        /* ACCORDION 1: Clearances & Actions (Open by default) */
         <Accordion
           title="Available Clearances"
           icon={<Compass className="w-3.5 h-3.5" />}
@@ -1509,6 +1518,7 @@ export const ClearanceControlDeck: React.FC = () => {
             );
           })()}
         </Accordion>
+        )}
 
         {/* ACCORDION 2: Flight Telemetry & Assignments (Collapsed for minimal view) */}
         <Accordion
