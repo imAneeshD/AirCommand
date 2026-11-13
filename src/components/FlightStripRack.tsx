@@ -319,6 +319,7 @@ export const FlightStripRack: React.FC = () => {
             const ctrl = controllerBadge(ac.controller, ac.flightKind);
             const hasReq = Boolean(ac.pendingRequest && !ac.pendingRequest.resolved);
             const isCalling = activeCallerIds.has(ac.id);
+            const ho = pendingHandoffsByAcId.get(ac.id);
 
             return (
               <button
@@ -470,7 +471,7 @@ export const FlightStripRack: React.FC = () => {
                   </div>
                 )}
 
-                {!ac.hasReadbackError && pendingRb.length === 0 && hasReq && ac.pendingRequest && (
+                {!ac.hasReadbackError && pendingRb.length === 0 && hasReq && ac.pendingRequest && !ho && (
                   <div className="mt-1.5 px-1.5 py-0.5 rounded bg-[var(--atc-amber-bg)] border border-[var(--atc-amber-border)] text-[10px] font-mono text-[var(--atc-amber)] flex items-center gap-1 truncate font-medium">
                     <AlertTriangle className="w-3 h-3 shrink-0" />
                     REQ: {ac.pendingRequest.type}
