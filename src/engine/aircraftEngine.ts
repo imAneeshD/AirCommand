@@ -198,12 +198,18 @@ export function updateAircraftStates(state: SimulationState): void {
             );
           }
         } else if (ac.holdingShortReason === "DEPARTURE_RUNWAY") {
+          const reqType = ac.controller === "GROUND" ? "HANDOFF" : "TAKEOFF";
+          const targetCtrl = ac.controller === "GROUND" ? "GROUND" : "TOWER";
+          const msg =
+            ac.controller === "GROUND"
+              ? `${controllerCallsign("GROUND", state.airport)}, ${ac.spokenCallsign}, holding short runway ${runwaySpokenName(ac.targetRunway)}, ready for departure, request Tower frequency.`
+              : `${controllerCallsign("TOWER", state.airport)}, ${ac.spokenCallsign}, holding short runway ${runwaySpokenName(ac.targetRunway)}, ready for departure.`;
           issuePilotRequestIfNeeded(
             state,
             ac,
-            "TAKEOFF",
-            ac.controller,
-            `${controllerCallsign(ac.controller, state.airport)}, ${ac.spokenCallsign}, holding short runway ${runwaySpokenName(ac.targetRunway)}, ready for departure.`,
+            reqType,
+            targetCtrl,
+            msg,
             ac.targetRunway
           );
         } else if (ac.flightKind === "ARRIVAL" && ac.holdingShortReason === "ROUTE_END") {

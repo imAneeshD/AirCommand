@@ -6,6 +6,8 @@ import {
   ArrowRight,
   Ban,
   CheckCircle,
+  ChevronDown,
+  ChevronUp,
   ClipboardList,
   Compass,
   Info,
@@ -74,10 +76,12 @@ export const ClearanceControlDeck: React.FC = () => {
   const [selectedApproachRunway, setSelectedApproachRunway] = useState<RunwayId>("09L");
   const [turnDir, setTurnDir] = useState<"NEAREST" | "LEFT" | "RIGHT">("NEAREST");
   const [customHeading, setCustomHeading] = useState("090");
+  const [showAltTaxiways, setShowAltTaxiways] = useState(false);
 
   // Keep deck tab in sync: role-locked sessions always show own role,
   // ALL-AUTO sessions follow the aircraft's current controller.
   useEffect(() => {
+    setShowAltTaxiways(false);
     setDeckTab(roleLocked ? lockedRole : (ac?.controller ?? "TOWER"));
     if (ac) {
       setSelectedTaxiRunway(ac.targetRunway);
@@ -210,6 +214,23 @@ export const ClearanceControlDeck: React.FC = () => {
 
   const groundConflict = inspectGroundConflict(sim, ac);
 
+  const isHoldingShort = Boolean(
+    ac.state === "HOLDING_SHORT" || ac.holdingAtRunway
+  );
+  const heldRunway =
+    ac.holdingAtRunway ??
+    (ac.holdingShortReason === "DEPARTURE_RUNWAY" ? ac.targetRunway : undefined);
+  const isCrossingRequired = Boolean(
+    ac.holdingShortReason === "CROSSING_REQUIRED" ||
+      (ac.holdingAtRunway && ac.holdingAtRunway !== ac.targetRunway)
+  );
+  const isDepartureHoldingShort = Boolean(
+    ac.holdingShortReason === "DEPARTURE_RUNWAY" ||
+      (ac.flightKind === "DEPARTURE" && !isCrossingRequired)
+  );
+  const hasMultipleRunwaysOrTaxiways =
+    sim.airport.runwayIds.length > 1 || taxiRoutes.length > 1;
+
   const runGroundResolution = (kind: GroundResolutionKind) => {
     setHoverPreviewRoute(null);
     const cmds = buildResolutionCommands(sim, ac, kind);
@@ -241,6 +262,166 @@ export const ClearanceControlDeck: React.FC = () => {
 
   const neutralBtn =
     "rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] hover:border-[var(--atc-border-strong)] hover:bg-[var(--atc-surface)] text-[var(--atc-text)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+
+  const renderTaxiRouteBuilder = () => (
+    <div className="rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] p-2 space-y-2">
+      <div className="flex items-center justify-between gap-1">
+        <span className="text-[10px] font-mono font-bold text-[var(--atc-text-secondary)] uppercase">
+          {isArrivalToGate ? `Taxi to Gate ${ac.gateId ?? ""}` : "Taxi Clearance"}
+        </span>
+        {!isArrivalToGate && (
+          <div className="flex gap-1">
+            {sim.airport.runwayIds.map((rwy) => (
+              <button
+                key={rwy}
+                onClick={() => setSelectedTaxiRunway(rwy)}
+                className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition-colors ${
+                  selectedTaxiRunway === rwy
+                    ? "bg-[var(--atc-accent-bg)] border-[var(--atc-accent-border)] text-[var(--atc-accent-text)] font-bold"
+                    : "bg-[var(--atc-surface)] border-[var(--atc-border)] text-[var(--atc-muted)]"
+                }`}
+              >
+                {rwy}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {taxiRoutes.length > 0 ? (
+        <div className="space-y-1.5">
+          {(() => {
+            const hasConflicts = taxiRoutes.some((r) => r.conflictLevel !== "CLEAR");
+            const firstConflict = taxiRoutes.find((r) => r.conflictLevel !== "CLEAR");
+            const hasClearBypass = taxiRoutes.some((r) => r.conflictLevel === "CLEAR");
+            return (
+              <>
+                {hasConflicts && firstConflict && (
+                  <div
+                    className={`rounded px-2 py-1.5 text-[10px] font-mono border flex items-start gap-1.5 ${
+                      !hasClearBypass || firstConflict.conflictLevel === "BLOCKED"
+                        ? "bg-[var(--atc-red-bg)] border-[var(--atc-red-border)] text-[var(--atc-red)]"
+                        : "bg-[var(--atc-amber-bg)] border-[var(--atc-amber-border)] text-[var(--atc-amber)]"
+                    }`}
+                  >
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    <span>
+                      <strong>Route Traffic Warning:</strong> {firstConflict.conflictReason}.{" "}
+                      {hasClearBypass
+                        ? "Select a CLEAR bypass route below."
+                        : "All paths share traffic — hold position or pick least congested route."}
+                    </span>
+                  </div>
+                )}
+
+                <div className="space-y-1">
+                  {taxiRoutes.slice(0, 5).map((rt, idx) => {
+                    const isClear = rt.conflictLevel === "CLEAR";
+                    const isBlocked = rt.conflictLevel === "BLOCKED";
+                    return (
+                      <button
+                        key={idx}
+                        disabled={nordoLocked}
+                        onMouseEnter={() => setHoverPreviewRoute(rt.nodeIds)}
+                        onMouseLeave={() => setHoverPreviewRoute(null)}
+                        onClick={() => {
+                          setHoverPreviewRoute(null);
+                          issueClearance({
+                            aircraftId: ac.id,
+                            controller: "GROUND",
+                            type: "TAXI",
+                            parameters: {
+                              runway: selectedTaxiRunway,
+                              routeTaxiways: rt.taxiways,
+                              destinationNodeId: rt.destinationNodeId,
+                              routeNodeIds: rt.nodeIds,
+                            },
+                          });
+                        }}
+                        title={rt.conflictReason ?? "Conflict-free taxiway route"}
+                        className={`w-full text-left px-2.5 py-1.5 rounded border text-[11px] font-mono flex items-center justify-between gap-2 disabled:opacity-35 transition-colors ${
+                          isBlocked
+                            ? "border-[var(--atc-red-border)] bg-[var(--atc-red-bg)]/60 hover:bg-[var(--atc-red-bg)] text-[var(--atc-text)]"
+                            : !isClear
+                            ? "border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)]/50 hover:bg-[var(--atc-amber-bg)] text-[var(--atc-text)]"
+                            : "border-[var(--atc-border)] hover:border-[var(--atc-emerald-border)] bg-[var(--atc-surface)] hover:bg-[var(--atc-emerald-bg)] text-[var(--atc-text)]"
+                        }`}
+                      >
+                        <span className="truncate">TAXI {rt.label}</span>
+                        <span className="flex items-center gap-1.5 shrink-0">
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${
+                              isBlocked
+                                ? "bg-[var(--atc-red-bg)] border-[var(--atc-red-border)] text-[var(--atc-red)]"
+                                : !isClear
+                                ? "bg-[var(--atc-amber-bg)] border-[var(--atc-amber-border)] text-[var(--atc-amber)]"
+                                : "bg-[var(--atc-emerald-bg)] border-[var(--atc-emerald-border)] text-[var(--atc-emerald)]"
+                            }`}
+                          >
+                            {isBlocked
+                              ? `BLOCKED · ${rt.conflictCallsigns.slice(0, 2).join(",")}`
+                              : !isClear
+                              ? `TRAFFIC · ${rt.conflictCallsigns.slice(0, 2).join(",")}`
+                              : "CLEAR"}
+                          </span>
+                          <ArrowRight className="w-3 h-3 text-[var(--atc-accent)] shrink-0" />
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            );
+          })()}
+        </div>
+      ) : (
+        <div className="text-[11px] font-mono text-[var(--atc-muted)]">
+          {ac.altitude > sim.airport.elevationFt + 50
+            ? "Aircraft airborne."
+            : "No taxi routes from current position."}
+        </div>
+      )}
+    </div>
+  );
+
+  const renderRunwayCrossingGrid = () => (
+    <div className="grid grid-cols-2 gap-1.5">
+      {sim.airport.runwayIds.map((rwy) => (
+        <button
+          key={`cross-${rwy}`}
+          disabled={nordoLocked || ac.altitude > sim.airport.elevationFt + 50}
+          onClick={() =>
+            issueClearance({
+              aircraftId: ac.id,
+              controller: "GROUND",
+              type: "CROSS_RUNWAY",
+              parameters: { runway: rwy },
+            })
+          }
+          className="py-1.5 px-2 rounded-md border font-mono text-[11px] font-semibold disabled:opacity-35 bg-[var(--atc-emerald-bg)] hover:opacity-90 border-[var(--atc-emerald-border)] text-[var(--atc-emerald)]"
+        >
+          CROSS RWY {rwy}
+        </button>
+      ))}
+      {sim.airport.runwayIds.map((rwy) => (
+        <button
+          key={`hs-${rwy}`}
+          disabled={nordoLocked || ac.altitude > sim.airport.elevationFt + 50}
+          onClick={() =>
+            issueClearance({
+              aircraftId: ac.id,
+              controller: "GROUND",
+              type: "HOLD_SHORT",
+              parameters: { runway: rwy },
+            })
+          }
+          className="py-1.5 px-2 rounded-md border font-mono text-[11px] font-semibold disabled:opacity-35 bg-[var(--atc-amber-bg)] hover:opacity-90 border-[var(--atc-amber-border)] text-[var(--atc-amber)]"
+        >
+          HOLD SHORT {rwy}
+        </button>
+      ))}
+    </div>
+  );
 
   return (
     <aside className="w-80 xl:w-[356px] bg-[var(--atc-panel)] border-l border-[var(--atc-border)] flex flex-col shrink-0 min-h-0 transition-colors">
@@ -814,218 +995,244 @@ export const ClearanceControlDeck: React.FC = () => {
           {/* GROUND COMMANDS */}
           {deckTab === "GROUND" && (
             <div className="space-y-2.5">
-              <div className="grid grid-cols-2 gap-1.5">
-                <button
-                  disabled={nordoLocked || (ac.state !== "AT_GATE" && ac.state !== "HOLD_POSITION")}
-                  onClick={() =>
-                    issueClearance({
-                      aircraftId: ac.id,
-                      controller: "GROUND",
-                      type: "PUSHBACK",
-                    })
-                  }
-                  className="py-2 px-2 rounded-md border font-mono text-[11px] font-bold transition-colors disabled:opacity-35 disabled:cursor-not-allowed bg-[var(--atc-accent-bg)] hover:opacity-90 border-[var(--atc-accent-border)] text-[var(--atc-accent-text)]"
-                >
-                  APPROVE PUSHBACK
-                </button>
-                <button
-                  disabled={nordoLocked || ac.altitude > sim.airport.elevationFt + 50}
-                  onClick={() =>
-                    issueClearance({
-                      aircraftId: ac.id,
-                      controller: "GROUND",
-                      type: "HOLD_POSITION",
-                    })
-                  }
-                  className="py-2 px-2 rounded-md border font-mono text-[11px] font-semibold disabled:opacity-35 disabled:cursor-not-allowed bg-[var(--atc-amber-bg)] hover:opacity-90 border-[var(--atc-amber-border)] text-[var(--atc-amber)]"
-                >
-                  HOLD POSITION
-                </button>
-              </div>
+              {isHoldingShort ? (
+                /* HOLDING SHORT SPECIFIC VIEW: Focus on next required option (Handoff / Crossing) */
+                <div className="space-y-2.5">
+                  {isCrossingRequired ? (
+                    /* Case 1: Holding short for runway crossing */
+                    <div className="rounded-lg border-2 border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] p-3 space-y-2.5 shadow-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-xs text-[var(--atc-emerald)] flex items-center gap-1.5">
+                          <CheckCircle className="w-3.5 h-3.5" />
+                          HOLDING SHORT RWY {heldRunway ?? ac.targetRunway}
+                        </span>
+                        <span className="text-[10px] text-[var(--atc-muted)] font-mono font-bold uppercase">
+                          Crossing Required
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-[var(--atc-text-secondary)] leading-relaxed">
+                        Aircraft has reached the runway holding point. Ensure the runway is clear of arrivals/departures, then clear aircraft to cross.
+                      </p>
+                      <button
+                        type="button"
+                        disabled={nordoLocked}
+                        onClick={() =>
+                          issueClearance({
+                            aircraftId: ac.id,
+                            controller: "GROUND",
+                            type: "CROSS_RUNWAY",
+                            parameters: { runway: heldRunway ?? ac.targetRunway },
+                          })
+                        }
+                        className="w-full py-2.5 px-3 rounded-md bg-[var(--atc-emerald)] hover:opacity-90 text-slate-950 font-mono font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5"
+                      >
+                        <CheckCircle className="w-4 h-4" />
+                        CLEAR TO CROSS RWY {heldRunway ?? ac.targetRunway}
+                      </button>
 
-              {/* Taxi Route Builder */}
-              <div className="rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] p-2 space-y-2">
-                <div className="flex items-center justify-between gap-1">
-                  <span className="text-[10px] font-mono font-bold text-[var(--atc-text-secondary)] uppercase">
-                    {isArrivalToGate ? `Taxi to Gate ${ac.gateId ?? ""}` : "Taxi Clearance"}
-                  </span>
-                  {!isArrivalToGate && (
-                    <div className="flex gap-1">
-                      {sim.airport.runwayIds.map((rwy) => (
+                      <div className="grid grid-cols-2 gap-1.5 pt-0.5">
                         <button
-                          key={rwy}
-                          onClick={() => setSelectedTaxiRunway(rwy)}
-                          className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition-colors ${
-                            selectedTaxiRunway === rwy
-                              ? "bg-[var(--atc-accent-bg)] border-[var(--atc-accent-border)] text-[var(--atc-accent-text)] font-bold"
-                              : "bg-[var(--atc-surface)] border-[var(--atc-border)] text-[var(--atc-muted)]"
-                          }`}
+                          disabled={nordoLocked}
+                          onClick={() =>
+                            issueClearance({
+                              aircraftId: ac.id,
+                              controller: "GROUND",
+                              type: "HOLD_POSITION",
+                            })
+                          }
+                          className="py-1.5 px-2 rounded-md border font-mono text-[11px] font-semibold bg-[var(--atc-amber-bg)] hover:opacity-90 border-[var(--atc-amber-border)] text-[var(--atc-amber)]"
                         >
-                          {rwy}
+                          HOLD POSITION
                         </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {taxiRoutes.length > 0 ? (() => {
-                  const hasConflicts = taxiRoutes.some((r) => r.conflictLevel !== "CLEAR");
-                  const firstConflict = taxiRoutes.find((r) => r.conflictLevel !== "CLEAR");
-                  const hasClearBypass = taxiRoutes.some((r) => r.conflictLevel === "CLEAR");
-                  return (
-                    <div className="space-y-1.5">
-                      {hasConflicts && firstConflict && (
-                        <div
-                          className={`rounded px-2 py-1.5 text-[10px] font-mono border flex items-start gap-1.5 ${
-                            !hasClearBypass || firstConflict.conflictLevel === "BLOCKED"
-                              ? "bg-[var(--atc-red-bg)] border-[var(--atc-red-border)] text-[var(--atc-red)]"
-                              : "bg-[var(--atc-amber-bg)] border-[var(--atc-amber-border)] text-[var(--atc-amber)]"
-                          }`}
+                        <button
+                          disabled={nordoLocked}
+                          onClick={() =>
+                            issueClearance({
+                              aircraftId: ac.id,
+                              controller: "GROUND",
+                              type: "HOLD_SHORT",
+                              parameters: { runway: heldRunway ?? ac.targetRunway },
+                            })
+                          }
+                          className="py-1.5 px-2 rounded-md border font-mono text-[11px] font-semibold bg-[var(--atc-amber-bg)] hover:opacity-90 border-[var(--atc-amber-border)] text-[var(--atc-amber)]"
                         >
-                          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                          <span>
-                            <strong>Route Traffic Warning:</strong> {firstConflict.conflictReason}.{" "}
-                            {hasClearBypass
-                              ? "Select a CLEAR bypass route below."
-                              : "All paths share traffic — hold position or pick least congested route."}
-                          </span>
-                        </div>
-                      )}
-
-                      <div className="space-y-1">
-                        {taxiRoutes.slice(0, 5).map((rt, idx) => {
-                          const isClear = rt.conflictLevel === "CLEAR";
-                          const isBlocked = rt.conflictLevel === "BLOCKED";
-                          return (
-                            <button
-                              key={idx}
-                              disabled={nordoLocked}
-                              onMouseEnter={() => setHoverPreviewRoute(rt.nodeIds)}
-                              onMouseLeave={() => setHoverPreviewRoute(null)}
-                              onClick={() => {
-                                setHoverPreviewRoute(null);
-                                issueClearance({
-                                  aircraftId: ac.id,
-                                  controller: "GROUND",
-                                  type: "TAXI",
-                                  parameters: {
-                                    runway: selectedTaxiRunway,
-                                    routeTaxiways: rt.taxiways,
-                                    destinationNodeId: rt.destinationNodeId,
-                                    routeNodeIds: rt.nodeIds,
-                                  },
-                                });
-                              }}
-                              title={rt.conflictReason ?? "Conflict-free taxiway route"}
-                              className={`w-full text-left px-2.5 py-1.5 rounded border text-[11px] font-mono flex items-center justify-between gap-2 disabled:opacity-35 transition-colors ${
-                                isBlocked
-                                  ? "border-[var(--atc-red-border)] bg-[var(--atc-red-bg)]/60 hover:bg-[var(--atc-red-bg)] text-[var(--atc-text)]"
-                                  : !isClear
-                                  ? "border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)]/50 hover:bg-[var(--atc-amber-bg)] text-[var(--atc-text)]"
-                                  : "border-[var(--atc-border)] hover:border-[var(--atc-emerald-border)] bg-[var(--atc-surface)] hover:bg-[var(--atc-emerald-bg)] text-[var(--atc-text)]"
-                              }`}
-                            >
-                              <span className="truncate">TAXI {rt.label}</span>
-                              <span className="flex items-center gap-1.5 shrink-0">
-                                <span
-                                  className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${
-                                    isBlocked
-                                      ? "bg-[var(--atc-red-bg)] border-[var(--atc-red-border)] text-[var(--atc-red)]"
-                                      : !isClear
-                                      ? "bg-[var(--atc-amber-bg)] border-[var(--atc-amber-border)] text-[var(--atc-amber)]"
-                                      : "bg-[var(--atc-emerald-bg)] border-[var(--atc-emerald-border)] text-[var(--atc-emerald)]"
-                                  }`}
-                                >
-                                  {isBlocked
-                                    ? `BLOCKED · ${rt.conflictCallsigns.slice(0, 2).join(",")}`
-                                    : !isClear
-                                    ? `TRAFFIC · ${rt.conflictCallsigns.slice(0, 2).join(",")}`
-                                    : "CLEAR"}
-                                </span>
-                                <ArrowRight className="w-3 h-3 text-[var(--atc-accent)] shrink-0" />
-                              </span>
-                            </button>
-                          );
-                        })}
+                          HOLD SHORT {heldRunway ?? ac.targetRunway}
+                        </button>
                       </div>
                     </div>
-                  );
-                })() : (
-                  <div className="text-[11px] font-mono text-[var(--atc-muted)]">
-                    {ac.altitude > sim.airport.elevationFt + 50
-                      ? "Aircraft airborne."
-                      : "No taxi routes from current position."}
+                  ) : (
+                    /* Case 2: Departure holding short for takeoff -> Transfer to Tower */
+                    <div className="rounded-lg border-2 border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] p-3 space-y-2.5 shadow-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-xs text-[var(--atc-cyan)] flex items-center gap-1.5">
+                          <Radio className="w-3.5 h-3.5" />
+                          HOLDING SHORT RWY {ac.targetRunway}
+                        </span>
+                        <span className="text-[10px] text-[var(--atc-cyan)] font-mono font-bold">
+                          READY FOR TOWER
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-[var(--atc-text-secondary)] leading-relaxed">
+                        Aircraft has completed taxi and is holding short at runway {ac.targetRunway}. Transfer control to Tower ({controllerFrequency("TOWER", sim.airport)} MHz) for lineup and takeoff clearance.
+                      </p>
+                      <button
+                        type="button"
+                        disabled={nordoLocked || ac.controller === "TOWER"}
+                        onClick={() =>
+                          issueClearance({
+                            aircraftId: ac.id,
+                            controller: "GROUND",
+                            type: "HANDOFF",
+                            parameters: { targetController: "TOWER" },
+                          })
+                        }
+                        className="w-full py-2.5 px-3 rounded-md bg-[var(--atc-cyan)] hover:opacity-90 text-slate-950 font-mono font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5"
+                      >
+                        <Radio className="w-4 h-4" />
+                        HANDOFF → TOWER ({controllerFrequency("TOWER", sim.airport)} MHz)
+                      </button>
+
+                      <div className="grid grid-cols-2 gap-1.5 pt-0.5">
+                        <button
+                          disabled={nordoLocked}
+                          onClick={() =>
+                            issueClearance({
+                              aircraftId: ac.id,
+                              controller: "GROUND",
+                              type: "HOLD_POSITION",
+                            })
+                          }
+                          className="py-1.5 px-2 rounded-md border font-mono text-[11px] font-semibold bg-[var(--atc-amber-bg)] hover:opacity-90 border-[var(--atc-amber-border)] text-[var(--atc-amber)]"
+                        >
+                          HOLD POSITION
+                        </button>
+                        <button
+                          disabled={nordoLocked}
+                          onClick={() =>
+                            issueClearance({
+                              aircraftId: ac.id,
+                              controller: "GROUND",
+                              type: "HOLD_SHORT",
+                              parameters: { runway: ac.targetRunway },
+                            })
+                          }
+                          className="py-1.5 px-2 rounded-md border font-mono text-[11px] font-semibold bg-[var(--atc-amber-bg)] hover:opacity-90 border-[var(--atc-amber-border)] text-[var(--atc-amber)]"
+                        >
+                          HOLD SHORT {ac.targetRunway}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Conditional Check: ONLY if there are multiple runways or alternative taxiways, show expander toggle */}
+                  {hasMultipleRunwaysOrTaxiways && (
+                    <div className="rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] p-2 space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowAltTaxiways((prev) => !prev)}
+                        className="w-full flex items-center justify-between text-[10px] font-mono font-bold text-[var(--atc-text-secondary)] hover:text-[var(--atc-text)] uppercase"
+                      >
+                        <span>
+                          {showAltTaxiways ? "Hide Alternative Taxiways & Runways" : "Reroute / Other Taxiways & Runways"} ({sim.airport.runwayIds.length} RWYs, {taxiRoutes.length} Routes)
+                        </span>
+                        {showAltTaxiways ? (
+                          <ChevronUp className="w-3.5 h-3.5" />
+                        ) : (
+                          <ChevronDown className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+
+                      {showAltTaxiways && (
+                        <div className="space-y-2.5 pt-1 border-t border-[var(--atc-border)]">
+                          {renderTaxiRouteBuilder()}
+                          {renderRunwayCrossingGrid()}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="pt-0.5">
+                    <button
+                      disabled={nordoLocked}
+                      onClick={() =>
+                        issueClearance({
+                          aircraftId: ac.id,
+                          controller: "GROUND",
+                          type: "UNABLE",
+                        })
+                      }
+                      className={`w-full py-1.5 px-2 font-mono text-xs ${neutralBtn}`}
+                    >
+                      UNABLE
+                    </button>
                   </div>
-                )}
-              </div>
+                </div>
+              ) : (
+                /* NORMAL GROUND VIEW: Pushback, Hold Position, Full Taxi Route Builder, Crossings */
+                <div className="space-y-2.5">
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      disabled={nordoLocked || (ac.state !== "AT_GATE" && ac.state !== "HOLD_POSITION")}
+                      onClick={() =>
+                        issueClearance({
+                          aircraftId: ac.id,
+                          controller: "GROUND",
+                          type: "PUSHBACK",
+                        })
+                      }
+                      className="py-2 px-2 rounded-md border font-mono text-[11px] font-bold transition-colors disabled:opacity-35 disabled:cursor-not-allowed bg-[var(--atc-accent-bg)] hover:opacity-90 border-[var(--atc-accent-border)] text-[var(--atc-accent-text)]"
+                    >
+                      APPROVE PUSHBACK
+                    </button>
+                    <button
+                      disabled={nordoLocked || ac.altitude > sim.airport.elevationFt + 50}
+                      onClick={() =>
+                        issueClearance({
+                          aircraftId: ac.id,
+                          controller: "GROUND",
+                          type: "HOLD_POSITION",
+                        })
+                      }
+                      className="py-2 px-2 rounded-md border font-mono text-[11px] font-semibold disabled:opacity-35 disabled:cursor-not-allowed bg-[var(--atc-amber-bg)] hover:opacity-90 border-[var(--atc-amber-border)] text-[var(--atc-amber)]"
+                    >
+                      HOLD POSITION
+                    </button>
+                  </div>
 
-              {/* Runway Crossing & Hold Short */}
-              <div className="grid grid-cols-2 gap-1.5">
-                {sim.airport.runwayIds.map((rwy) => (
-                  <button
-                    key={`cross-${rwy}`}
-                    disabled={nordoLocked || ac.altitude > sim.airport.elevationFt + 50}
-                    onClick={() =>
-                      issueClearance({
-                        aircraftId: ac.id,
-                        controller: "GROUND",
-                        type: "CROSS_RUNWAY",
-                        parameters: { runway: rwy },
-                      })
-                    }
-                    className="py-1.5 px-2 rounded-md border font-mono text-[11px] font-semibold disabled:opacity-35 bg-[var(--atc-emerald-bg)] hover:opacity-90 border-[var(--atc-emerald-border)] text-[var(--atc-emerald)]"
-                  >
-                    CROSS RWY {rwy}
-                  </button>
-                ))}
-                {sim.airport.runwayIds.map((rwy) => (
-                  <button
-                    key={`hs-${rwy}`}
-                    disabled={nordoLocked || ac.altitude > sim.airport.elevationFt + 50}
-                    onClick={() =>
-                      issueClearance({
-                        aircraftId: ac.id,
-                        controller: "GROUND",
-                        type: "HOLD_SHORT",
-                        parameters: { runway: rwy },
-                      })
-                    }
-                    className="py-1.5 px-2 rounded-md border font-mono text-[11px] font-semibold disabled:opacity-35 bg-[var(--atc-amber-bg)] hover:opacity-90 border-[var(--atc-amber-border)] text-[var(--atc-amber)]"
-                  >
-                    HOLD SHORT {rwy}
-                  </button>
-                ))}
-              </div>
+                  {renderTaxiRouteBuilder()}
+                  {renderRunwayCrossingGrid()}
 
-              <div className="grid grid-cols-2 gap-1.5">
-                <button
-                  disabled={nordoLocked}
-                  onClick={() =>
-                    issueClearance({
-                      aircraftId: ac.id,
-                      controller: "GROUND",
-                      type: "UNABLE",
-                    })
-                  }
-                  className={`py-1.5 px-2 font-mono text-xs ${neutralBtn}`}
-                >
-                  UNABLE
-                </button>
-                <button
-                  disabled={nordoLocked || ac.controller === "TOWER"}
-                  onClick={() =>
-                    issueClearance({
-                      aircraftId: ac.id,
-                      controller: "GROUND",
-                      type: "HANDOFF",
-                      parameters: { targetController: "TOWER" },
-                    })
-                  }
-                  className="py-1.5 px-2 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-xs font-semibold disabled:opacity-35"
-                >
-                  HANDOFF → TWR ({controllerFrequency("TOWER", sim.airport)})
-                </button>
-              </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      disabled={nordoLocked}
+                      onClick={() =>
+                        issueClearance({
+                          aircraftId: ac.id,
+                          controller: "GROUND",
+                          type: "UNABLE",
+                        })
+                      }
+                      className={`py-1.5 px-2 font-mono text-xs ${neutralBtn}`}
+                    >
+                      UNABLE
+                    </button>
+                    <button
+                      disabled={nordoLocked || ac.controller === "TOWER"}
+                      onClick={() =>
+                        issueClearance({
+                          aircraftId: ac.id,
+                          controller: "GROUND",
+                          type: "HANDOFF",
+                          parameters: { targetController: "TOWER" },
+                        })
+                      }
+                      className="py-1.5 px-2 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-xs font-semibold disabled:opacity-35"
+                    >
+                      HANDOFF → TWR ({controllerFrequency("TOWER", sim.airport)})
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
