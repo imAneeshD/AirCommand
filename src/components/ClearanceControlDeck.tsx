@@ -59,14 +59,21 @@ export const ClearanceControlDeck: React.FC = () => {
   const activeRole = sim.config.activePlayerStation;
   const fallbackRole: ControllerRole = activeRole === "ALL" ? "TOWER" : activeRole;
 
+  // In a role-locked session (solo non-ALL or multiplayer), always pin the deck to the
+  // player's own role so they never see another station's controls.
+  const roleLocked = activeRole !== "ALL" || Boolean(assignedRole);
+  const lockedRole: ControllerRole = assignedRole ?? (activeRole === "ALL" ? "TOWER" : activeRole);
+
   const [deckTab, setDeckTab] = useState<ControllerRole>(fallbackRole);
   const [selectedTaxiRunway, setSelectedTaxiRunway] = useState<RunwayId>("09L");
   const [selectedApproachRunway, setSelectedApproachRunway] = useState<RunwayId>("09L");
   const [turnDir, setTurnDir] = useState<"NEAREST" | "LEFT" | "RIGHT">("NEAREST");
   const [customHeading, setCustomHeading] = useState("090");
 
+  // Keep deck tab in sync: role-locked sessions always show own role,
+  // ALL-AUTO sessions follow the aircraft's current controller.
   useEffect(() => {
-    setDeckTab(ac?.controller ?? (activeRole === "ALL" ? "TOWER" : activeRole));
+    setDeckTab(roleLocked ? lockedRole : (ac?.controller ?? "TOWER"));
     if (ac) {
       setSelectedTaxiRunway(ac.targetRunway);
       const rwyId = ac.assignedApproach ?? ac.targetRunway;
@@ -546,31 +553,43 @@ export const ClearanceControlDeck: React.FC = () => {
           }
           bodyClassName="space-y-2.5"
         >
-          {/* Controller Section Tabs */}
-          <div className="grid grid-cols-3 gap-1 bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] p-1 rounded-md text-[11px] font-mono">
-            {(["GROUND", "TOWER", "DEPARTURE"] as const).map((role) => {
-              const isRoleAuto = sim.config.stationControl[role] === "AUTONOMOUS";
-              const isSelected = deckTab === role;
-              return (
-                <button
-                  key={role}
-                  onClick={() => setDeckTab(role)}
-                  className={`py-1 rounded font-semibold transition-all flex items-center justify-center gap-1 ${
-                    isSelected
-                      ? "bg-[var(--atc-surface)] text-[var(--atc-text)] shadow-sm border border-[var(--atc-border)]"
-                      : "text-[var(--atc-muted)] hover:text-[var(--atc-text)]"
-                  }`}
-                >
-                  <span>{role === "DEPARTURE" ? "DEP/APP" : role}</span>
-                  {isRoleAuto && (
-                    <span className="text-[8px] px-1 rounded bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)]">
-                      AI
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+          {/* Controller Section Tabs — only shown in ALL-AUTO mode.
+              When the player has a specific role, show only their station label. */}
+          {roleLocked ? (
+            <div className="flex items-center gap-2 px-1 py-0.5">
+              <span className="px-2.5 py-1 rounded-md bg-[var(--atc-surface)] border border-[var(--atc-accent-border)] text-[var(--atc-accent-text)] text-[11px] font-mono font-bold">
+                {lockedRole === "DEPARTURE" ? "DEP/APP" : lockedRole}
+              </span>
+              <span className="text-[10px] text-[var(--atc-muted)] font-mono">
+                Your station · other roles are AI-managed
+              </span>
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 gap-1 bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] p-1 rounded-md text-[11px] font-mono">
+              {(["GROUND", "TOWER", "DEPARTURE"] as const).map((role) => {
+                const isRoleAuto = sim.config.stationControl[role] === "AUTONOMOUS";
+                const isSelected = deckTab === role;
+                return (
+                  <button
+                    key={role}
+                    onClick={() => setDeckTab(role)}
+                    className={`py-1 rounded font-semibold transition-all flex items-center justify-center gap-1 ${
+                      isSelected
+                        ? "bg-[var(--atc-surface)] text-[var(--atc-text)] shadow-sm border border-[var(--atc-border)]"
+                        : "text-[var(--atc-muted)] hover:text-[var(--atc-text)]"
+                    }`}
+                  >
+                    <span>{role === "DEPARTURE" ? "DEP/APP" : role}</span>
+                    {isRoleAuto && (
+                      <span className="text-[8px] px-1 rounded bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)]">
+                        AI
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {/* GROUND COMMANDS */}
           {deckTab === "GROUND" && (
