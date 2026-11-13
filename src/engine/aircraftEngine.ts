@@ -84,7 +84,7 @@ function issuePilotRequestIfNeeded(
   ac.lastTransmissionAt = state.time;
   addRadioMessage(state, {
     sender: ac.callsign,
-    recipient: controllerCallsign(controller, state.airport),
+    recipient: controllerCallsign(controller, state.airport, ac.flightKind),
     controller,
     aircraftId: ac.id,
     category: "PILOT_REQUEST",
@@ -476,11 +476,11 @@ export function updateAircraftStates(state: SimulationState): void {
             state.metrics.goAroundsExecuted += 1;
             addRadioMessage(state, {
               sender: ac.callsign,
-              recipient: controllerCallsign(ac.controller, state.airport),
+              recipient: controllerCallsign(ac.controller, state.airport, ac.flightKind),
               controller: ac.controller,
               aircraftId: ac.id,
               category: "EMERGENCY",
-              text: `${controllerCallsign(ac.controller, state.airport)}, ${ac.spokenCallsign}, going around at minimums — no landing clearance received!`,
+              text: `${controllerCallsign(ac.controller, state.airport, ac.flightKind)}, ${ac.spokenCallsign}, going around at minimums — no landing clearance received!`,
             });
           } else {
             ac.altitude = Math.max(ac.altitude, elev + 250);

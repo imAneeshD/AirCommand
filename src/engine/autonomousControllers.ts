@@ -711,8 +711,8 @@ function runAutonomousDeparture(state: SimulationState): void {
       const along = alongRunwayNm(rwySpec, ac.x, ac.y);
       const guidance = computeDepAppGuidance(state.airport, ac, rwy);
 
-      // 1. Proactively hand off to Tower when within 11 NM or on final
-      if ((along >= -11.0 && along <= -1.0) || ac.state === "FINAL") {
+      // 1. Proactively hand off to Tower when within 14 NM or on final
+      if ((along >= -14.0 && along <= -1.0) || ac.state === "FINAL") {
         submitClearanceDecision(
           state,
           {

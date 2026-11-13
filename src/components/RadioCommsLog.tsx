@@ -59,19 +59,22 @@ export const RadioCommsLog: React.FC = () => {
   const togglePanelMinimized = useAtcStore((s) => s.togglePanelMinimized);
   const setPanelMinimized = useAtcStore((s) => s.setPanelMinimized);
   const [chatText, setChatText] = useState("");
+  const activeStation = useAtcStore((s) => s.sim.config.activePlayerStation);
   const [filter, setFilter] = useState<LogFilter>(
-    sim.config.activePlayerStation === "ALL" ? "ALL" : "STATION"
+    activeStation === "ALL" ? "ALL" : "STATION"
   );
 
   useEffect(() => {
-    setFilter(sim.config.activePlayerStation === "ALL" ? "ALL" : "STATION");
-  }, [sim.config.activePlayerStation]);
+    setFilter(activeStation === "ALL" ? "ALL" : "STATION");
+  }, [activeStation]);
 
   const messages = sim.radioLog.filter((m) => {
     if (filter === "STATION") {
-      return sim.config.activePlayerStation === "ALL"
+      return activeStation === "ALL"
         ? true
-        : m.controller === sim.config.activePlayerStation;
+        : m.controller === activeStation ||
+          m.recipient === "ALL_STATIONS" ||
+          (m.controller === undefined && !m.recipient);
     }
     if (filter === "ALERTS") {
       return m.category === "READBACK_ERROR" || m.category === "EMERGENCY";
@@ -179,18 +182,16 @@ export const RadioCommsLog: React.FC = () => {
         <div className="flex items-center gap-1.5 text-[10px] font-mono shrink-0">
           {!collapsed &&
             activeTab === "LOGS" &&
-            (
-              [
-                { id: "ALL", label: "ALL FREQ" },
-                {
-                  id: "STATION",
-                  label:
-                    sim.config.activePlayerStation === "ALL"
-                      ? "ALL (AUTO)"
-                      : `${sim.config.activePlayerStation} ONLY`,
-                },
-                { id: "ALERTS", label: `ALERTS (${sim.incidents.length})` },
-              ] as const
+            (activeStation === "ALL"
+              ? ([
+                  { id: "ALL", label: "ALL FREQ" },
+                  { id: "ALERTS", label: `ALERTS (${sim.incidents.length})` },
+                ] as const)
+              : ([
+                  { id: "STATION", label: `${activeStation} ONLY` },
+                  { id: "ALL", label: "ALL FREQ" },
+                  { id: "ALERTS", label: `ALERTS (${sim.incidents.length})` },
+                ] as const)
             ).map((f) => (
               <button
                 key={f.id}
