@@ -697,16 +697,22 @@ export const ClearanceControlDeck: React.FC = () => {
                 <div className="flex gap-1.5 pt-0.5">
                   <button
                     type="button"
-                    onClick={() => respondToHandoff(h.id, true)}
-                    className="flex-1 py-1.5 px-3 rounded-md border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:bg-[var(--atc-surface)] hover:border-[var(--atc-emerald)] text-[var(--atc-emerald)] font-mono font-bold text-xs transition-colors flex items-center justify-center gap-1.5"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      respondToHandoff(h.id, true);
+                    }}
+                    className="flex-1 py-1.5 px-3 rounded-md border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:bg-[var(--atc-surface)] hover:border-[var(--atc-emerald)] text-[var(--atc-emerald)] font-mono font-bold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     <CheckCircle className="w-3.5 h-3.5" />
                     ACCEPT
                   </button>
                   <button
                     type="button"
-                    onClick={() => respondToHandoff(h.id, false)}
-                    className="py-1.5 px-3 rounded-md border border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] hover:bg-[var(--atc-surface)] text-[var(--atc-red)] font-mono text-xs font-semibold transition-colors"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      respondToHandoff(h.id, false);
+                    }}
+                    className="py-1.5 px-3 rounded-md border border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] hover:bg-[var(--atc-surface)] text-[var(--atc-red)] font-mono text-xs font-semibold transition-colors cursor-pointer"
                   >
                     REJECT
                   </button>
@@ -870,16 +876,22 @@ export const ClearanceControlDeck: React.FC = () => {
               <div className="flex gap-2 pt-1">
                 <button
                   type="button"
-                  onClick={() => respondToHandoff(pendingForSelectedAc.id, true)}
-                  className="flex-1 py-1.5 px-3 rounded-md border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:bg-[var(--atc-surface)] hover:border-[var(--atc-emerald)] text-[var(--atc-emerald)] font-mono font-bold text-xs transition-colors flex items-center justify-center gap-1.5"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    respondToHandoff(pendingForSelectedAc.id, true);
+                  }}
+                  className="flex-1 py-1.5 px-3 rounded-md border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:bg-[var(--atc-surface)] hover:border-[var(--atc-emerald)] text-[var(--atc-emerald)] font-mono font-bold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <CheckCircle className="w-4 h-4" />
                   ACCEPT HANDOFF ({ac.callsign} → {lockedRole})
                 </button>
                 <button
                   type="button"
-                  onClick={() => respondToHandoff(pendingForSelectedAc.id, false)}
-                  className="py-1.5 px-3 rounded-md border border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] hover:bg-[var(--atc-surface)] text-[var(--atc-red)] font-mono text-xs font-semibold transition-colors"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    respondToHandoff(pendingForSelectedAc.id, false);
+                  }}
+                  className="py-1.5 px-3 rounded-md border border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] hover:bg-[var(--atc-surface)] text-[var(--atc-red)] font-mono text-xs font-semibold transition-colors cursor-pointer"
                 >
                   REJECT
                 </button>
