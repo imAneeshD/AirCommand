@@ -517,7 +517,9 @@ export class AirportImportService {
         return sub.flat();
       }
       if (!res.ok) return [];
-      const json = (await res.json()) as { elements?: OsmElement[] };
+      const text = await res.text();
+      if (!text || text.trim().length === 0) return [];
+      const json = JSON.parse(text) as { elements?: OsmElement[] };
       return json.elements ?? [];
     } catch {
       return [];
@@ -563,7 +565,9 @@ out skel qt;`;
           signal: AbortSignal.timeout(6500),
         });
         if (!res.ok) continue;
-        const payload = (await res.json()) as { elements?: OsmElement[] };
+        const text = await res.text();
+        if (!text || text.trim().length === 0) continue;
+        const payload = JSON.parse(text) as { elements?: OsmElement[] };
         const converted = osmElementsToGeoJson(payload.elements ?? []);
         if (converted) return converted;
       } catch {

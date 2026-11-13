@@ -165,6 +165,8 @@ interface AtcStore {
     providedTracks?: LiveAdsbTrack[],
     initialRole?: PlayerRoleMode
   ) => Promise<{ ok: boolean; count: number; error?: string }>;
+  liveTrafficLoading: boolean;
+  toggleLiveTraffic: (forceEnable?: boolean) => Promise<void>;
   pollLiveTraffic: () => Promise<void>;
   saveEditedAirportGeometry: (
     icao: string,
@@ -504,7 +506,9 @@ async function tryLoadStaticOsmPack(icao: string): Promise<AirportGeoJsonCollect
   try {
     const res = await fetch(`/data/osm/${icao.toUpperCase()}.geojson`);
     if (!res.ok) return null;
-    const parsed = (await res.json()) as AirportGeoJsonCollection;
+    const text = await res.text();
+    if (!text || text.trim().length === 0) return null;
+    const parsed = JSON.parse(text) as AirportGeoJsonCollection;
     if (
       parsed &&
       parsed.type === "FeatureCollection" &&
@@ -640,6 +644,7 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
   selectedAirportGeoJson: null,
   airportDetailLoading: false,
   airportDetailError: null,
+  liveTrafficLoading: false,
 
   playerId: getOrCreatePlayerId(),
   playerName: getOrCreatePlayerName(),
@@ -874,6 +879,80 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
     } catch {
       // OpenSky cooldown or transient network error
     }
+  },
+
+  toggleLiveTraffic: async (forceEnable?: boolean) => {
+    const { sim, selectedAirportRecord, isOnline, liveTrafficLoading } = get();
+    if (liveTrafficLoading) return;
+
+    const currentlyActive = Boolean(sim.liveSnapshotMeta?.liveSyncEnabled);
+    const shouldEnable = forceEnable !== undefined ? forceEnable : !currentlyActive;
+
+    if (!shouldEnable) {
+      set({ liveTrafficLoading: true });
+      const record = selectedAirportRecord || offlineDb.getBundledFallbackAirport(sim.airport.icao);
+      if (record) {
+        await get().launchRealAirportSimulation(record, "NORMAL_OPS", sim.config.activePlayerStation);
+      }
+      set({ liveTrafficLoading: false });
+      return;
+    }
+
+    set({ liveTrafficLoading: true });
+    radioAudio.stopAllSpeech();
+
+    const activeRecord = selectedAirportRecord || offlineDb.getBundledFallbackAirport(sim.airport.icao);
+    if (!activeRecord) {
+      set({ liveTrafficLoading: false });
+      return;
+    }
+
+    let tracks: LiveAdsbTrack[] = [];
+    let fetchedAtMs = Date.now();
+
+    if (isOnline && activeRecord.lat && activeRecord.lon) {
+      try {
+        let snap = await apiClient.getLiveAdsb(activeRecord.lat, activeRecord.lon, 2.0);
+        if (!snap.tracks || snap.tracks.length === 0) {
+          snap = await apiClient.getLiveAdsb(activeRecord.lat, activeRecord.lon, 4.0);
+        }
+        if (snap.tracks && snap.tracks.length > 0) {
+          tracks = snap.tracks;
+          fetchedAtMs = snap.fetchedAtMs;
+        }
+      } catch {
+        // Fall back gracefully
+      }
+    }
+
+    const customLayout = sim.airport;
+    const conv = convertLiveTracksToSimulation({
+      airportRecord: activeRecord,
+      customLayout,
+      tracks,
+      activeStation: sim.config.activePlayerStation,
+      scenarioId: "MIXED",
+      fetchedAtMs,
+    });
+
+    conv.sim.liveSnapshotMeta = {
+      ...conv.sim.liveSnapshotMeta!,
+      liveSyncEnabled: true,
+      lastSyncStatus: "SYNCED",
+      lastLivePollAtMs: fetchedAtMs,
+      activeLiveCount: conv.sim.aircraftOrder.length,
+    };
+
+    set({
+      sim: conv.sim,
+      tickVersion: 0,
+      liveTrafficLoading: false,
+      lastFeedback: {
+        ok: true,
+        text: `Live traffic active at ${activeRecord.icao}: Populated ${conv.sim.aircraftOrder.length} real live flights (${conv.groundCount} on ground/taxiways, ${conv.airborneCount} airborne).`,
+        at: 0,
+      },
+    });
   },
 
   launchSimulationFromLiveTraffic: async (record, providedTracks, initialRole = "ALL") => {

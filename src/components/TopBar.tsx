@@ -79,6 +79,11 @@ export const TopBar: React.FC = () => {
   const toggleTheme = useAtcStore((s) => s.toggleTheme);
   const minimizedPanels = useAtcStore((s) => s.minimizedPanels);
   const togglePanelMinimized = useAtcStore((s) => s.togglePanelMinimized);
+  const liveTrafficLoading = useAtcStore((s) => s.liveTrafficLoading);
+  const toggleLiveTraffic = useAtcStore((s) => s.toggleLiveTraffic);
+
+  const isLiveActive = Boolean(sim.liveSnapshotMeta?.liveSyncEnabled);
+  const liveAircraftCount = sim.aircraftOrder.filter((id) => Boolean(sim.aircraft[id])).length;
 
   const isMpActive = Boolean(roomState && roomState.status === "ACTIVE");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -217,7 +222,7 @@ export const TopBar: React.FC = () => {
           ) : (
             <Pause className="w-3.5 h-3.5" />
           )}
-          <span>{isMpActive ? "SYNCED" : sim.paused ? "PAUSED" : "LIVE"}</span>
+          <span>{isMpActive ? "SYNCED" : sim.paused ? "PAUSED" : "RUNNING"}</span>
         </button>
 
         {/* Simulation Speed Pill: 1x | 2x | 4x */}
@@ -236,6 +241,38 @@ export const TopBar: React.FC = () => {
             </button>
           ))}
         </div>
+
+        {/* Live Traffic Option */}
+        <button
+          onClick={() => void toggleLiveTraffic()}
+          disabled={liveTrafficLoading}
+          title={
+            isLiveActive
+              ? `Live ADS-B Traffic is Active (${liveAircraftCount} real flights on ground & in air). Click to refresh or switch to simulated traffic.`
+              : "Enable Live Traffic: Populate real flights directly from live APIs onto gates, taxiways & airspace"
+          }
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-mono font-bold border transition-all cursor-pointer shadow-sm disabled:opacity-60 ${
+            isLiveActive
+              ? "bg-emerald-500/15 border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/25 shadow-emerald-500/10"
+              : "bg-[var(--atc-surface-alt)] border-[var(--atc-border)] text-[var(--atc-muted)] hover:text-[var(--atc-text)] hover:border-[var(--atc-border-strong)]"
+          }`}
+        >
+          <span
+            className={`w-2 h-2 rounded-full transition-all ${
+              isLiveActive ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)] animate-pulse" : "bg-slate-500"
+            }`}
+          />
+          {liveTrafficLoading ? (
+            <span className="flex items-center gap-1 text-amber-400">
+              <span className="w-2.5 h-2.5 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+              <span>SYNCING...</span>
+            </span>
+          ) : (
+            <span className="tracking-wide">
+              {isLiveActive ? `LIVE TRAFFIC (${liveAircraftCount})` : "LIVE TRAFFIC"}
+            </span>
+          )}
+        </button>
       </div>
 
       {/* RIGHT SECTION: Communications, Layout & Consolidated Tools */}
@@ -390,6 +427,28 @@ export const TopBar: React.FC = () => {
                     Global Airport Discovery Map
                   </span>
                   <span className="text-[10px] text-[var(--atc-muted)]">Browse</span>
+                </button>
+
+                {/* Live ADS-B Traffic Toggle */}
+                <button
+                  onClick={() => {
+                    setSettingsOpen(false);
+                    void toggleLiveTraffic();
+                  }}
+                  disabled={!isOnline || liveTrafficLoading}
+                  className={`w-full px-2.5 py-2 rounded-md border text-xs flex items-center justify-between font-semibold transition-colors cursor-pointer disabled:opacity-40 ${
+                    isLiveActive
+                      ? "bg-emerald-500/15 border-emerald-500/50 text-emerald-400"
+                      : "border-[var(--atc-border)] bg-[var(--atc-surface-alt)] hover:bg-[var(--atc-surface)] text-[var(--atc-text)]"
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <Radio className="w-3.5 h-3.5" />
+                    Live ADS-B Flight Feed
+                  </span>
+                  <span className="text-[10px] font-mono font-bold">
+                    {liveTrafficLoading ? "SYNCING..." : isLiveActive ? `LIVE (${liveAircraftCount} AC)` : "ENABLE"}
+                  </span>
                 </button>
 
                 {/* Live ADS-B Radar View */}

@@ -1240,6 +1240,18 @@ export const ClearanceControlDeck: React.FC = () => {
 
                 return (
                   <div className="space-y-2">
+                    {(ac.state === "GO_AROUND" || ac.state === "MISSED_APPROACH") && (
+                      <div className="p-2.5 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-300 text-xs space-y-1">
+                        <div className="font-bold flex items-center gap-1.5 text-amber-400">
+                          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                          <span>MISSED APPROACH IN PROGRESS</span>
+                        </div>
+                        <p className="text-[11px] text-[var(--atc-text-secondary)] leading-relaxed">
+                          Climbing to missed approach altitude ({Math.round((sim.airport.elevationFt + 3000) / 500) * 500} ft). Hand off to Approach (APP 121.25) below for radar vectors back to final approach.
+                        </p>
+                      </div>
+                    )}
+
                     <div className="space-y-1.5">
                       <button
                         disabled={
@@ -1393,7 +1405,11 @@ export const ClearanceControlDeck: React.FC = () => {
                         ? "Transfer climbing missed approach aircraft back to Approach Control for re-vectoring"
                         : "Available when arrival executes Go-Around / Missed Approach"
                     }
-                    className="py-1.5 px-2 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-[11px] font-semibold disabled:opacity-35 disabled:cursor-not-allowed"
+                    className={`py-1.5 px-2 rounded-md border font-mono text-[11px] font-semibold transition-all disabled:opacity-35 disabled:cursor-not-allowed ${
+                      (ac.state === "GO_AROUND" || ac.state === "MISSED_APPROACH") && ac.controller === "TOWER"
+                        ? "border-amber-400 bg-amber-500/25 text-amber-300 animate-pulse font-bold shadow-sm cursor-pointer"
+                        : "border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)]"
+                    }`}
                   >
                     HANDOFF → APP ({controllerFrequency("DEPARTURE", sim.airport, "ARRIVAL")})
                   </button>
@@ -1441,7 +1457,11 @@ export const ClearanceControlDeck: React.FC = () => {
                       }, "HANDOFF_DEP")
                     }
                     title="Airborne after takeoff — transfer to Departure Control for climb & SID"
-                    className="py-1.5 px-2 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-[11px] font-semibold disabled:opacity-35 disabled:cursor-not-allowed"
+                    className={`py-1.5 px-2 rounded-md border font-mono text-[11px] font-semibold transition-all disabled:opacity-35 disabled:cursor-not-allowed ${
+                      (ac.state === "GO_AROUND" || ac.state === "MISSED_APPROACH") && ac.controller === "TOWER"
+                        ? "border-amber-400 bg-amber-500/25 text-amber-300 animate-pulse font-bold shadow-sm cursor-pointer"
+                        : "border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)]"
+                    }`}
                   >
                     HANDOFF → DEP ({controllerFrequency("DEPARTURE", sim.airport, "DEPARTURE")})
                   </button>

@@ -65,39 +65,34 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
     throw new Error(`Network offline or server unreachable: ${(netErr as Error).message}`);
   }
 
-  const contentType = res.headers.get("content-type") ?? "";
-  const isJson = contentType.includes("application/json");
+  let rawText = "";
+  try {
+    rawText = await res.text();
+  } catch {
+    rawText = "";
+  }
+
+  const trimmed = rawText.trim();
 
   if (!res.ok) {
     let errMsg = `Request failed (${res.status})`;
-    if (isJson) {
+    if (trimmed.length > 0) {
       try {
-        const errData = (await res.json()) as { error?: string; message?: string };
+        const errData = JSON.parse(trimmed) as { error?: string; message?: string };
         errMsg = errData.error || errData.message || errMsg;
-      } catch {}
-    } else {
-      try {
-        const text = await res.text();
-        if (text && text.length < 120) errMsg = text.trim();
-      } catch {}
+      } catch {
+        if (trimmed.length < 140) errMsg = trimmed;
+      }
     }
     throw new Error(errMsg);
   }
 
-  if (!isJson) {
-    try {
-      const text = await res.text();
-      if (!text || text.trim().length === 0) {
-        throw new Error(`Server returned empty response (${res.status})`);
-      }
-      return JSON.parse(text) as T;
-    } catch (parseErr) {
-      throw new Error(`Invalid server response (${res.status})`);
-    }
+  if (trimmed.length === 0) {
+    return {} as T;
   }
 
   try {
-    return (await res.json()) as T;
+    return JSON.parse(trimmed) as T;
   } catch {
     throw new Error(`Could not parse JSON response (${res.status})`);
   }
