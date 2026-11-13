@@ -28,7 +28,8 @@ function stateBadgeStyle(ac: Aircraft): string {
   if (
     ac.hasReadbackError ||
     ac.operationMode === "EMERGENCY_OPERATION" ||
-    ac.state === "STOPPED_ON_RUNWAY"
+    ac.state === "STOPPED_ON_RUNWAY" ||
+    ac.state === "CRASHED"
   ) {
     return "bg-[var(--atc-red-bg)] text-[var(--atc-red)] border-[var(--atc-red-border)]";
   }

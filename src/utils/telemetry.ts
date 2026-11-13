@@ -20,6 +20,7 @@ const SURFACE_STATES = new Set<AircraftState>([
   "ROLLOUT",
   "VACATING_RUNWAY",
   "COMPLETED_ARRIVAL",
+  "CRASHED",
 ]);
 
 export function isSurfaceAircraft(ac: Aircraft, elevationFt: number): boolean {
@@ -53,6 +54,16 @@ export function formatAltitudeReadout(
   const aglFt = isGround ? 0 : Math.max(0, Math.round(ac.altitude - elevationFt));
 
   if (isGround) {
+    if (ac.state === "CRASHED") {
+      return {
+        isGround: true,
+        aglFt: 0,
+        mslFt: Math.round(elevationFt),
+        compact: "CRASH 0ft",
+        strip: "CRASH",
+        detailed: `0ft AGL (${Math.round(elevationFt)}ft MSL) · CRASH SITE`,
+      };
+    }
     return {
       isGround: true,
       aglFt: 0,

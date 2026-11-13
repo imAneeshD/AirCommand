@@ -5,11 +5,54 @@ import {
   headingDiffDeg,
   runwaySpokenName,
 } from "../data/asteriaAirport.ts";
-import type { Aircraft, RunwayId, SimulationState } from "../types/atc.ts";
+import type { Aircraft, RunwayId, RunwaySpec, SimulationState } from "../types/atc.ts";
 import { formatGateIcao } from "../utils/natoPhonetics.ts";
 import { completeClearancesOfType, nextId } from "./clearanceEngine.ts";
 import { addRadioMessage, controllerCallsign } from "./decisionEngine.ts";
 import { canAircraftExecuteAction } from "./validationEngine.ts";
+
+export function declareAircraftCrash(
+  state: SimulationState,
+  ac: Aircraft,
+  rwy: RunwaySpec | undefined,
+  reason: string
+): void {
+  ac.state = "CRASHED";
+  ac.speed = 0;
+  ac.verticalSpeed = 0;
+  ac.altitude = state.airport.elevationFt;
+  ac.operationMode = "EMERGENCY_OPERATION";
+  ac.emergencyType = "CRASH";
+  ac.squawk = "7700";
+  const rwyId = rwy?.id ?? ac.targetRunway ?? "09R";
+  ac.crashDetails = {
+    time: state.time,
+    runwayId: rwyId,
+    reason,
+    arffDispatched: false,
+    runwayHalted: false,
+    medicalRequested: false,
+  };
+  state.metrics.safetyScore = Math.max(0, state.metrics.safetyScore - 40);
+
+  state.incidents.push({
+    id: nextId(state, "inc"),
+    timestamp: state.time,
+    severity: "CRITICAL",
+    code: "CRASH_EXCURSION",
+    message: `CRASH / RUNWAY EXCURSION: ${ac.callsign} impacted off-runway at ${rwyId} (${reason}).`,
+    aircraftIds: [ac.id],
+  });
+
+  addRadioMessage(state, {
+    sender: "TOWER",
+    recipient: "ALL_STATIONS",
+    controller: "TOWER",
+    aircraftId: ac.id,
+    category: "EMERGENCY",
+    text: `CRASH ALARM! ${ac.callsign} off-runway excursion / impact declared at runway ${runwaySpokenName(rwyId)}. Emergency crash rescue facilities activated.`,
+  });
+}
 
 function issuePilotRequestIfNeeded(
   state: SimulationState,
@@ -86,7 +129,7 @@ export function updateAircraftStates(state: SimulationState): void {
 
   for (const id of state.aircraftOrder) {
     const ac = state.aircraft[id];
-    if (!ac) continue;
+    if (!ac || ac.state === "CRASHED") continue;
 
     switch (ac.state) {
       case "AT_GATE": {
@@ -239,6 +282,19 @@ export function updateAircraftStates(state: SimulationState): void {
         if (!canAircraftExecuteAction(ac, "TAKEOFF_ROLL", state).allowed) {
           ac.state = "HOLD_POSITION";
           break;
+        }
+        const rwy = state.airport.runways[ac.targetRunway];
+        if (rwy) {
+          const along = alongRunwayNm(rwy, ac.x, ac.y);
+          const cross = crossTrackRunwayNm(rwy, ac.x, ac.y);
+          if (Math.abs(cross) > 0.038 && ac.speed > 40) {
+            declareAircraftCrash(state, ac, rwy, "Takeoff roll lateral excursion off runway into grass");
+            break;
+          }
+          if (along > rwy.lengthNm + 0.04 && ac.speed > 45) {
+            declareAircraftCrash(state, ac, rwy, "Takeoff overrun off departure runway end");
+            break;
+          }
         }
         const vr = ac.wakeCategory === "HEAVY" ? 150 : 140;
         if (ac.speed >= vr) {
@@ -421,16 +477,40 @@ export function updateAircraftStates(state: SimulationState): void {
         const rwy = state.airport.runways[ac.assignedApproach ?? ac.targetRunway];
         if (!rwy) break;
         const along = alongRunwayNm(rwy, ac.x, ac.y);
+        const cross = crossTrackRunwayNm(rwy, ac.x, ac.y);
         const tdzAlong = Math.min(0.22, rwy.lengthNm * 0.14);
-        if (along >= tdzAlong * 0.7 && along <= rwy.lengthNm * 0.55 && ac.altitude <= elev + 22) {
+
+        // Ground/terrain impact and excursion checks outside runway boundaries:
+        if (ac.altitude <= elev + 16) {
+          if (along < -0.05 && ac.speed > 50) {
+            declareAircraftCrash(state, ac, rwy, "Undershoot terrain collision short of runway threshold");
+            break;
+          }
+          if (Math.abs(cross) > 0.035 && ac.speed > 40) {
+            declareAircraftCrash(state, ac, rwy, "Lateral runway excursion into terrain at high speed");
+            break;
+          }
+          if (along > rwy.lengthNm + 0.04 && ac.speed > 35) {
+            declareAircraftCrash(state, ac, rwy, "Runway overrun past runway end at high speed");
+            break;
+          }
+        }
+
+        if (
+          along >= tdzAlong * 0.5 &&
+          along <= rwy.lengthNm * 0.60 &&
+          ac.altitude <= elev + 28 &&
+          Math.abs(cross) <= 0.035
+        ) {
           ac.altitude = elev;
           ac.verticalSpeed = 0;
           ac.state = "TOUCHDOWN";
           ac.stateEnteredAt = state.time;
-        } else if (along > rwy.lengthNm * 0.45 && ac.altitude > elev + 65) {
+        } else if (along > rwy.lengthNm * 0.45 && ac.altitude > elev + 18) {
           // Missed approach protection if crossing past touchdown zone still high on glideslope
           ac.state = "GO_AROUND";
           ac.stateEnteredAt = state.time;
+          ac.verticalSpeed = 1800; // Immediate positive climb rate
           ac.assignedAltitude = baseAlt + 3000;
           ac.assignedHeading = rwy.heading;
           ac.assignedSpeed = 190;
@@ -441,7 +521,7 @@ export function updateAircraftStates(state: SimulationState): void {
             controller: ac.controller,
             aircraftId: ac.id,
             category: "EMERGENCY",
-            text: `${controllerCallsign(ac.controller, state.airport)}, ${ac.spokenCallsign}, high and unstable over runway, going around!`,
+            text: `${controllerCallsign(ac.controller, state.airport)}, ${ac.spokenCallsign}, floating past touchdown zone, going around!`,
           });
         }
         break;
@@ -459,11 +539,22 @@ export function updateAircraftStates(state: SimulationState): void {
         const rwyId = ac.assignedApproach ?? ac.targetRunway;
         const rwy = state.airport.runways[rwyId];
         if (!rwy) break;
+        const along = alongRunwayNm(rwy, ac.x, ac.y);
+        const cross = crossTrackRunwayNm(rwy, ac.x, ac.y);
+
+        if (along > rwy.lengthNm + 0.04 && ac.speed > 35) {
+          declareAircraftCrash(state, ac, rwy, "Rollout overrun off runway end into overrun area");
+          break;
+        }
+        if (Math.abs(cross) > 0.035 && ac.speed > 35) {
+          declareAircraftCrash(state, ac, rwy, "Lateral rollout veer-off off runway surface");
+          break;
+        }
+
         const exitSel = selectExitHoldShortNode(state, ac, rwyId);
         if (!exitSel) break;
         const rwyExitNode = state.airport.nodes[exitSel.exitRwyNodeId];
         if (!rwyExitNode) break;
-        const along = alongRunwayNm(rwy, ac.x, ac.y);
         const exitAlong = alongRunwayNm(rwy, rwyExitNode.x, rwyExitNode.y);
         const maxTurnoffSpd = ac.expediteVacate ? 38 : 32;
         if (
@@ -516,6 +607,19 @@ export function updateAircraftStates(state: SimulationState): void {
       }
 
       case "GO_AROUND": {
+        const rwy = state.airport.runways[ac.assignedApproach ?? ac.targetRunway];
+        if (rwy) {
+          const along = alongRunwayNm(rwy, ac.x, ac.y);
+          const cross = crossTrackRunwayNm(rwy, ac.x, ac.y);
+          if (
+            ac.altitude <= elev + 8 &&
+            (along < -0.05 || along > rwy.lengthNm + 0.04 || Math.abs(cross) > 0.035) &&
+            ac.speed > 35
+          ) {
+            declareAircraftCrash(state, ac, rwy, "Off-runway ground impact during go-around");
+            break;
+          }
+        }
         if (ac.altitude >= elev + 1200) {
           ac.state = "MISSED_APPROACH";
           ac.stateEnteredAt = state.time;

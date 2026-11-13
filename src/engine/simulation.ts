@@ -109,6 +109,8 @@ export function getAircraftPhaseLabel(ac: Aircraft): AircraftPhaseLabel {
       return "Go-around";
     case "COMPLETED_DEPARTURE":
       return "Cruise";
+    case "CRASHED":
+      return "Crashed";
   }
 }
 
@@ -145,6 +147,7 @@ export function createBaseSimulation(
     radioLog: [],
     handoffs: [],
     incidents: [],
+    closedRunways: {},
     config,
     metrics: {
       departuresCompleted: 0,

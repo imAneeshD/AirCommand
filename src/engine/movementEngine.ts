@@ -648,8 +648,10 @@ function integrateAirborneFlight(
         canAircraftExecuteAction(ac, "CHANGE_ALTITUDE", state).allowed)
         ? ac.assignedAltitude
         : ac.state === "GO_AROUND" || ac.state === "MISSED_APPROACH"
-        ? Math.round(elev / 500) * 500 + 2200
+        ? Math.round(elev / 500) * 500 + 3000
         : ac.state === "CLIMB"
+        ? Math.round(elev / 500) * 500 + 3000
+        : ac.state === "APPROACH"
         ? Math.round(elev / 500) * 500 + 3000
         : null;
 
@@ -659,10 +661,19 @@ function integrateAirborneFlight(
         ac.altitude = targetAlt;
         smoothSetVs(0);
       } else {
+        if ((ac.state === "GO_AROUND" || ac.state === "MISSED_APPROACH") && ac.verticalSpeed < 1200) {
+          // Immediate TOGA go-around climb rate: arrest descent instantaneously
+          ac.verticalSpeed = 1600;
+        }
         const maxRate = ac.state === "GO_AROUND" ? 2400 : ac.state === "CLIMB" ? 2100 : 1800;
         const targetVs = Math.sign(altDiff) * Math.min(maxRate, Math.max(300, Math.abs(altDiff) * 3.2));
-        smoothSetVs(targetVs, 650);
-        ac.altitude = Math.max(elev, ac.altitude + (ac.verticalSpeed / 60) * dt);
+        smoothSetVs(targetVs, ac.state === "GO_AROUND" ? 1400 : 650);
+        if (ac.state === "GO_AROUND" || ac.state === "MISSED_APPROACH") {
+          // Go-around altitude must strictly climb and never descend into terrain
+          ac.altitude = Math.max(ac.altitude, ac.altitude + (Math.max(600, ac.verticalSpeed) / 60) * dt);
+        } else {
+          ac.altitude = Math.max(elev, ac.altitude + (ac.verticalSpeed / 60) * dt);
+        }
       }
     } else {
       smoothSetVs(0);

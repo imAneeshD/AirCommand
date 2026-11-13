@@ -52,6 +52,10 @@ export const ClearanceControlDeck: React.FC = () => {
   const causeRadioFailure = useAtcStore((s) => s.causeRadioFailure);
   const causeEmergency = useAtcStore((s) => s.causeEmergency);
   const towDisabledAircraft = useAtcStore((s) => s.towDisabledAircraft);
+  const dispatchCrashRescue = useAtcStore((s) => s.dispatchCrashRescue);
+  const haltRunwayOperations = useAtcStore((s) => s.haltRunwayOperations);
+  const requestMedicalEvacuation = useAtcStore((s) => s.requestMedicalEvacuation);
+  const clearCrashSite = useAtcStore((s) => s.clearCrashSite);
   const setHoverPreviewRoute = useAtcStore((s) => s.setHoverPreviewRoute);
   const minimized = useAtcStore((s) => s.minimizedPanels.right);
   const togglePanelMinimized = useAtcStore((s) => s.togglePanelMinimized);
@@ -518,7 +522,128 @@ export const ClearanceControlDeck: React.FC = () => {
           </div>
         ) : null}
 
-        {roleLocked && ac.controller !== lockedRole ? (
+        {ac.state === "CRASHED" ? (
+          <div className="rounded-lg border border-red-500 bg-red-950/40 p-3 space-y-3 font-mono shadow-lg">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-red-400 font-extrabold text-xs">
+                <AlertOctagon className="w-4 h-4 animate-pulse" />
+                <span>CRASH ALARM · RUNWAY EXCURSION</span>
+              </div>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-600 text-white font-bold">
+                MAYDAY 7700
+              </span>
+            </div>
+
+            <div className="text-[11px] text-red-200 leading-snug">
+              {ac.crashDetails?.reason ?? "Off-runway ground collision / excursion detected at high speed."}
+            </div>
+
+            <div className="space-y-1.5 pt-1">
+              {/* Facility 1: ARFF */}
+              <button
+                type="button"
+                disabled={Boolean(ac.crashDetails?.arffDispatched)}
+                onClick={() => dispatchCrashRescue(ac.id)}
+                className={`w-full py-2 px-2.5 rounded-md text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+                  ac.crashDetails?.arffDispatched
+                    ? "bg-emerald-950/60 border border-emerald-500/80 text-emerald-300 cursor-default"
+                    : "bg-red-600 hover:bg-red-500 text-white shadow-md animate-pulse"
+                }`}
+              >
+                {ac.crashDetails?.arffDispatched ? (
+                  <>
+                    <CheckCircle className="w-4 h-4" />
+                    <span>ARFF ON SCENE · FOAM SUPPRESSION ACTIVE</span>
+                  </>
+                ) : (
+                  <>
+                    <ShieldAlert className="w-4 h-4" />
+                    <span>DISPATCH CRASH TENDERS &amp; RESCUE (ARFF)</span>
+                  </>
+                )}
+              </button>
+
+              {/* Facility 2: Halt Runway */}
+              {(() => {
+                const rwyId = ac.crashDetails?.runwayId ?? ac.targetRunway;
+                const isHalted = Boolean(ac.crashDetails?.runwayHalted || sim.closedRunways?.[rwyId]);
+                return (
+                  <button
+                    type="button"
+                    disabled={isHalted}
+                    onClick={() => haltRunwayOperations(rwyId, ac.id)}
+                    className={`w-full py-2 px-2.5 rounded-md text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+                      isHalted
+                        ? "bg-amber-950/60 border border-amber-500/80 text-amber-300 cursor-default"
+                        : "bg-amber-600 hover:bg-amber-500 text-white shadow-md"
+                    }`}
+                  >
+                    {isHalted ? (
+                      <>
+                        <CheckCircle className="w-4 h-4" />
+                        <span>RUNWAY {rwyId} CLOSED · OPERATIONS HALTED</span>
+                      </>
+                    ) : (
+                      <>
+                        <Ban className="w-4 h-4" />
+                        <span>HALT RUNWAY {rwyId} OPERATIONS (CLOSE RWY)</span>
+                      </>
+                    )}
+                  </button>
+                );
+              })()}
+
+              {/* Facility 3: Medical Evac */}
+              <button
+                type="button"
+                disabled={Boolean(ac.crashDetails?.medicalRequested)}
+                onClick={() => requestMedicalEvacuation(ac.id)}
+                className={`w-full py-2 px-2.5 rounded-md text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+                  ac.crashDetails?.medicalRequested
+                    ? "bg-cyan-950/60 border border-cyan-500/80 text-cyan-300 cursor-default"
+                    : "bg-cyan-600 hover:bg-cyan-500 text-slate-950 shadow-md"
+                }`}
+              >
+                {ac.crashDetails?.medicalRequested ? (
+                  <>
+                    <CheckCircle className="w-4 h-4" />
+                    <span>MEDICAL EVAC EN ROUTE · 6 AMBULANCES ACTIVE</span>
+                  </>
+                ) : (
+                  <>
+                    <Activity className="w-4 h-4" />
+                    <span>REQUEST MEDICAL &amp; FIRE EVACUATION</span>
+                  </>
+                )}
+              </button>
+
+              {/* Facility 4: Clear Crash Site */}
+              {(() => {
+                const canClear = Boolean(
+                  ac.crashDetails?.arffDispatched &&
+                    ac.crashDetails?.runwayHalted &&
+                    ac.crashDetails?.medicalRequested
+                );
+                return (
+                  <button
+                    type="button"
+                    disabled={!canClear}
+                    onClick={() => clearCrashSite(ac.id)}
+                    className="w-full py-2 px-2.5 rounded-md text-xs font-bold transition-all flex items-center justify-center gap-2 bg-slate-800 border border-slate-600 hover:border-emerald-500 hover:text-emerald-400 text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                    title={
+                      canClear
+                        ? "Clear wreckage with crane and tug and restore airfield operations"
+                        : "Requires ARFF dispatch, Runway halt, and Medical evacuation coordination first"
+                    }
+                  >
+                    <Wrench className="w-4 h-4" />
+                    <span>CLEAR CRASH SITE &amp; REOPEN RUNWAY</span>
+                  </button>
+                );
+              })()}
+            </div>
+          </div>
+        ) : roleLocked && ac.controller !== lockedRole ? (
           <div className="rounded-lg border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] p-3 text-[11px] font-mono text-[var(--atc-text)] space-y-2">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-[var(--atc-emerald)] shrink-0" />

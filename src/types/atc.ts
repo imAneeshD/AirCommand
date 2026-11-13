@@ -37,7 +37,8 @@ export type AircraftState =
   | "GO_AROUND"
   | "MISSED_APPROACH"
   | "COMPLETED_DEPARTURE"
-  | "COMPLETED_ARRIVAL";
+  | "COMPLETED_ARRIVAL"
+  | "CRASHED";
 
 export type ClearanceType =
   | "PUSHBACK"
@@ -118,7 +119,9 @@ export type EmergencyType =
   | "ENGINE_FAILURE"
   | "REJECTED_TAKEOFF_ABORT"
   | "MEDICAL"
-  | "LOW_FUEL";
+  | "LOW_FUEL"
+  | "RUNWAY_EXCURSION"
+  | "CRASH";
 
 export type CommStatus = "NORMAL" | "RADIO_FAILURE";
 export type NordoBehaviorMode = "LIGHT_GUN_SIGNALS" | "PREDEFINED_LOST_COMM";
@@ -177,6 +180,14 @@ export interface Aircraft {
   controller: ControllerRole;
   operationMode: OperationMode;
   emergencyType: EmergencyType;
+  crashDetails?: {
+    time: number;
+    runwayId: RunwayId;
+    reason: string;
+    arffDispatched: boolean;
+    runwayHalted: boolean;
+    medicalRequested: boolean;
+  };
   commStatus: CommStatus;
   nordoMode: NordoBehaviorMode;
 
@@ -431,7 +442,8 @@ export type AircraftPhaseLabel =
   | "Taxi-in"
   | "Parking"
   | "Go-around"
-  | "Diversion";
+  | "Diversion"
+  | "Crashed";
 
 export interface RawRunwayMetadata {
   id: string;
@@ -647,6 +659,7 @@ export interface SimulationState {
   radioLog: RadioMessage[];
   handoffs: ControllerHandoff[];
   incidents: SafetyIncident[];
+  closedRunways?: Record<string, boolean>;
   config: SimulationConfig;
   metrics: SimulationMetrics;
   nextIdCounter: number;

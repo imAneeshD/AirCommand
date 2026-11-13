@@ -184,6 +184,13 @@ export function submitClearanceDecision(
     return { ok: false, reason: `Unknown aircraft ${command.aircraftId}.` };
   }
 
+  if (aircraft.state === "CRASHED") {
+    return {
+      ok: false,
+      reason: `${aircraft.callsign} has CRASHED off-runway — use Emergency Crash Rescue Facilities.`,
+    };
+  }
+
   // Enforce RADIO_FAILURE (NORDO 7600) — normal radio commands cannot control a NORDO aircraft!
   if (aircraft.commStatus === "RADIO_FAILURE" && command.type !== "LIGHT_GUN") {
     return {
@@ -236,6 +243,7 @@ export function submitClearanceDecision(
             );
             aircraft.state = "GO_AROUND";
             aircraft.stateEnteredAt = state.time;
+            aircraft.verticalSpeed = 1600;
             aircraft.assignedAltitude = safeAlt;
             aircraft.assignedHeading = rwy ? rwy.heading : aircraft.heading;
             aircraft.assignedSpeed = Math.max(190, aircraft.speed);
@@ -896,6 +904,7 @@ function applyClearanceImmediateEffects(
     case "GO_AROUND": {
       aircraft.state = "GO_AROUND";
       aircraft.stateEnteredAt = state.time;
+      aircraft.verticalSpeed = 1600;
       aircraft.assignedAltitude = Number(clearance.parameters.altitude ?? 3000);
       aircraft.assignedHeading = Number(clearance.parameters.heading ?? 90);
       aircraft.assignedSpeed = 190;
@@ -1553,6 +1562,145 @@ export function clearStoppedRunwayEmergency(
     aircraftId: ac.id,
     category: "SYSTEM",
     text: `Airport Rescue & Tug cleared ${ac.callsign} off runway ${ac.targetRunway} to ${bestNode.label}. Runway clear.`,
+  });
+  return true;
+}
+
+export function dispatchCrashRescue(
+  state: SimulationState,
+  aircraftId: string
+): boolean {
+  const ac = state.aircraft[aircraftId];
+  if (!ac || (ac.state !== "CRASHED" && ac.operationMode !== "EMERGENCY_OPERATION")) return false;
+  if (!ac.crashDetails) {
+    ac.crashDetails = {
+      time: state.time,
+      runwayId: ac.targetRunway ?? "09R",
+      reason: "Emergency airfield crash response",
+      arffDispatched: true,
+      runwayHalted: false,
+      medicalRequested: false,
+    };
+  } else {
+    ac.crashDetails.arffDispatched = true;
+  }
+  const rwyId = ac.crashDetails.runwayId;
+  addRadioMessage(state, {
+    sender: "TOWER",
+    recipient: "ARFF_DISPATCH",
+    controller: "TOWER",
+    aircraftId: ac.id,
+    category: "EMERGENCY",
+    text: `Tower to ARFF: Crash alarm confirmed for ${ac.callsign} at runway ${runwaySpokenName(rwyId)}. Deploy all crash tenders and rapid intervention vehicles immediately!`,
+  });
+  addRadioMessage(state, {
+    sender: "ARFF_1",
+    recipient: "TOWER",
+    controller: "TOWER",
+    aircraftId: ac.id,
+    category: "SYSTEM",
+    text: `ARFF Dispatch: Crash Tenders 1, 2, and Rescue 4 on scene at ${ac.callsign}. High-expansion foam laid down, fire suppression active.`,
+  });
+  return true;
+}
+
+export function haltRunwayOperations(
+  state: SimulationState,
+  runwayId: string,
+  aircraftId?: string
+): boolean {
+  if (!state.closedRunways) state.closedRunways = {};
+  state.closedRunways[runwayId] = true;
+  if (aircraftId && state.aircraft[aircraftId]?.crashDetails) {
+    state.aircraft[aircraftId].crashDetails!.runwayHalted = true;
+  }
+  addRadioMessage(state, {
+    sender: "TOWER",
+    recipient: "ALL_STATIONS",
+    controller: "TOWER",
+    aircraftId,
+    category: "EMERGENCY",
+    text: `All stations, Asteria Tower: Runway ${runwaySpokenName(runwayId)} is officially CLOSED immediately due to crash emergency. Inbound flights abort approach and hold.`,
+  });
+  for (const otherId of state.aircraftOrder) {
+    const o = state.aircraft[otherId];
+    if (!o || o.id === aircraftId) continue;
+    const destRwy = o.assignedApproach ?? o.targetRunway;
+    if (destRwy === runwayId && (o.state === "FINAL" || o.state === "CLEARED_TO_LAND" || o.state === "APPROACH")) {
+      o.state = "GO_AROUND";
+      o.verticalSpeed = 1800;
+      o.assignedAltitude = Math.round(state.airport.elevationFt / 500) * 500 + 3000;
+      addRadioMessage(state, {
+        sender: "TOWER",
+        recipient: o.callsign,
+        controller: "TOWER",
+        aircraftId: o.id,
+        category: "EMERGENCY",
+        text: `${o.callsign}, Asteria Tower, runway ${runwaySpokenName(runwayId)} is closed! Go around immediately, climb 3000, maintain runway heading.`,
+      });
+    }
+  }
+  return true;
+}
+
+export function requestMedicalEvacuation(
+  state: SimulationState,
+  aircraftId: string
+): boolean {
+  const ac = state.aircraft[aircraftId];
+  if (!ac) return false;
+  if (!ac.crashDetails) {
+    ac.crashDetails = {
+      time: state.time,
+      runwayId: ac.targetRunway ?? "09R",
+      reason: "Emergency casualty evacuation",
+      arffDispatched: false,
+      runwayHalted: false,
+      medicalRequested: true,
+    };
+  } else {
+    ac.crashDetails.medicalRequested = true;
+  }
+  addRadioMessage(state, {
+    sender: "TOWER",
+    recipient: "MED_DISPATCH",
+    controller: "TOWER",
+    aircraftId: ac.id,
+    category: "EMERGENCY",
+    text: `Tower to Emergency Medical: Level 3 disaster medical response and casualty evacuation requested for ${ac.callsign}.`,
+  });
+  addRadioMessage(state, {
+    sender: "MED_OPS",
+    recipient: "TOWER",
+    controller: "TOWER",
+    aircraftId: ac.id,
+    category: "SYSTEM",
+    text: `Medical Dispatch: 6 ambulances and mobile trauma hospital entering through Gate 4 to ${ac.callsign} crash site. Evacuation underway.`,
+  });
+  return true;
+}
+
+export function clearCrashSite(
+  state: SimulationState,
+  aircraftId: string
+): boolean {
+  const ac = state.aircraft[aircraftId];
+  if (!ac || ac.state !== "CRASHED") return false;
+  const rwyId = ac.crashDetails?.runwayId ?? ac.targetRunway;
+  ac.state = "COMPLETED_ARRIVAL";
+  ac.operationMode = "NORMAL_OPERATION";
+  ac.emergencyType = "NONE";
+  ac.squawk = "1200";
+  if (state.closedRunways && rwyId) {
+    state.closedRunways[rwyId] = false;
+  }
+  addRadioMessage(state, {
+    sender: "OPS_HEAVY",
+    recipient: "TOWER",
+    controller: "TOWER",
+    aircraftId: ac.id,
+    category: "SYSTEM",
+    text: `Airfield Operations: Crash site secured. ${ac.callsign} wreckage cleared by heavy crane and transported to hangar. Runway ${runwaySpokenName(rwyId)} inspected, FOD clear, and reopened.`,
   });
   return true;
 }

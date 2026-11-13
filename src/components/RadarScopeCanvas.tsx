@@ -119,6 +119,8 @@ function shortStateTag(ac: Aircraft, elevationFt: number): string {
     case "GO_AROUND":
     case "MISSED_APPROACH":
       return `GA ${agl}ft`;
+    case "CRASHED":
+      return "CRASH 0ft";
     default: {
       const altTag =
         agl < 1500
