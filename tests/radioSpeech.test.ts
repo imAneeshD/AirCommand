@@ -177,7 +177,8 @@ test("Single-role synchronous clearance waits for acknowledgeSyncClearance befor
   res.clearance.readbackDueAt = s.time;
   stepSimulation(s, 0.2);
   assert.equal(res.clearance.lifecycle, "ACTIVE");
-  assert.ok(ual.state === "PUSHBACK_APPROVED" || ual.state === "PUSHING_BACK");
+  const endState = ual.state as string;
+  assert.ok(endState === "PUSHBACK_APPROVED" || endState === "PUSHING_BACK");
 
   // Verify clean single to-and-fro exchange: exactly 1 ATC command and 1 pilot reply
   const msgs = s.radioLog.filter((m) => m.aircraftId === ual.id);
