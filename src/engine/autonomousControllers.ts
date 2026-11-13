@@ -578,7 +578,11 @@ function runAutonomousDeparture(state: SimulationState): void {
       }
 
       const distFromAirport = Math.hypot(ac.x, ac.y);
-      if (distFromAirport >= 12 && ac.altitude >= elev + 4000) {
+      if (
+        (distFromAirport >= 9.5 && ac.altitude >= elev + 2800) ||
+        (ac.state === "CRUISE_OUTBOUND" && ac.altitude >= elev + 2500) ||
+        distFromAirport >= 14
+      ) {
         submitClearanceDecision(
           state,
           {

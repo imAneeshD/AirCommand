@@ -6,6 +6,7 @@ import {
   createArrivalAircraft,
   createBaseSimulation,
   createDepartureAircraft,
+  spawnRandomTraffic,
 } from "../engine/simulation.ts";
 import { updateAircraftStates } from "../engine/aircraftEngine.ts";
 import type {
@@ -137,6 +138,32 @@ function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
 }
 
+export function getTargetLimitsForScenario(scen?: ScenarioId): { min: number; max: number } {
+  switch (scen) {
+    case "LOW_TRAFFIC":
+      return { min: 2, max: 3 };
+    case "LIGHT":
+      return { min: 4, max: 5 };
+    case "NORMAL_OPS":
+    case "MIXED":
+    case "MEDIUM":
+      return { min: 6, max: 8 };
+    case "HEAVY":
+    case "ARRIVAL_HEAVY":
+    case "DEPARTURE_HEAVY":
+      return { min: 10, max: 14 };
+    case "RUSH_HOUR":
+      return { min: 14, max: 18 };
+    case "SANDBOX":
+      return { min: 2, max: 6 };
+    case "CROSSINGS_AND_READBACK":
+    case "EMERGENCY_AND_NORDO":
+    case "EMERGENCY":
+    default:
+      return { min: 4, max: 8 };
+  }
+}
+
 export interface LiveConversionResult {
   sim: SimulationState;
   convertedCount: number;
@@ -162,7 +189,8 @@ export function convertLiveTracksToSimulation(opts: {
   const activeStation = opts.activeStation ?? "ALL";
   const sim = createBaseSimulation(scenarioId, activeStation, opts.airportRecord.icao, layout);
   const elev = layout.elevationFt;
-  const maxAc = opts.maxAircraft ?? 12;
+  const limits = getTargetLimitsForScenario(scenarioId);
+  const maxAc = opts.maxAircraft ?? limits.max;
 
   // Deduplicate & score tracks by proximity + ground/approach relevance
   const seenCallsigns = new Set<string>();
@@ -345,6 +373,19 @@ export function convertLiveTracksToSimulation(opts: {
     );
   });
 
+  // Top up with realistic local flights if live traffic count is below scenario mode minimum (for explicit mode filters like HEAVY, RUSH_HOUR)
+  if (
+    opts.scenarioId &&
+    opts.scenarioId !== "SANDBOX" &&
+    opts.scenarioId !== "MIXED" &&
+    sim.aircraftOrder.length < limits.min
+  ) {
+    const need = limits.min - sim.aircraftOrder.length;
+    for (let i = 0; i < need; i++) {
+      spawnRandomTraffic(sim);
+    }
+  }
+
   if (sim.aircraftOrder.length > 0) {
     sim.selectedAircraftId =
       sim.aircraftOrder.find((id) => sim.aircraft[id]?.controller === "GROUND") ??
@@ -359,9 +400,10 @@ export function convertLiveTracksToSimulation(opts: {
     convertedCount: chosen.length,
     source: "OpenSky Network (Live ADS-B)",
     lastLivePollAtMs: opts.fetchedAtMs ?? Date.now(),
-    activeLiveCount: chosen.length,
+    activeLiveCount: sim.aircraftOrder.length,
     liveSyncEnabled: true,
     lastSyncStatus: "SYNCED",
+    cachedTracks: opts.tracks,
   };
 
   addRadioMessage(sim, {
@@ -371,8 +413,8 @@ export function convertLiveTracksToSimulation(opts: {
     category: "SYSTEM",
     text:
       chosen.length > 0
-        ? `LIVE SNAPSHOT ACTIVE at ${opts.airportRecord.icao}: Imported ${chosen.length} real ADS-B flights (${groundCount} ground, ${airborneCount} airborne) into AirCommand ATC.`
-        : `No live ADS-B targets found near ${opts.airportRecord.icao} right now — airfield loaded cleanly; spawn traffic or pick a scenario.`,
+        ? `LIVE SNAPSHOT ACTIVE at ${opts.airportRecord.icao} (${scenarioId}): Populated ${sim.aircraftOrder.length} flights (${chosen.length} real ADS-B, ${groundCount} ground, ${airborneCount} airborne).`
+        : `No live ADS-B targets found near ${opts.airportRecord.icao} right now — airfield loaded cleanly with ${sim.aircraftOrder.length} simulated flights.`,
   });
 
   updateAircraftStates(sim);

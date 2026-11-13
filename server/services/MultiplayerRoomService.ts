@@ -601,68 +601,78 @@ export class MultiplayerRoomService {
 
         const ac = ir.sim.aircraft[h.aircraftId];
         if (ac) {
-          ac.controller = h.toController;
-          ac.lastTransmissionAt = ir.sim.time;
+          if (h.toController === "ACC") {
+            ac.state = "COMPLETED_DEPARTURE";
+            ac.stateEnteredAt = ir.sim.time;
+            ac.lastTransmissionAt = ir.sim.time;
+            ir.sim.metrics.departuresCompleted += 1;
+            if (ac.pendingRequest) {
+              ac.pendingRequest.resolved = true;
+            }
+          } else {
+            ac.controller = h.toController;
+            ac.lastTransmissionAt = ir.sim.time;
 
-          if (h.toController === "TOWER") {
-            if (ac.flightKind === "ARRIVAL") {
-              const rwy = ac.assignedApproach ?? ac.targetRunway;
-              const msgText = `${controllerCallsign("TOWER", ir.sim.airport)}, ${ac.spokenCallsign}, inbound ILS runway ${runwaySpokenName(rwy)}, request landing clearance.`;
+            if (h.toController === "TOWER") {
+              if (ac.flightKind === "ARRIVAL") {
+                const rwy = ac.assignedApproach ?? ac.targetRunway;
+                const msgText = `${controllerCallsign("TOWER", ir.sim.airport)}, ${ac.spokenCallsign}, inbound ILS runway ${runwaySpokenName(rwy)}, request landing clearance.`;
+                ac.pendingRequest = {
+                  id: nextId(ir.sim, "req"),
+                  type: "LANDING",
+                  controller: "TOWER",
+                  message: msgText,
+                  requestedAt: ir.sim.time,
+                  runway: rwy,
+                  resolved: false,
+                };
+                addRadioMessage(ir.sim, {
+                  sender: ac.callsign,
+                  recipient: controllerCallsign("TOWER", ir.sim.airport),
+                  controller: "TOWER",
+                  aircraftId: ac.id,
+                  category: "PILOT_REQUEST",
+                  text: msgText,
+                });
+              } else if (ac.flightKind === "DEPARTURE") {
+                const msgText = `${controllerCallsign("TOWER", ir.sim.airport)}, ${ac.spokenCallsign}, holding short runway ${runwaySpokenName(ac.targetRunway)}, ready for departure.`;
+                ac.pendingRequest = {
+                  id: nextId(ir.sim, "req"),
+                  type: "TAKEOFF",
+                  controller: "TOWER",
+                  message: msgText,
+                  requestedAt: ir.sim.time,
+                  runway: ac.targetRunway,
+                  resolved: false,
+                };
+                addRadioMessage(ir.sim, {
+                  sender: ac.callsign,
+                  recipient: controllerCallsign("TOWER", ir.sim.airport),
+                  controller: "TOWER",
+                  aircraftId: ac.id,
+                  category: "PILOT_REQUEST",
+                  text: msgText,
+                });
+              }
+            } else if (h.toController === "GROUND") {
+              const msgText = `${controllerCallsign("GROUND", ir.sim.airport)}, ${ac.spokenCallsign}, clear of runway, request taxi to gate.`;
               ac.pendingRequest = {
                 id: nextId(ir.sim, "req"),
-                type: "LANDING",
-                controller: "TOWER",
+                type: "TAXI",
+                controller: "GROUND",
                 message: msgText,
                 requestedAt: ir.sim.time,
-                runway: rwy,
                 resolved: false,
               };
               addRadioMessage(ir.sim, {
                 sender: ac.callsign,
-                recipient: controllerCallsign("TOWER", ir.sim.airport),
-                controller: "TOWER",
-                aircraftId: ac.id,
-                category: "PILOT_REQUEST",
-                text: msgText,
-              });
-            } else if (ac.flightKind === "DEPARTURE") {
-              const msgText = `${controllerCallsign("TOWER", ir.sim.airport)}, ${ac.spokenCallsign}, holding short runway ${runwaySpokenName(ac.targetRunway)}, ready for departure.`;
-              ac.pendingRequest = {
-                id: nextId(ir.sim, "req"),
-                type: "TAKEOFF",
-                controller: "TOWER",
-                message: msgText,
-                requestedAt: ir.sim.time,
-                runway: ac.targetRunway,
-                resolved: false,
-              };
-              addRadioMessage(ir.sim, {
-                sender: ac.callsign,
-                recipient: controllerCallsign("TOWER", ir.sim.airport),
-                controller: "TOWER",
+                recipient: controllerCallsign("GROUND", ir.sim.airport),
+                controller: "GROUND",
                 aircraftId: ac.id,
                 category: "PILOT_REQUEST",
                 text: msgText,
               });
             }
-          } else if (h.toController === "GROUND") {
-            const msgText = `${controllerCallsign("GROUND", ir.sim.airport)}, ${ac.spokenCallsign}, clear of runway, request taxi to gate.`;
-            ac.pendingRequest = {
-              id: nextId(ir.sim, "req"),
-              type: "TAXI",
-              controller: "GROUND",
-              message: msgText,
-              requestedAt: ir.sim.time,
-              resolved: false,
-            };
-            addRadioMessage(ir.sim, {
-              sender: ac.callsign,
-              recipient: controllerCallsign("GROUND", ir.sim.airport),
-              controller: "GROUND",
-              aircraftId: ac.id,
-              category: "PILOT_REQUEST",
-              text: msgText,
-            });
           }
         }
       }

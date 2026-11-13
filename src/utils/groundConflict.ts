@@ -206,15 +206,29 @@ export function inspectGroundConflict(
     return null;
   }
 
+  const distToBlocker = blocker ? Math.hypot(blocker.x - ac.x, blocker.y - ac.y) : Infinity;
+  let isComingStraightAtUs = false;
+  if (blocker && distToBlocker <= 0.054) {
+    const dx = blocker.x - ac.x;
+    const dy = blocker.y - ac.y;
+    const radOther = (blocker.heading * Math.PI) / 180;
+    const otherFwdX = Math.sin(radOther);
+    const otherFwdY = Math.cos(radOther);
+    const dotOtherTowardsUs = ((-dx * otherFwdX) + (-dy * otherFwdY)) / distToBlocker;
+    isComingStraightAtUs = dotOtherTowardsUs > 0.65;
+  }
+
   const mutualDeadlock = Boolean(
     blocker &&
-      blocker.speed <= 3.5 &&
-      (findBlockingTrafficAhead(blocker, sim, 0.068)?.id === ac.id ||
-        Math.hypot(blocker.x - ac.x, blocker.y - ac.y) <= 0.06)
+      distToBlocker <= 0.054 &&
+      isComingStraightAtUs &&
+      (findBlockingTrafficAhead(blocker, sim, 0.054)?.id === ac.id || distToBlocker <= 0.045)
   );
 
   const bypassRoute = findBestBypassRoute(sim, ac, blocker);
   const stepBack = findBestStepBackNode(sim.airport, ac, blocker);
+
+  const isBlocked = Boolean(blocker && distToBlocker <= 0.054 && (isComingStraightAtUs || mutualDeadlock));
 
   const recommendedAction: GroundConflictReport["recommendedAction"] =
     bypassRoute && bypassRoute.conflictLevel === "CLEAR"
@@ -233,12 +247,12 @@ export function inspectGroundConflict(
     ? `Holding for ${blocker.callsign} to pass (auto-resumes once clear)`
     : mutualDeadlock && blocker
     ? `Nose-to-nose deadlock with ${blocker.callsign} (${Math.round(ac.speed)}kt / ${Math.round(blocker.speed)}kt)`
-    : blocker
+    : isBlocked && blocker
     ? `Blocked on taxiway by ${blocker.callsign} (${Math.round(blocker.speed)}kt)`
     : `Holding position on ground`;
 
   return {
-    isBlocked: true,
+    isBlocked,
     isYieldWaiting,
     mutualDeadlock,
     blocker,

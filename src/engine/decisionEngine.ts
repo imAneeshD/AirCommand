@@ -909,9 +909,24 @@ function applyClearanceImmediateEffects(
       break;
     }
     case "CANCEL_TAKEOFF": {
-      aircraft.state = "TAKEOFF_CANCELLED";
-      aircraft.stateEnteredAt = state.time;
-      aircraft.speed = 0;
+      for (const clr of aircraft.clearances) {
+        if (clr.type === "TAKEOFF" || clr.type === "LINE_UP") {
+          clr.cancelled = true;
+          clr.active = false;
+          clr.lifecycle = "CANCELLED";
+        }
+      }
+      if (aircraft.state === "TAKEOFF_ROLL" || aircraft.state === "ROTATE") {
+        aircraft.state = "BRAKING";
+        aircraft.stateEnteredAt = state.time;
+      } else {
+        aircraft.state = "TAKEOFF_CANCELLED";
+        aircraft.stateEnteredAt = state.time;
+        aircraft.speed = 0;
+      }
+      if (aircraft.pendingRequest?.type === "TAKEOFF") {
+        aircraft.pendingRequest.resolved = true;
+      }
       break;
     }
     case "REJECT_TAKEOFF": {
@@ -1117,7 +1132,8 @@ function applyAcknowledgedClearance(
       }
       if (
         aircraft.pendingRequest?.type === "APPROACH_CLEARANCE" ||
-        aircraft.pendingRequest?.type === "APPROACH_VECTORS"
+        aircraft.pendingRequest?.type === "APPROACH_VECTORS" ||
+        aircraft.pendingRequest?.type === "RUNWAY_CHANGE"
       ) {
         aircraft.pendingRequest.resolved = true;
       }

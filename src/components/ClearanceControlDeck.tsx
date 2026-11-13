@@ -317,7 +317,20 @@ export const ClearanceControlDeck: React.FC = () => {
                 <div className="space-y-1">
                   {taxiRoutes.slice(0, 5).map((rt, idx) => {
                     const isClear = rt.conflictLevel === "CLEAR";
-                    const isBlocked = rt.conflictLevel === "BLOCKED";
+                    const firstOpposingCallsign = rt.conflictCallsigns[0];
+                    const opposingAc = firstOpposingCallsign ? sim.aircraft[firstOpposingCallsign] : null;
+                    const distNm = opposingAc ? Math.hypot(opposingAc.x - ac.x, opposingAc.y - ac.y) : Infinity;
+                    let comingStraightAtUs = false;
+                    if (opposingAc && distNm <= 0.054) {
+                      const dx = opposingAc.x - ac.x;
+                      const dy = opposingAc.y - ac.y;
+                      const rad = (opposingAc.heading * Math.PI) / 180;
+                      const fwdX = Math.sin(rad);
+                      const fwdY = Math.cos(rad);
+                      const dot = ((-dx * fwdX) + (-dy * fwdY)) / distNm;
+                      comingStraightAtUs = dot > 0.45;
+                    }
+                    const isBlocked = rt.conflictLevel === "BLOCKED" && distNm <= 0.054 && comingStraightAtUs;
                     return (
                       <button
                         key={idx}
@@ -501,6 +514,37 @@ export const ClearanceControlDeck: React.FC = () => {
             <div className="text-xs text-[var(--atc-text)] mt-1 italic">
               "{ac.pendingRequest.message}"
             </div>
+            {ac.pendingRequest.type === "RUNWAY_CHANGE" && ac.pendingRequest.runway && (
+              <div className="mt-2 flex gap-2">
+                <button
+                  disabled={nordoLocked}
+                  onClick={() =>
+                    issueClearance({
+                      aircraftId: ac.id,
+                      controller: ac.controller,
+                      type: ac.flightKind === "ARRIVAL" ? "APPROACH" : "TAXI",
+                      parameters: { runway: ac.pendingRequest!.runway },
+                    })
+                  }
+                  className="flex-1 py-1.5 px-2 rounded-md border border-[var(--atc-green-border)] bg-[var(--atc-green-bg)] hover:opacity-90 text-[var(--atc-green)] font-mono text-xs font-semibold"
+                >
+                  APPROVE RWY {ac.pendingRequest.runway}
+                </button>
+                <button
+                  disabled={nordoLocked}
+                  onClick={() =>
+                    issueClearance({
+                      aircraftId: ac.id,
+                      controller: ac.controller,
+                      type: "UNABLE",
+                    })
+                  }
+                  className="py-1.5 px-3 rounded-md border border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] hover:opacity-90 text-[var(--atc-red)] font-mono text-xs font-semibold"
+                >
+                  UNABLE
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -1291,7 +1335,10 @@ export const ClearanceControlDeck: React.FC = () => {
                         issueClearance({
                           aircraftId: ac.id,
                           controller: "TOWER",
-                          type: "CANCEL_TAKEOFF",
+                          type:
+                            ac.state === "TAKEOFF_ROLL" || ac.state === "ROTATE"
+                              ? "REJECT_TAKEOFF"
+                              : "CANCEL_TAKEOFF",
                         })
                       }
                       className="py-1.5 px-2 rounded-md border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] hover:opacity-90 text-[var(--atc-amber)] font-mono text-[11px] font-semibold disabled:opacity-35"

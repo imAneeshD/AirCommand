@@ -572,7 +572,12 @@ function integrateAirborneFlight(
     const fix = state.airport.fixes[ac.assignedDirectFix];
     if (fix) {
       const dist = Math.hypot(fix.x - ac.x, fix.y - ac.y);
-      if (dist < 1.1 && ac.assignedApproach && fix.kind === "IAF") {
+      if (dist < 1.2 && ac.flightKind === "DEPARTURE") {
+        // Departure fix reached! Proceed outbound en route instead of circling around the waypoint
+        ac.assignedDirectFix = null;
+        ac.assignedHeading = ac.heading;
+        ac.state = "CRUISE_OUTBOUND";
+      } else if (dist < 1.1 && ac.assignedApproach && fix.kind === "IAF") {
         ac.heading = turnTowardHeading(ac.heading, rwy.heading, 4.5 * dt, "NEAREST");
       } else {
         const targetHdg = bearingDeg(ac.x, ac.y, fix.x, fix.y);
@@ -594,6 +599,13 @@ function integrateAirborneFlight(
         ac.assignedTurnDirection = "NEAREST";
       }
     }
+  } else if (
+    ac.flightKind === "DEPARTURE" &&
+    (ac.state === "CLIMB" || ac.state === "CRUISE_OUTBOUND")
+  ) {
+    // If no heading assigned, keep tracking outbound on runway heading away from airfield
+    const outboundHdg = rwy?.heading ?? ac.heading;
+    ac.heading = turnTowardHeading(ac.heading, outboundHdg, 4 * dt, "NEAREST");
   }
 
   // 2. Vertical Guidance (Unified 3-degree ILS Glideslope & Smooth Climb Profile)
