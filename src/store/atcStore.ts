@@ -591,6 +591,10 @@ async function resolveAirportBundle(
       updatedAt: new Date().toISOString(),
       pendingSync: false,
     });
+    detailError = null;
+  } else if (activeRecord.runways && activeRecord.runways.length > 0) {
+    // If OurAirports has verified runways, layout builds cleanly without error
+    detailError = null;
   } else if (!isOnline && !detailError) {
     detailError =
       "Offline mode — using OurAirports runway metadata (OSM geometry cached when online).";
@@ -888,8 +892,8 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
         tracks = snap.tracks;
         fetchedAtMs = snap.fetchedAtMs;
       } catch (err) {
-        set({ airportDetailLoading: false });
-        return { ok: false, count: 0, error: (err as Error).message };
+        // Fall back gracefully to local scenario traffic if live ADS-B network request fails
+        tracks = [];
       }
     }
 

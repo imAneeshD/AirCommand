@@ -14,10 +14,13 @@ import {
   createArrivalAircraft,
   createDepartureAircraft,
   createScenarioSimulation,
+  findBestGateForAircraft,
   getAircraftPhaseLabel,
   spawnRandomTraffic,
   stepSimulation,
 } from "../src/engine/simulation.ts";
+import { canAircraftMove } from "../src/engine/validationEngine.ts";
+import { AIRCRAFT_TYPE_SPECS } from "../src/data/aircraftCatalog.ts";
 import type { AircraftState, AirportGeoJsonCollection, LiveAdsbTrack } from "../src/types/atc.ts";
 import { formatUserDateTime, formatWallClockAtSimOffset } from "../src/utils/dateTime.ts";
 import { convertLiveTracksToSimulation, mergeLiveTracksIntoSimulation } from "../src/utils/liveToSim.ts";
@@ -523,7 +526,7 @@ test("convertLiveTracksToSimulation maps real ADS-B flights onto real airport in
     const gnd = converted.sim.aircraft["IGO1471"];
     assert.ok(gnd);
     assert.equal(gnd.flightKind, "DEPARTURE");
-    assert.equal(gnd.aircraftType, "A320");
+    assert.equal(gnd.aircraftType, "A20N");
     assert.equal(gnd.state, "AT_GATE");
 
     const depClimb = converted.sim.aircraft["AIC401"];
@@ -1280,6 +1283,27 @@ test("Voice PTT command parser and per-pilot speech profile handle spoken ATC ph
     assert.equal(landCmd.command.type, "LAND");
     assert.equal(landCmd.command.parameters?.runway, "09R");
   }
+
+  // Spoken variations: "take off" with space and "switch to tower"
+  const toCmd = parseAtcVoiceCommand("cleared for take off runway zero niner left", sim);
+  assert.equal(toCmd.ok, true);
+  if (toCmd.ok) {
+    assert.equal(toCmd.command.type, "TAKEOFF");
+    assert.equal(toCmd.command.parameters?.runway, "09L");
+  }
+
+  const hoCmd = parseAtcVoiceCommand("switch to tower", sim);
+  assert.equal(hoCmd.ok, true);
+  if (hoCmd.ok) {
+    assert.equal(hoCmd.command.type, "HANDOFF");
+    assert.equal(hoCmd.command.parameters?.targetController, "TOWER");
+  }
+
+  const holdCmd = parseAtcVoiceCommand("hold position", sim);
+  assert.equal(holdCmd.ok, true);
+  if (holdCmd.ok) {
+    assert.equal(holdCmd.command.type, "HOLD_POSITION");
+  }
 });
 
 test("LOW_TRAFFIC scenario spawns only 2 aircraft initially and caps active traffic at 3 planes", () => {
@@ -1720,4 +1744,113 @@ test("Ground traffic deadlock detector and 1-click Wait & Pass, Push Back Step, 
   assert.ok(dep.stepBackTargetNodeId);
   for (let i = 0; i < 40; i++) stepSimulation(sim, 1.0);
   assert.equal(dep.stepBackTargetNodeId, undefined);
+});
+
+test("Go-Around aircraft never freeze in midair and canAircraftMove returns true without stalling", () => {
+  const sim = createScenarioSimulation("SANDBOX", "TOWER", "KAST");
+  const rwy = sim.airport.runways[sim.airport.primaryArrivalRunway];
+  const ac = createArrivalAircraft(sim, {
+    callsign: "BAW659",
+    spokenCallsign: "Speedbird 659",
+    airline: "British Airways",
+    aircraftType: "A320",
+    x: rwy.thresholdX,
+    y: rwy.thresholdY,
+    heading: rwy.heading,
+    altitude: sim.airport.elevationFt + 700,
+    speed: 140,
+    targetRunway: sim.airport.primaryArrivalRunway,
+    gateId: sim.airport.gateIds[0],
+    state: "FINAL",
+    controller: "TOWER",
+  });
+  ac.state = "GO_AROUND";
+  ac.assignedAltitude = sim.airport.elevationFt + 3000;
+  ac.verticalSpeed = 1800;
+
+  // Aircraft in GO_AROUND must always be allowed to move through the air
+  assert.equal(canAircraftMove(ac, sim), true);
+
+  const prevX = ac.x;
+  const prevY = ac.y;
+  const prevAlt = ac.altitude;
+
+  stepSimulation(sim, 1.0);
+
+  // Must have climbed and flown forward, not frozen in place
+  assert.ok(ac.altitude > prevAlt, `Altitude should climb: ${ac.altitude} > ${prevAlt}`);
+  const movedDist = Math.hypot(ac.x - prevX, ac.y - prevY);
+  assert.ok(movedDist > 0, `Aircraft should move along track: moved ${movedDist} nm`);
+});
+
+test("Aircraft catalog contains diverse Boeing, Airbus, Cargo, Military, and Regional aircraft models", () => {
+  // Boeing models
+  assert.ok(AIRCRAFT_TYPE_SPECS["B738"]);
+  assert.ok(AIRCRAFT_TYPE_SPECS["B739"]);
+  assert.ok(AIRCRAFT_TYPE_SPECS["B77W"]);
+  assert.ok(AIRCRAFT_TYPE_SPECS["B789"]);
+  assert.ok(AIRCRAFT_TYPE_SPECS["B748"]);
+
+  // Airbus models
+  assert.ok(AIRCRAFT_TYPE_SPECS["A320"]);
+  assert.ok(AIRCRAFT_TYPE_SPECS["A20N"]);
+  assert.ok(AIRCRAFT_TYPE_SPECS["A321"]);
+  assert.ok(AIRCRAFT_TYPE_SPECS["A359"]);
+  assert.ok(AIRCRAFT_TYPE_SPECS["A388"]);
+  assert.ok(AIRCRAFT_TYPE_SPECS["A388"].model.includes("Superjumbo"));
+
+  // Cargo models
+  assert.ok(AIRCRAFT_TYPE_SPECS["MD11"]);
+  assert.ok(AIRCRAFT_TYPE_SPECS["B77F"]);
+  assert.ok(AIRCRAFT_TYPE_SPECS["B763"]);
+
+  // Military models
+  assert.ok(AIRCRAFT_TYPE_SPECS["C17"]);
+  assert.ok(AIRCRAFT_TYPE_SPECS["C130"]);
+  assert.ok(AIRCRAFT_TYPE_SPECS["A400"]);
+  assert.ok(AIRCRAFT_TYPE_SPECS["P8"]);
+  assert.equal(AIRCRAFT_TYPE_SPECS["C17"].airframeStyle, "MILITARY_TRANSPORT");
+});
+
+test("Respective aircraft park in respective places: Cargo at cargo gates, Military at military stands", () => {
+  const sim = createScenarioSimulation("NORMAL_OPS", "ALL", "VOBL");
+  const ap = sim.airport;
+
+  const used = new Set<string>();
+
+  // Cargo aircraft assignment
+  const cargoGate = findBestGateForAircraft(
+    ap,
+    { aircraftType: "B763", callsign: "BZP401", isCargo: true, wakeCategory: "HEAVY" },
+    used
+  );
+  assert.ok(cargoGate);
+  assert.ok(
+    cargoGate.toUpperCase().includes("CARGO") || cargoGate.startsWith("C") || cargoGate.startsWith("S1"),
+    `Cargo plane should get cargo stand, got ${cargoGate}`
+  );
+  used.add(cargoGate);
+
+  // Military aircraft assignment
+  const milGate = findBestGateForAircraft(
+    ap,
+    { aircraftType: "C17", callsign: "IAF702", isMilitary: true, wakeCategory: "HEAVY" },
+    used
+  );
+  assert.ok(milGate);
+  assert.ok(
+    milGate.toUpperCase().includes("MIL") || milGate.toUpperCase().includes("REMOTE") || milGate.startsWith("M") || milGate.startsWith("S3"),
+    `Military plane should get military/remote stand, got ${milGate}`
+  );
+  used.add(milGate);
+
+  // Passenger aircraft assignment does NOT take cargo or military stand
+  const paxGate = findBestGateForAircraft(
+    ap,
+    { aircraftType: "A321", callsign: "IGO127", isCargo: false, isMilitary: false, wakeCategory: "MEDIUM" },
+    used
+  );
+  assert.ok(paxGate);
+  assert.ok(!paxGate.toUpperCase().includes("CARGO"), `Passenger plane should not take cargo stand, got ${paxGate}`);
+  assert.ok(!paxGate.toUpperCase().includes("MIL"), `Passenger plane should not take military stand, got ${paxGate}`);
 });

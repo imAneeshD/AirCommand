@@ -606,6 +606,21 @@ function integrateAirborneFlight(
     // If no heading assigned, keep tracking outbound on runway heading away from airfield
     const outboundHdg = rwy?.heading ?? ac.heading;
     ac.heading = turnTowardHeading(ac.heading, outboundHdg, 4 * dt, "NEAREST");
+  } else if (
+    (ac.state === "GO_AROUND" || ac.state === "MISSED_APPROACH") &&
+    ac.assignedHeading === null &&
+    !ac.assignedDirectFix
+  ) {
+    // Standard missed approach climb track: climb straight out along runway heading
+    const missedFix = state.airport.fixes["MISSED"];
+    const agl = Math.max(0, ac.altitude - elev);
+    if (missedFix && agl >= 1200) {
+      const tgtHdg = bearingDeg(ac.x, ac.y, missedFix.x, missedFix.y);
+      ac.heading = turnTowardHeading(ac.heading, tgtHdg, 4 * dt, "NEAREST");
+    } else {
+      const gaHdg = rwy?.heading ?? ac.heading;
+      ac.heading = turnTowardHeading(ac.heading, gaHdg, 4 * dt, "NEAREST");
+    }
   }
 
   // 2. Vertical Guidance (Unified 3-degree ILS Glideslope & Smooth Climb Profile)

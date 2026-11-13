@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Compass, ExternalLink, Minus, Plus, PlaneLanding, PlaneTakeoff, Radio, RotateCcw, Wifi, X } from "lucide-react";
+import { Compass, ExternalLink, Minus, Plus, PlaneLanding, PlaneTakeoff, Radio, RotateCcw, Sparkles, Wifi, X } from "lucide-react";
 import { getAircraftTypeSpec, getAirlineLivery } from "../data/aircraftCatalog.ts";
 import { runwayPoint } from "../data/asteriaAirport.ts";
 import { isRunwayOccupied } from "../engine/validationEngine.ts";
@@ -22,6 +22,7 @@ import { getAglAltitudeFt, isSurfaceAircraft } from "../utils/telemetry.ts";
 import { AircraftPhotoFrame } from "./AircraftPhotoFrame.tsx";
 
 type ScopeBasemapLayer = "hybrid" | "satellite" | "chart";
+export type RunwayLightsMode = "SHOW" | "PLANE_ONLY" | "OFF";
 
 interface ScreenPt {
   x: number;
@@ -342,6 +343,25 @@ export const RadarScopeCanvas: React.FC = () => {
 
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [scopeLayer, setScopeLayer] = useState<ScopeBasemapLayer>("hybrid");
+  const [runwayLightsMode, setRunwayLightsMode] = useState<RunwayLightsMode>(() => {
+    try {
+      const saved = localStorage.getItem("aircommand_rwy_lights_mode");
+      if (saved === "SHOW" || saved === "PLANE_ONLY" || saved === "OFF") return saved;
+    } catch {}
+    return "OFF";
+  });
+
+  const toggleRunwayLightsMode = () => {
+    setRunwayLightsMode((prev) => {
+      const next: RunwayLightsMode =
+        prev === "OFF" ? "SHOW" : prev === "SHOW" ? "PLANE_ONLY" : "OFF";
+      try {
+        localStorage.setItem("aircommand_rwy_lights_mode", next);
+      } catch {}
+      return next;
+    });
+  };
+
   const [ttsVersion, setTtsVersion] = useState(0);
   const [showLiveAdsbOverlay, setShowLiveAdsbOverlay] = useState(false);
   const [liveTracks, setLiveTracks] = useState<LiveAdsbTrack[]>([]);
@@ -438,38 +458,76 @@ export const RadarScopeCanvas: React.FC = () => {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    ctx.save();
-    ctx.scale(dpr, dpr);
-    drawnLabelHitsRef.current = drawScope(
-      ctx,
-      width,
-      height,
-      sim,
-      camera,
-      hoverPreviewRoute,
-      hoveredId,
-      theme,
-      scopeLayer,
-      activeCallers
-    );
-    if (showLiveAdsbOverlay && sim.airport.isRealWorld && sim.airport.lat !== undefined && sim.airport.lon !== undefined) {
-      liveTrackHitsRef.current = drawLiveAdsbOverlay(
+    let animId: number;
+    let lastAnim = 0;
+
+    const render = () => {
+      const dpr = window.devicePixelRatio || 1;
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+      if (width === 0 || height === 0) return;
+
+      if (canvas.width !== Math.floor(width * dpr) || canvas.height !== Math.floor(height * dpr)) {
+        canvas.width = Math.floor(width * dpr);
+        canvas.height = Math.floor(height * dpr);
+      }
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      ctx.save();
+      ctx.scale(dpr, dpr);
+      drawnLabelHitsRef.current = drawScope(
         ctx,
         width,
         height,
-        sim.airport.lat,
-        sim.airport.lon,
+        sim,
         camera,
-        getRotRad(sim.airport),
-        liveTracks,
-        selectedLiveIcao24,
-        theme
+        hoverPreviewRoute,
+        hoveredId,
+        theme,
+        scopeLayer,
+        activeCallers,
+        runwayLightsMode
       );
-    } else {
-      liveTrackHitsRef.current = [];
-    }
-    ctx.restore();
-  }, [sim, tickVersion, ttsVersion, camera, hoverPreviewRoute, hoveredId, theme, scopeLayer, showLiveAdsbOverlay, liveTracks, selectedLiveIcao24]);
+      if (showLiveAdsbOverlay && sim.airport.isRealWorld && sim.airport.lat !== undefined && sim.airport.lon !== undefined) {
+        liveTrackHitsRef.current = drawLiveAdsbOverlay(
+          ctx,
+          width,
+          height,
+          sim.airport.lat,
+          sim.airport.lon,
+          camera,
+          getRotRad(sim.airport),
+          liveTracks,
+          selectedLiveIcao24,
+          theme
+        );
+      } else {
+        liveTrackHitsRef.current = [];
+      }
+      ctx.restore();
+
+      // Only schedule next frame if runway lights or active radio wave callers need smooth animation,
+      // throttled to ~20 FPS for minimal CPU usage
+      if (runwayLightsMode === "SHOW" || activeCallers.length > 0) {
+        animId = requestAnimationFrame((nextTime) => {
+          if (nextTime - lastAnim >= 50) {
+            lastAnim = nextTime;
+            render();
+          } else {
+            animId = requestAnimationFrame(render);
+          }
+        });
+      }
+    };
+
+    render();
+
+    return () => {
+      if (animId) cancelAnimationFrame(animId);
+    };
+  }, [sim, tickVersion, ttsVersion, camera, hoverPreviewRoute, hoveredId, theme, scopeLayer, showLiveAdsbOverlay, liveTracks, selectedLiveIcao24, runwayLightsMode, activeCallers]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -723,6 +781,38 @@ export const RadarScopeCanvas: React.FC = () => {
             </button>
           </>
         )}
+
+        <button
+          type="button"
+          onClick={toggleRunwayLightsMode}
+          title={
+            runwayLightsMode === "SHOW"
+              ? "Runway Lights: SHOW ALL. Click to switch to PLANE ONLY."
+              : runwayLightsMode === "PLANE_ONLY"
+              ? "Runway Lights: PLANE ONLY (active runways with planes). Click to switch to COMPLETE OFF."
+              : "Runway Lights: COMPLETE OFF. Click to switch to SHOW ALL."
+          }
+          className={`px-2.5 py-1 rounded-md border text-[10px] font-mono font-bold flex items-center gap-1.5 shadow-[var(--atc-shadow)] backdrop-blur-sm transition-colors cursor-pointer ${
+            runwayLightsMode === "SHOW"
+              ? "bg-amber-500/20 border-amber-400 text-amber-400"
+              : runwayLightsMode === "PLANE_ONLY"
+              ? "bg-sky-500/20 border-sky-400 text-sky-400"
+              : "bg-[var(--atc-surface)]/95 border-[var(--atc-border)] text-[var(--atc-muted)] hover:text-[var(--atc-text)]"
+          }`}
+        >
+          <Sparkles
+            className={`w-3 h-3 ${
+              runwayLightsMode === "SHOW"
+                ? "text-amber-400"
+                : runwayLightsMode === "PLANE_ONLY"
+                ? "text-sky-400"
+                : "text-[var(--atc-muted)]"
+            }`}
+          />
+          <span>
+            RWY LIGHTS: {runwayLightsMode === "SHOW" ? "SHOW" : runwayLightsMode === "PLANE_ONLY" ? "PLANE ONLY" : "OFF"}
+          </span>
+        </button>
       </div>
 
       {/* Selected OpenSky Live ADS-B Target Popup Card (with real aircraft photo + metadata) */}
@@ -928,6 +1018,238 @@ function drawTopographicTerrain(
   }
 }
 
+export function isRunwayActiveForAircraft(sim: SimulationState, rwy: RunwaySpec): boolean {
+  const rwyIds = new Set([rwy.id, rwy.oppositeId]);
+  for (const acId of sim.aircraftOrder) {
+    const ac = sim.aircraft[acId];
+    if (!ac) continue;
+
+    const matchesRunway =
+      (ac.targetRunway && rwyIds.has(ac.targetRunway)) ||
+      (ac.holdingAtRunway && rwyIds.has(ac.holdingAtRunway)) ||
+      (ac.assignedApproach && rwyIds.has(ac.assignedApproach));
+
+    if (!matchesRunway) continue;
+
+    if (
+      ac.state === "APPROACH" ||
+      ac.state === "FINAL" ||
+      ac.state === "LANDING" ||
+      ac.state === "TOUCHDOWN" ||
+      ac.state === "ROLLOUT" ||
+      ac.state === "LINE_UP_WAIT" ||
+      ac.state === "TAKEOFF_CLEARED" ||
+      ac.state === "TAKEOFF_ROLL" ||
+      ac.state === "ROTATE" ||
+      ac.state === "CROSSING_RUNWAY" ||
+      ac.state === "HOLDING_SHORT" ||
+      ac.state === "VACATING_RUNWAY" ||
+      ac.state === "STOPPED_ON_RUNWAY" ||
+      sim.selectedAircraftId === ac.id
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function drawRunwayLighting(
+  ctx: CanvasRenderingContext2D,
+  rwy: RunwaySpec,
+  rwW: number,
+  rwH: number,
+  pixelsPerNm: number,
+  nowMs: number,
+  isLight: boolean,
+  activeForPlane: boolean
+): void {
+  // Low-zoom subtle luminous guide
+  if (pixelsPerNm < 25) {
+    ctx.strokeStyle = activeForPlane ? "rgba(253, 224, 71, 0.45)" : "rgba(255, 255, 255, 0.28)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(-rwW / 2, -rwH / 2);
+    ctx.lineTo(rwW / 2, -rwH / 2);
+    ctx.moveTo(-rwW / 2, rwH / 2);
+    ctx.lineTo(rwW / 2, rwH / 2);
+    ctx.stroke();
+    return;
+  }
+
+  // 1. Runway Edge Lights (HIRL - High Intensity Runway Lights)
+  const edgeSpacing = Math.max(14, Math.min(28, rwW / 36));
+  const cautionStartX = rwW / 6;
+  const yTop = -rwH / 2 - 1.2;
+  const yBottom = rwH / 2 + 1.2;
+
+  for (let x = -rwW / 2 + 4; x <= rwW / 2 - 4; x += edgeSpacing) {
+    const isCaution = x > cautionStartX || x < -cautionStartX;
+    const coreColor = isCaution ? "#fef08a" : "#ffffff";
+    const haloColor = isCaution ? "rgba(250, 204, 21, 0.45)" : "rgba(255, 255, 255, 0.4)";
+
+    ctx.fillStyle = haloColor;
+    ctx.beginPath();
+    ctx.arc(x, yTop, 2.8, 0, Math.PI * 2);
+    ctx.arc(x, yBottom, 2.8, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = coreColor;
+    ctx.beginPath();
+    ctx.arc(x, yTop, 1.3, 0, Math.PI * 2);
+    ctx.arc(x, yBottom, 1.3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // 2. Runway Centerline Lights (RCLL)
+  if (pixelsPerNm >= 55) {
+    const clSpacing = Math.max(12, Math.min(22, rwW / 46));
+    const redTransitionX = rwW * 0.35;
+    const redFinalX = rwW * 0.44;
+
+    for (let x = -rwW / 2 + 12; x <= rwW / 2 - 12; x += clSpacing) {
+      const isFinalRed = Math.abs(x) >= redFinalX;
+      const isAlternating = Math.abs(x) >= redTransitionX && !isFinalRed;
+      const isRed = isFinalRed || (isAlternating && Math.floor(x / clSpacing) % 2 === 0);
+      const clColor = isRed ? "#ef4444" : "#ffffff";
+      const clHalo = isRed ? "rgba(239, 68, 68, 0.45)" : "rgba(255, 255, 255, 0.4)";
+
+      ctx.fillStyle = clHalo;
+      ctx.beginPath();
+      ctx.arc(x, 0, 2.4, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = clColor;
+      ctx.beginPath();
+      ctx.arc(x, 0, 1.1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // 3. Touchdown Zone Lights (TDZL)
+  if (pixelsPerNm >= 80) {
+    const tdzRows = 5;
+    const tdzSpacing = Math.max(16, Math.min(26, rwW * 0.045));
+    const tdzY1 = -rwH * 0.22;
+    const tdzY2 = rwH * 0.22;
+
+    for (const side of [-1, 1]) {
+      const baseX = side === -1 ? -rwW / 2 + 18 : rwW / 2 - 18;
+      const dir = side === -1 ? 1 : -1;
+      for (let r = 0; r < tdzRows; r++) {
+        const tx = baseX + dir * r * tdzSpacing;
+        for (let b = -1; b <= 1; b++) {
+          ctx.fillStyle = "rgba(255, 255, 255, 0.88)";
+          ctx.beginPath();
+          ctx.arc(tx, tdzY1 + b * 1.8, 0.9, 0, Math.PI * 2);
+          ctx.arc(tx, tdzY2 + b * 1.8, 0.9, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+  }
+
+  // 4. Threshold Green Lights & End Red Lights
+  const threshLights = Math.max(8, Math.min(14, Math.floor(rwH / 3)));
+  const threshPitch = (rwH - 3) / threshLights;
+
+  for (let i = 0; i < threshLights; i++) {
+    const ty = -rwH / 2 + 1.5 + i * threshPitch;
+    // Green threshold bar
+    ctx.fillStyle = "rgba(34, 197, 94, 0.5)";
+    ctx.beginPath();
+    ctx.arc(-rwW / 2, ty, 3.0, 0, Math.PI * 2);
+    ctx.arc(rwW / 2, ty, 3.0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#22c55e";
+    ctx.beginPath();
+    ctx.arc(-rwW / 2, ty, 1.5, 0, Math.PI * 2);
+    ctx.arc(rwW / 2, ty, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Red Runway End Wing-Bars
+  for (const endX of [-rwW / 2, rwW / 2]) {
+    for (const endY of [-rwH / 2 - 1.5, rwH / 2 + 1.5]) {
+      ctx.fillStyle = "rgba(239, 68, 68, 0.55)";
+      ctx.beginPath();
+      ctx.arc(endX, endY, 3.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#ef4444";
+      ctx.beginPath();
+      ctx.arc(endX, endY, 1.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // 5. Approach Lighting System (ALS) with Sequenced Strobes ("The Rabbit")
+  if (pixelsPerNm >= 40) {
+    const alsLen = Math.min(160, Math.max(50, rwW * 0.32));
+    const barSpacing = Math.max(18, alsLen / 6);
+    const numBars = Math.floor(alsLen / barSpacing);
+    const strobePhase = Math.floor((nowMs * 0.006) % numBars);
+
+    for (const side of [-1, 1]) {
+      const threshX = side === -1 ? -rwW / 2 : rwW / 2;
+      const dir = side === -1 ? -1 : 1;
+
+      for (let b = 1; b <= numBars; b++) {
+        const bx = threshX + dir * b * barSpacing;
+        const isStrobe = (side === -1 ? numBars - b : b - 1) === strobePhase;
+
+        const isDecisionCrossbar = b === 3;
+        const barWidth = isDecisionCrossbar ? 26 : 12;
+        const dotCount = isDecisionCrossbar ? 7 : 5;
+        const dotPitch = barWidth / (dotCount - 1);
+
+        for (let d = 0; d < dotCount; d++) {
+          const dy = -barWidth / 2 + d * dotPitch;
+          ctx.fillStyle = isStrobe
+            ? "rgba(255, 255, 255, 0.95)"
+            : "rgba(241, 245, 249, 0.65)";
+          ctx.beginPath();
+          ctx.arc(bx, dy, isStrobe ? 1.5 : 1.0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Animated Sequencer Strobe (The Rabbit) flash
+        if (isStrobe) {
+          ctx.fillStyle = "rgba(255, 255, 255, 0.75)";
+          ctx.beginPath();
+          ctx.arc(bx, 0, 5.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = "#ffffff";
+          ctx.beginPath();
+          ctx.arc(bx, 0, 2.4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      // 6. PAPI (Precision Approach Path Indicator)
+      const papiX = threshX - dir * Math.min(50, rwW * 0.14);
+      const papiY = -rwH / 2 - 9;
+      const papiSpacing = 3.6;
+
+      for (let p = 0; p < 4; p++) {
+        const isWhite = p < 2;
+        const pColor = isWhite ? "#ffffff" : "#ef4444";
+        const pHalo = isWhite ? "rgba(255, 255, 255, 0.65)" : "rgba(239, 68, 68, 0.65)";
+        const px = papiX + dir * (p - 1.5) * papiSpacing;
+
+        ctx.fillStyle = pHalo;
+        ctx.beginPath();
+        ctx.arc(px, papiY, 2.8, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = pColor;
+        ctx.beginPath();
+        ctx.arc(px, papiY, 1.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+}
+
 function drawRealisticRunway(
   ctx: CanvasRenderingContext2D,
   sim: SimulationState,
@@ -936,7 +1258,9 @@ function drawRealisticRunway(
   pixelsPerNm: number,
   rotRad: number,
   isLight: boolean,
-  scopeLayer: ScopeBasemapLayer = "hybrid"
+  scopeLayer: ScopeBasemapLayer = "hybrid",
+  runwayLightsMode: RunwayLightsMode = "SHOW",
+  nowMs = 0
 ): void {
   const isSatOnly = scopeLayer === "satellite";
   const midPt = runwayPoint(rwy, rwy.lengthNm / 2, 0);
@@ -1087,6 +1411,15 @@ function drawRealisticRunway(
     ctx.setLineDash([]);
   }
 
+  // Runway Airfield Ground Lighting (Real-world standard ICAO/FAA HIRL, RCLL, TDZL, PAPI, ALS)
+  const activeForPlane = isRunwayActiveForAircraft(sim, rwy);
+  const shouldShowLights =
+    runwayLightsMode === "SHOW" || (runwayLightsMode === "PLANE_ONLY" && activeForPlane);
+
+  if (shouldShowLights) {
+    drawRunwayLighting(ctx, rwy, rwW, rwH, pixelsPerNm, nowMs, isLight, activeForPlane);
+  }
+
   ctx.restore();
 }
 
@@ -1205,10 +1538,12 @@ function drawScope(
   hoveredId: string | null,
   theme: "light" | "dark",
   scopeLayer: ScopeBasemapLayer = "hybrid",
-  activeCallers: ActiveCallerSignal[] = []
+  activeCallers: ActiveCallerSignal[] = [],
+  runwayLightsMode: RunwayLightsMode = "SHOW"
 ): DrawnLabelHit[] {
   const isLight = theme === "light";
   const rotRad = getRotRad(sim.airport);
+  const nowMs = typeof performance !== "undefined" ? performance.now() : Date.now();
   const toScreen = (wx: number, wy: number): [number, number] =>
     worldToScreen(wx, wy, w, h, cam, rotRad);
 
@@ -1535,11 +1870,22 @@ function drawScope(
       ctx.textBaseline = "alphabetic";
     }
 
-    // Realistic Staggered & Styled Runways
+    // Realistic Staggered & Styled Runways (with dynamic ICAO Airfield Ground Lighting)
     for (const rwyId of sim.airport.runwayIds) {
       const rwy = sim.airport.runways[rwyId];
       if (!rwy) continue;
-      drawRealisticRunway(ctx, sim, rwy, toScreen, cam.pixelsPerNm, rotRad, isLight, scopeLayer);
+      drawRealisticRunway(
+        ctx,
+        sim,
+        rwy,
+        toScreen,
+        cam.pixelsPerNm,
+        rotRad,
+        isLight,
+        scopeLayer,
+        runwayLightsMode,
+        nowMs
+      );
     }
 
     // Architectural Terminals, Jetbridges, Hangars & ATC Tower
@@ -1708,6 +2054,22 @@ function drawScope(
           ctx.moveTo(-6, 2);
           ctx.lineTo(6, 2);
           ctx.stroke();
+
+          // Runway Guard Lights (Wig-Wag yellow flashing lights)
+          const hsRwy = node.holdShortForRunway ? sim.airport.runways[node.holdShortForRunway] : null;
+          const hsActive = hsRwy ? isRunwayActiveForAircraft(sim, hsRwy) : false;
+          if (runwayLightsMode === "SHOW" || (runwayLightsMode === "PLANE_ONLY" && hsActive)) {
+            const wigWagPhase = Math.floor(nowMs * 0.003) % 2;
+            ctx.fillStyle = wigWagPhase === 0 ? "rgba(250, 204, 21, 0.95)" : "rgba(161, 98, 7, 0.35)";
+            ctx.beginPath();
+            ctx.arc(-8, 0, 1.8, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = wigWagPhase === 1 ? "rgba(250, 204, 21, 0.95)" : "rgba(161, 98, 7, 0.35)";
+            ctx.beginPath();
+            ctx.arc(8, 0, 1.8, 0, Math.PI * 2);
+            ctx.fill();
+          }
+
           ctx.restore();
         } else if (node.kind === "GATE" && node.gateId) {
           ctx.fillStyle = isLight ? "#0284c7" : "#38bdf8";
@@ -1808,7 +2170,6 @@ function drawScope(
   }
 
   // 4. Draw Aircraft Icons first, then Place & Draw Non-Overlapping Data Tags
-  const nowMs = typeof performance !== "undefined" ? performance.now() : Date.now();
   const callerById = new Map<string, ActiveCallerSignal>(
     activeCallers.map((c) => [c.aircraftId, c])
   );
@@ -1886,16 +2247,10 @@ function drawScope(
       ? "#0284c7"
       : "#22d3ee";
 
-    // Selection / Alert Halo + Target Lock Corner Reticle for selected aircraft
+    // Target Lock Corner Reticle for selected aircraft (clean square lines)
     if (isSelected) {
       const selColor = isError || isEmerg ? "#ef4444" : isLight ? "#d97706" : "#22d3ee";
-      const pulseR = 16 + Math.sin(nowMs * 0.006) * 2;
       ctx.save();
-      ctx.strokeStyle = isLight ? "rgba(217, 119, 6, 0.35)" : "rgba(34, 211, 238, 0.35)";
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.arc(ax, ay, pulseR, 0, Math.PI * 2);
-      ctx.stroke();
 
       // 4 crisp corner target-lock brackets around selected aircraft
       const r = 18;

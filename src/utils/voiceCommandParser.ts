@@ -337,15 +337,15 @@ export function parseAtcVoiceCommand(rawTranscript: string, sim: SimulationState
     );
   }
 
-  if (/\b(?:cleared|clear)\s+(?:to\s+)?land\b/.test(normalized)) {
+  if (/\b(?:cleared\s+(?:to\s+|for\s+)?land(?:ing)?|clear\s+(?:to\s+|for\s+)?land(?:ing)?|land(?:ing)?\s+cleared)\b/.test(normalized)) {
     return makeResult("LAND", { runway }, `${ac.callsign}: Cleared to land RWY ${runway}`);
   }
 
-  if (/\b(?:cleared\s+(?:for\s+)?takeoff|takeoff cleared|clear for takeoff)\b/.test(normalized)) {
+  if (/\b(?:cleared\s+(?:for\s+)?take\s*off|take\s*off\s+cleared|clear\s+(?:for\s+)?take\s*off|take\s*off)\b/.test(normalized)) {
     return makeResult("TAKEOFF", { runway }, `${ac.callsign}: Cleared for takeoff RWY ${runway}`);
   }
 
-  if (/\b(?:line up and wait|line up|position and hold)\b/.test(normalized)) {
+  if (/\b(?:line\s*up(?:\s+and\s+wait)?|position\s+and\s+hold)\b/.test(normalized)) {
     return makeResult("LINE_UP", { runway }, `${ac.callsign}: Line up & wait RWY ${runway}`);
   }
 
@@ -357,15 +357,26 @@ export function parseAtcVoiceCommand(rawTranscript: string, sim: SimulationState
     return makeResult("HOLD_SHORT", { runway }, `${ac.callsign}: Hold short RWY ${runway}`);
   }
 
-  if (/\b(?:hold position|hold your position)\b/.test(normalized)) {
+  if (/\b(?:hold\s+position|hold\s+your\s+position|hold\s+here|stop\s+taxi)\b/.test(normalized)) {
     return makeResult("HOLD_POSITION", {}, `${ac.callsign}: Hold position`);
   }
 
   if (/\btaxi\b/.test(normalized)) {
-    const startNodeId =
+    let startNodeId =
       ac.currentNodeId ??
       (ac.state === "AT_GATE" && ac.gateId ? `GATE_${ac.gateId}` : undefined) ??
       (ac.state === "PUSHBACK_COMPLETE" && ac.gateId ? `PB_${ac.gateId}` : undefined);
+
+    if (!startNodeId && typeof ac.x === "number" && typeof ac.y === "number") {
+      let bestD = Infinity;
+      for (const [nid, node] of Object.entries(sim.airport.nodes)) {
+        const d = (node.x - ac.x) ** 2 + (node.y - ac.y) ** 2;
+        if (d < bestD) {
+          bestD = d;
+          startNodeId = nid;
+        }
+      }
+    }
 
     if (startNodeId) {
       const suggestions = getSuggestedTaxiRoutes(
@@ -454,8 +465,10 @@ export function parseAtcVoiceCommand(rawTranscript: string, sim: SimulationState
     }
   }
 
-  // Handoff: "contact tower" / "contact ground" / "contact departure" / "contact approach" / "contact center" / "contact area"
-  const handoffMatch = normalized.match(/\bcontact\b.*\b(ground|tower|departure|approach|center|area|control)\b/);
+  // Handoff: "contact tower" / "switch to tower" / "transfer to departure"
+  const handoffMatch = normalized.match(
+    /\b(?:contact|switch(?:\s+to)?|transfer(?:\s+to)?|handoff(?:\s+to)?)\b.*\b(ground|tower|departure|approach|center|area|control)\b/
+  );
   if (handoffMatch) {
     const roleMap: Record<string, ControllerRole | "ACC"> = {
       ground: "GROUND",

@@ -79,6 +79,42 @@ export const ClearanceControlDeck: React.FC = () => {
   const [customHeading, setCustomHeading] = useState("090");
   const [showAltTaxiways, setShowAltTaxiways] = useState(false);
 
+  // Track commands clicked by the player for each aircraft + state, to provide immediate tactile feedback (disabling the button upon click)
+  const [clickedCommands, setClickedCommands] = useState<Record<string, { state: string; at: number }>>({});
+
+  useEffect(() => {
+    if (lastFeedback && !lastFeedback.ok) {
+      // If a command failed or was rejected, clear disabled state so user can retry
+      setClickedCommands({});
+    }
+  }, [lastFeedback]);
+
+  const registerCommandClick = (cmdKey: string) => {
+    if (!ac) return;
+    setClickedCommands((prev) => ({
+      ...prev,
+      [`${ac.id}:${cmdKey}`]: { state: ac.state, at: sim.time },
+    }));
+  };
+
+  const isCommandDisabled = (cmdKey: string): boolean => {
+    if (!ac) return false;
+    const rec = clickedCommands[`${ac.id}:${cmdKey}`];
+    if (!rec) return false;
+    // Only disabled while the aircraft is still in the same state/situation as when the command was clicked
+    return rec.state === ac.state;
+  };
+
+  const handleIssueClearance = (
+    cmd: Parameters<typeof issueClearance>[0],
+    cmdKey?: string
+  ) => {
+    if (cmdKey) {
+      registerCommandClick(cmdKey);
+    }
+    issueClearance(cmd);
+  };
+
   // Keep deck tab in sync: role-locked sessions always show own role,
   // ALL-AUTO sessions follow the aircraft's current controller.
   useEffect(() => {
@@ -493,49 +529,7 @@ export const ClearanceControlDeck: React.FC = () => {
 
       {/* Scrollable Organized Accordion Stack */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2.5 min-h-0">
-        {/* Urgent Contextual Banners (Always visible when triggered) */}
-        {ac.pendingRequest && !ac.pendingRequest.resolved && (
-          <div className="rounded-lg border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] p-2.5">
-            <div className="text-[10px] font-mono font-bold text-[var(--atc-amber)] uppercase flex items-center gap-1">
-              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-              REQUEST ({ac.pendingRequest.type})
-            </div>
-            <div className="text-xs text-[var(--atc-text)] mt-1 italic">
-              "{ac.pendingRequest.message}"
-            </div>
-            {ac.pendingRequest.type === "RUNWAY_CHANGE" && ac.pendingRequest.runway && (
-              <div className="mt-2 flex gap-2">
-                <button
-                  disabled={nordoLocked}
-                  onClick={() =>
-                    issueClearance({
-                      aircraftId: ac.id,
-                      controller: ac.controller,
-                      type: ac.flightKind === "ARRIVAL" ? "APPROACH" : "TAXI",
-                      parameters: { runway: ac.pendingRequest!.runway },
-                    })
-                  }
-                  className="flex-1 py-1.5 px-2 rounded-md border border-[var(--atc-green-border)] bg-[var(--atc-green-bg)] hover:opacity-90 text-[var(--atc-green)] font-mono text-xs font-semibold"
-                >
-                  APPROVE RWY {ac.pendingRequest.runway}
-                </button>
-                <button
-                  disabled={nordoLocked}
-                  onClick={() =>
-                    issueClearance({
-                      aircraftId: ac.id,
-                      controller: ac.controller,
-                      type: "UNABLE",
-                    })
-                  }
-                  className="py-1.5 px-3 rounded-md border border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] hover:opacity-90 text-[var(--atc-red)] font-mono text-xs font-semibold"
-                >
-                  UNABLE
-                </button>
-              </div>
-            )}
-          </div>
-        )}
+        {/* Urgent Readback Error Banner (Only shown when error exists) */}
 
         {ac.hasReadbackError && errClearance && (
           <div className="rounded-lg border border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] p-2.5 space-y-2">
@@ -684,22 +678,7 @@ export const ClearanceControlDeck: React.FC = () => {
           </div>
         )}
 
-        {lastFeedback && sim.time - lastFeedback.at < 8 && (
-          <div
-            className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-mono flex items-center gap-1.5 ${
-              lastFeedback.ok
-                ? "bg-[var(--atc-cyan-bg)] border-[var(--atc-cyan-border)] text-[var(--atc-cyan)]"
-                : "bg-[var(--atc-red-bg)] border-[var(--atc-red-border)] text-[var(--atc-red)]"
-            }`}
-          >
-            {lastFeedback.ok ? (
-              <CheckCircle className="w-3.5 h-3.5 shrink-0" />
-            ) : (
-              <AlertOctagon className="w-3.5 h-3.5 shrink-0" />
-            )}
-            <span>{lastFeedback.text}</span>
-          </div>
-        )}
+
 
 
         {roomState?.status === "ACTIVE" && assignedRole && deckTab !== assignedRole ? (
@@ -837,49 +816,18 @@ export const ClearanceControlDeck: React.FC = () => {
             </div>
           </div>
         ) : roleLocked && ac.controller !== lockedRole ? (
-          pendingForSelectedAc ? (
-            <div className="rounded-lg border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] p-3 space-y-2.5 shadow-sm font-mono">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-[var(--atc-emerald)] flex items-center gap-1.5">
-                  <Radio className="w-3.5 h-3.5 animate-spin-slow shrink-0" />
-                  Incoming Handoff ({controllerCallsign(pendingForSelectedAc.fromController, sim.airport, ac.flightKind)} → {lockedRole})
-                </span>
-                <span className="text-[10px] text-[var(--atc-muted)]">
-                  {controllerFrequency(lockedRole, sim.airport, ac.flightKind)} MHz
-                </span>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => respondToHandoff(pendingForSelectedAc.id, true)}
-                  className="flex-1 py-2 px-3 rounded-md border border-[var(--atc-emerald-border)] bg-[var(--atc-surface)] hover:bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-sm transition-colors"
-                >
-                  <CheckCircle className="w-4 h-4 shrink-0" />
-                  ACCEPT HANDOFF
-                </button>
-                <button
-                  type="button"
-                  onClick={() => respondToHandoff(pendingForSelectedAc.id, false)}
-                  className="py-2 px-3 rounded-md border border-[var(--atc-red-border)] bg-[var(--atc-surface)] hover:bg-[var(--atc-red-bg)] text-[var(--atc-red)] font-semibold text-xs cursor-pointer transition-colors"
-                >
-                  REJECT
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] p-2.5 font-mono text-[11px] flex items-center justify-between gap-2 shadow-sm">
-              <span className="truncate text-[var(--atc-text-secondary)]">
-                On frequency: <strong className="text-[var(--atc-text)]">{controllerCallsign(ac.controller, sim.airport, ac.flightKind)}</strong>
-              </span>
-              <button
-                type="button"
-                onClick={() => claimAircraftStation(ac.id, lockedRole)}
-                className="py-1 px-2.5 rounded border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:bg-[var(--atc-surface)] text-[var(--atc-cyan)] font-bold text-[10px] shrink-0 transition-colors"
-              >
-                TAKE OVER
-              </button>
-            </div>
-          )
+          <div className="rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] p-2.5 font-mono text-[11px] flex items-center justify-between gap-2 shadow-sm">
+            <span className="truncate text-[var(--atc-text-secondary)]">
+              On frequency: <strong className="text-[var(--atc-text)]">{controllerCallsign(ac.controller, sim.airport, ac.flightKind)}</strong>
+            </span>
+            <button
+              type="button"
+              onClick={() => claimAircraftStation(ac.id, lockedRole)}
+              className="py-1 px-2.5 rounded border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:bg-[var(--atc-surface)] text-[var(--atc-cyan)] font-bold text-[10px] shrink-0 transition-colors"
+            >
+              TAKE OVER
+            </button>
+          </div>
         ) : (
         /* ACCORDION 1: Clearances & Actions (Open by default) */
         <Accordion
@@ -984,16 +932,16 @@ export const ClearanceControlDeck: React.FC = () => {
                       </p>
                       <button
                         type="button"
-                        disabled={nordoLocked}
+                        disabled={nordoLocked || isCommandDisabled("CROSS_RUNWAY")}
                         onClick={() =>
-                          issueClearance({
+                          handleIssueClearance({
                             aircraftId: ac.id,
                             controller: "GROUND",
                             type: "CROSS_RUNWAY",
                             parameters: { runway: heldRunway ?? ac.targetRunway },
-                          })
+                          }, "CROSS_RUNWAY")
                         }
-                        className="w-full py-2 px-3 rounded-md border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:bg-[var(--atc-surface)] hover:border-[var(--atc-emerald)] text-[var(--atc-emerald)] font-mono font-bold text-xs transition-colors flex items-center justify-center gap-1.5 disabled:opacity-35"
+                        className="w-full py-2 px-3 rounded-md border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:bg-[var(--atc-surface)] hover:border-[var(--atc-emerald)] text-[var(--atc-emerald)] font-mono font-bold text-xs transition-colors flex items-center justify-center gap-1.5 disabled:opacity-35 disabled:cursor-not-allowed"
                       >
                         <CheckCircle className="w-4 h-4" />
                         CLEAR TO CROSS RWY {heldRunway ?? ac.targetRunway}
@@ -1001,29 +949,29 @@ export const ClearanceControlDeck: React.FC = () => {
 
                       <div className="grid grid-cols-2 gap-1.5 pt-0.5">
                         <button
-                          disabled={nordoLocked}
+                          disabled={nordoLocked || isCommandDisabled("HOLD_POSITION")}
                           onClick={() =>
-                            issueClearance({
+                            handleIssueClearance({
                               aircraftId: ac.id,
                               controller: "GROUND",
                               type: "HOLD_POSITION",
-                            })
+                            }, "HOLD_POSITION")
                           }
-                          className="py-1.5 px-2 rounded-md border font-mono text-[11px] font-semibold bg-[var(--atc-amber-bg)] hover:opacity-90 border-[var(--atc-amber-border)] text-[var(--atc-amber)]"
+                          className="py-1.5 px-2 rounded-md border font-mono text-[11px] font-semibold bg-[var(--atc-amber-bg)] hover:opacity-90 border-[var(--atc-amber-border)] text-[var(--atc-amber)] disabled:opacity-35 disabled:cursor-not-allowed"
                         >
                           HOLD POSITION
                         </button>
                         <button
-                          disabled={nordoLocked}
+                          disabled={nordoLocked || isCommandDisabled("HOLD_SHORT")}
                           onClick={() =>
-                            issueClearance({
+                            handleIssueClearance({
                               aircraftId: ac.id,
                               controller: "GROUND",
                               type: "HOLD_SHORT",
                               parameters: { runway: heldRunway ?? ac.targetRunway },
-                            })
+                            }, "HOLD_SHORT")
                           }
-                          className="py-1.5 px-2 rounded-md border font-mono text-[11px] font-semibold bg-[var(--atc-amber-bg)] hover:opacity-90 border-[var(--atc-amber-border)] text-[var(--atc-amber)]"
+                          className="py-1.5 px-2 rounded-md border font-mono text-[11px] font-semibold bg-[var(--atc-amber-bg)] hover:opacity-90 border-[var(--atc-amber-border)] text-[var(--atc-amber)] disabled:opacity-35 disabled:cursor-not-allowed"
                         >
                           HOLD SHORT {heldRunway ?? ac.targetRunway}
                         </button>
@@ -1046,16 +994,16 @@ export const ClearanceControlDeck: React.FC = () => {
                       </p>
                       <button
                         type="button"
-                        disabled={nordoLocked || ac.controller === "TOWER"}
+                        disabled={nordoLocked || ac.controller === "TOWER" || isCommandDisabled("HANDOFF_TOWER")}
                         onClick={() =>
-                          issueClearance({
+                          handleIssueClearance({
                             aircraftId: ac.id,
                             controller: "GROUND",
                             type: "HANDOFF",
                             parameters: { targetController: "TOWER" },
-                          })
+                          }, "HANDOFF_TOWER")
                         }
-                        className="w-full py-2 px-3 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:bg-[var(--atc-surface)] hover:border-[var(--atc-cyan)] text-[var(--atc-cyan)] font-mono font-bold text-xs transition-colors flex items-center justify-center gap-1.5 disabled:opacity-35"
+                        className="w-full py-2 px-3 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:bg-[var(--atc-surface)] hover:border-[var(--atc-cyan)] text-[var(--atc-cyan)] font-mono font-bold text-xs transition-colors flex items-center justify-center gap-1.5 disabled:opacity-35 disabled:cursor-not-allowed"
                       >
                         <Radio className="w-4 h-4" />
                         HANDOFF → TOWER ({controllerFrequency("TOWER", sim.airport)} MHz)
@@ -1063,29 +1011,29 @@ export const ClearanceControlDeck: React.FC = () => {
 
                       <div className="grid grid-cols-2 gap-1.5 pt-0.5">
                         <button
-                          disabled={nordoLocked}
+                          disabled={nordoLocked || isCommandDisabled("HOLD_POSITION")}
                           onClick={() =>
-                            issueClearance({
+                            handleIssueClearance({
                               aircraftId: ac.id,
                               controller: "GROUND",
                               type: "HOLD_POSITION",
-                            })
+                            }, "HOLD_POSITION")
                           }
-                          className="py-1.5 px-2 rounded-md border font-mono text-[11px] font-semibold bg-[var(--atc-amber-bg)] hover:opacity-90 border-[var(--atc-amber-border)] text-[var(--atc-amber)]"
+                          className="py-1.5 px-2 rounded-md border font-mono text-[11px] font-semibold bg-[var(--atc-amber-bg)] hover:opacity-90 border-[var(--atc-amber-border)] text-[var(--atc-amber)] disabled:opacity-35 disabled:cursor-not-allowed"
                         >
                           HOLD POSITION
                         </button>
                         <button
-                          disabled={nordoLocked}
+                          disabled={nordoLocked || isCommandDisabled("HOLD_SHORT")}
                           onClick={() =>
-                            issueClearance({
+                            handleIssueClearance({
                               aircraftId: ac.id,
                               controller: "GROUND",
                               type: "HOLD_SHORT",
                               parameters: { runway: ac.targetRunway },
-                            })
+                            }, "HOLD_SHORT")
                           }
-                          className="py-1.5 px-2 rounded-md border font-mono text-[11px] font-semibold bg-[var(--atc-amber-bg)] hover:opacity-90 border-[var(--atc-amber-border)] text-[var(--atc-amber)]"
+                          className="py-1.5 px-2 rounded-md border font-mono text-[11px] font-semibold bg-[var(--atc-amber-bg)] hover:opacity-90 border-[var(--atc-amber-border)] text-[var(--atc-amber)] disabled:opacity-35 disabled:cursor-not-allowed"
                         >
                           HOLD SHORT {ac.targetRunway}
                         </button>
@@ -1122,13 +1070,13 @@ export const ClearanceControlDeck: React.FC = () => {
 
                   <div className="pt-0.5">
                     <button
-                      disabled={nordoLocked}
+                      disabled={nordoLocked || isCommandDisabled("UNABLE")}
                       onClick={() =>
-                        issueClearance({
+                        handleIssueClearance({
                           aircraftId: ac.id,
                           controller: "GROUND",
                           type: "UNABLE",
-                        })
+                        }, "UNABLE")
                       }
                       className={`w-full py-1.5 px-2 font-mono text-xs ${neutralBtn}`}
                     >
@@ -1141,26 +1089,26 @@ export const ClearanceControlDeck: React.FC = () => {
                 <div className="space-y-2.5">
                   <div className="grid grid-cols-2 gap-1.5">
                     <button
-                      disabled={nordoLocked || (ac.state !== "AT_GATE" && ac.state !== "HOLD_POSITION")}
+                      disabled={nordoLocked || (ac.state !== "AT_GATE" && ac.state !== "HOLD_POSITION") || isCommandDisabled("PUSHBACK")}
                       onClick={() =>
-                        issueClearance({
+                        handleIssueClearance({
                           aircraftId: ac.id,
                           controller: "GROUND",
                           type: "PUSHBACK",
-                        })
+                        }, "PUSHBACK")
                       }
                       className="py-2 px-2 rounded-md border font-mono text-[11px] font-bold transition-colors disabled:opacity-35 disabled:cursor-not-allowed bg-[var(--atc-accent-bg)] hover:opacity-90 border-[var(--atc-accent-border)] text-[var(--atc-accent-text)]"
                     >
                       APPROVE PUSHBACK
                     </button>
                     <button
-                      disabled={nordoLocked || ac.altitude > sim.airport.elevationFt + 50}
+                      disabled={nordoLocked || ac.altitude > sim.airport.elevationFt + 50 || isCommandDisabled("HOLD_POSITION")}
                       onClick={() =>
-                        issueClearance({
+                        handleIssueClearance({
                           aircraftId: ac.id,
                           controller: "GROUND",
                           type: "HOLD_POSITION",
-                        })
+                        }, "HOLD_POSITION")
                       }
                       className="py-2 px-2 rounded-md border font-mono text-[11px] font-semibold disabled:opacity-35 disabled:cursor-not-allowed bg-[var(--atc-amber-bg)] hover:opacity-90 border-[var(--atc-amber-border)] text-[var(--atc-amber)]"
                     >
@@ -1173,29 +1121,29 @@ export const ClearanceControlDeck: React.FC = () => {
 
                   <div className="grid grid-cols-2 gap-1.5">
                     <button
-                      disabled={nordoLocked}
+                      disabled={nordoLocked || isCommandDisabled("UNABLE")}
                       onClick={() =>
-                        issueClearance({
+                        handleIssueClearance({
                           aircraftId: ac.id,
                           controller: "GROUND",
                           type: "UNABLE",
-                        })
+                        }, "UNABLE")
                       }
                       className={`py-1.5 px-2 font-mono text-xs ${neutralBtn}`}
                     >
                       UNABLE
                     </button>
                     <button
-                      disabled={nordoLocked || ac.controller === "TOWER"}
+                      disabled={nordoLocked || ac.controller === "TOWER" || isCommandDisabled("HANDOFF_TOWER")}
                       onClick={() =>
-                        issueClearance({
+                        handleIssueClearance({
                           aircraftId: ac.id,
                           controller: "GROUND",
                           type: "HANDOFF",
                           parameters: { targetController: "TOWER" },
-                        })
+                        }, "HANDOFF_TOWER")
                       }
-                      className="py-1.5 px-2 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-xs font-semibold disabled:opacity-35"
+                      className="py-1.5 px-2 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-xs font-semibold disabled:opacity-35 disabled:cursor-not-allowed"
                     >
                       HANDOFF → TWR ({controllerFrequency("TOWER", sim.airport)})
                     </button>
@@ -1211,63 +1159,63 @@ export const ClearanceControlDeck: React.FC = () => {
               {ac.flightKind === "DEPARTURE" && (
                 <div className="space-y-1.5">
                   <button
-                    disabled={nordoLocked}
+                    disabled={nordoLocked || isCommandDisabled("LINE_UP")}
                     onClick={() =>
-                      issueClearance({
+                      handleIssueClearance({
                         aircraftId: ac.id,
                         controller: "TOWER",
                         type: "LINE_UP",
                         parameters: { runway: ac.targetRunway },
-                      })
+                      }, "LINE_UP")
                     }
-                    className="w-full py-2 rounded-md border border-[var(--atc-accent-border)] bg-[var(--atc-accent-bg)] hover:opacity-90 text-[var(--atc-accent-text)] font-mono text-xs font-bold disabled:opacity-35"
+                    className="w-full py-2 rounded-md border border-[var(--atc-accent-border)] bg-[var(--atc-accent-bg)] hover:opacity-90 text-[var(--atc-accent-text)] font-mono text-xs font-bold disabled:opacity-35 disabled:cursor-not-allowed"
                   >
                     LINE UP AND WAIT RWY {ac.targetRunway}
                   </button>
 
                   <button
-                    disabled={nordoLocked}
+                    disabled={nordoLocked || isCommandDisabled("TAKEOFF")}
                     onClick={() => {
                       const baseAlt = Math.round(sim.airport.elevationFt / 500) * 500;
-                      issueClearance({
+                      handleIssueClearance({
                         aircraftId: ac.id,
                         controller: "TOWER",
                         type: "TAKEOFF",
                         parameters: { runway: ac.targetRunway, initialAltitude: baseAlt + 3000 },
-                      });
+                      }, "TAKEOFF");
                     }}
-                    className="w-full py-2 rounded-md border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:opacity-90 text-[var(--atc-emerald)] font-mono text-xs font-bold disabled:opacity-35"
+                    className="w-full py-2 rounded-md border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:opacity-90 text-[var(--atc-emerald)] font-mono text-xs font-bold disabled:opacity-35 disabled:cursor-not-allowed"
                   >
                     CLEARED FOR TAKEOFF RWY {ac.targetRunway}
                   </button>
 
                   <div className="grid grid-cols-2 gap-1.5">
                     <button
-                      disabled={nordoLocked}
+                      disabled={nordoLocked || isCommandDisabled("CANCEL_TAKEOFF")}
                       onClick={() =>
-                        issueClearance({
+                        handleIssueClearance({
                           aircraftId: ac.id,
                           controller: "TOWER",
                           type:
                             ac.state === "TAKEOFF_ROLL" || ac.state === "ROTATE"
                               ? "REJECT_TAKEOFF"
                               : "CANCEL_TAKEOFF",
-                        })
+                        }, "CANCEL_TAKEOFF")
                       }
-                      className="py-1.5 px-2 rounded-md border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] hover:opacity-90 text-[var(--atc-amber)] font-mono text-[11px] font-semibold disabled:opacity-35"
+                      className="py-1.5 px-2 rounded-md border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] hover:opacity-90 text-[var(--atc-amber)] font-mono text-[11px] font-semibold disabled:opacity-35 disabled:cursor-not-allowed"
                     >
                       CANCEL TAKEOFF
                     </button>
                     <button
-                      disabled={nordoLocked || ac.state !== "TAKEOFF_ROLL"}
+                      disabled={nordoLocked || ac.state !== "TAKEOFF_ROLL" || isCommandDisabled("REJECT_TAKEOFF")}
                       onClick={() =>
-                        issueClearance({
+                        handleIssueClearance({
                           aircraftId: ac.id,
                           controller: "TOWER",
                           type: "REJECT_TAKEOFF",
-                        })
+                        }, "REJECT_TAKEOFF")
                       }
-                      className="py-1.5 px-2 rounded-md border border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] hover:opacity-90 text-[var(--atc-red)] font-mono text-[11px] font-bold disabled:opacity-35"
+                      className="py-1.5 px-2 rounded-md border border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] hover:opacity-90 text-[var(--atc-red)] font-mono text-[11px] font-bold disabled:opacity-35 disabled:cursor-not-allowed"
                     >
                       REJECT TAKEOFF
                     </button>
@@ -1298,17 +1246,18 @@ export const ClearanceControlDeck: React.FC = () => {
                           nordoLocked ||
                           (ac.state !== "APPROACH" &&
                             ac.state !== "FINAL" &&
-                            ac.state !== "CLEARED_TO_LAND")
+                            ac.state !== "CLEARED_TO_LAND") ||
+                          isCommandDisabled("LAND")
                         }
                         onClick={() =>
-                          issueClearance({
+                          handleIssueClearance({
                             aircraftId: ac.id,
                             controller: "TOWER",
                             type: "LAND",
                             parameters: { runway: activeLandRwy },
-                          })
+                          }, "LAND")
                         }
-                        className="w-full py-2 rounded-md border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:opacity-90 text-[var(--atc-emerald)] font-mono text-xs font-bold disabled:opacity-35"
+                        className="w-full py-2 rounded-md border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:opacity-90 text-[var(--atc-emerald)] font-mono text-xs font-bold disabled:opacity-35 disabled:cursor-not-allowed"
                       >
                         CLEARED TO LAND RWY {activeLandRwy}
                       </button>
@@ -1318,18 +1267,19 @@ export const ClearanceControlDeck: React.FC = () => {
                           (ac.state !== "APPROACH" &&
                             ac.state !== "FINAL" &&
                             ac.state !== "CLEARED_TO_LAND" &&
-                            ac.state !== "LANDING")
+                            ac.state !== "LANDING") ||
+                          isCommandDisabled("GO_AROUND")
                         }
                         onClick={() => {
                           const gaAlt = Math.round((sim.airport.elevationFt + 3000) / 500) * 500;
-                          issueClearance({
+                          handleIssueClearance({
                             aircraftId: ac.id,
                             controller: "TOWER",
                             type: "GO_AROUND",
                             parameters: { altitude: gaAlt, heading: 90 },
-                          });
+                          }, "GO_AROUND");
                         }}
-                        className="w-full py-2 rounded-md border border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] hover:opacity-90 text-[var(--atc-red)] font-mono text-xs font-semibold disabled:opacity-35"
+                        className="w-full py-2 rounded-md border border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] hover:opacity-90 text-[var(--atc-red)] font-mono text-xs font-semibold disabled:opacity-35 disabled:cursor-not-allowed"
                       >
                         GO AROUND (CLIMB {Math.round((sim.airport.elevationFt + 3000) / 500) * 500})
                       </button>
@@ -1352,12 +1302,13 @@ export const ClearanceControlDeck: React.FC = () => {
                       {canVacateRwy && exitOptions.length > 0 ? (
                         <div className="space-y-1">
                           <button
+                            disabled={isCommandDisabled("VACATE_EXPEDITE")}
                             onMouseEnter={() => setHoverPreviewRoute(exitOptions[0].nodeIds)}
                             onMouseLeave={() => setHoverPreviewRoute(null)}
                             onClick={() => {
                               setHoverPreviewRoute(null);
                               const opt = exitOptions[0];
-                              issueClearance({
+                              handleIssueClearance({
                                 aircraftId: ac.id,
                                 controller: "TOWER",
                                 type: "VACATE_RUNWAY",
@@ -1368,9 +1319,9 @@ export const ClearanceControlDeck: React.FC = () => {
                                   taxiway: opt.taxiway,
                                   expedite: true,
                                 },
-                              });
+                              }, "VACATE_EXPEDITE");
                             }}
-                            className="w-full py-1.5 px-2.5 rounded border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] hover:opacity-90 text-[var(--atc-amber)] font-mono text-[11px] font-bold flex items-center justify-between transition-opacity"
+                            className="w-full py-1.5 px-2.5 rounded border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] hover:opacity-90 text-[var(--atc-amber)] font-mono text-[11px] font-bold flex items-center justify-between transition-opacity disabled:opacity-35 disabled:cursor-not-allowed"
                           >
                             <span>EXPEDITE VACATE ({exitOptions[0].taxiway})</span>
                             <ArrowRight className="w-3 h-3 shrink-0" />
@@ -1380,11 +1331,12 @@ export const ClearanceControlDeck: React.FC = () => {
                             {exitOptions.slice(0, 4).map((opt) => (
                               <button
                                 key={`${opt.exitRwyNodeId}-${opt.holdShortNodeId}`}
+                                disabled={isCommandDisabled(`VACATE_${opt.taxiway}`)}
                                 onMouseEnter={() => setHoverPreviewRoute(opt.nodeIds)}
                                 onMouseLeave={() => setHoverPreviewRoute(null)}
                                 onClick={() => {
                                   setHoverPreviewRoute(null);
-                                  issueClearance({
+                                  handleIssueClearance({
                                     aircraftId: ac.id,
                                     controller: "TOWER",
                                     type: "VACATE_RUNWAY",
@@ -1394,9 +1346,9 @@ export const ClearanceControlDeck: React.FC = () => {
                                       holdShortNodeId: opt.holdShortNodeId,
                                       taxiway: opt.taxiway,
                                     },
-                                  });
+                                  }, `VACATE_${opt.taxiway}`);
                                 }}
-                                className={`text-left px-2 py-1.5 rounded border text-[10px] font-mono transition-colors ${
+                                className={`text-left px-2 py-1.5 rounded border text-[10px] font-mono transition-colors disabled:opacity-35 disabled:cursor-not-allowed ${
                                   ac.vacateAssignedHoldShortId === opt.holdShortNodeId
                                     ? "bg-[var(--atc-cyan-bg)] border-[var(--atc-cyan-border)] text-[var(--atc-cyan)] font-bold"
                                     : "bg-[var(--atc-surface)] border-[var(--atc-border)] hover:border-[var(--atc-accent-border)] text-[var(--atc-text)]"
@@ -1425,22 +1377,23 @@ export const ClearanceControlDeck: React.FC = () => {
                     disabled={
                       nordoLocked ||
                       ac.controller === "DEPARTURE" ||
-                      (ac.state !== "GO_AROUND" && ac.state !== "MISSED_APPROACH")
+                      (ac.state !== "GO_AROUND" && ac.state !== "MISSED_APPROACH") ||
+                      isCommandDisabled("HANDOFF_APP")
                     }
                     onClick={() =>
-                      issueClearance({
+                      handleIssueClearance({
                         aircraftId: ac.id,
                         controller: "TOWER",
                         type: "HANDOFF",
                         parameters: { targetController: "DEPARTURE" },
-                      })
+                      }, "HANDOFF_APP")
                     }
                     title={
                       ac.state === "GO_AROUND" || ac.state === "MISSED_APPROACH"
                         ? "Transfer climbing missed approach aircraft back to Approach Control for re-vectoring"
                         : "Available when arrival executes Go-Around / Missed Approach"
                     }
-                    className="py-1.5 px-2 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-[11px] font-semibold disabled:opacity-35"
+                    className="py-1.5 px-2 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-[11px] font-semibold disabled:opacity-35 disabled:cursor-not-allowed"
                   >
                     HANDOFF → APP ({controllerFrequency("DEPARTURE", sim.airport, "ARRIVAL")})
                   </button>
@@ -1451,18 +1404,19 @@ export const ClearanceControlDeck: React.FC = () => {
                       (ac.state !== "TOUCHDOWN" &&
                         ac.state !== "ROLLOUT" &&
                         ac.state !== "VACATING_RUNWAY" &&
-                        ac.altitude > sim.airport.elevationFt + 50)
+                        ac.altitude > sim.airport.elevationFt + 50) ||
+                      isCommandDisabled("HANDOFF_GND")
                     }
                     onClick={() =>
-                      issueClearance({
+                      handleIssueClearance({
                         aircraftId: ac.id,
                         controller: "TOWER",
                         type: "HANDOFF",
                         parameters: { targetController: "GROUND" },
-                      })
+                      }, "HANDOFF_GND")
                     }
                     title="Vacated runway — transfer to Ground Control for taxi to gate stand"
-                    className="py-1.5 px-2 rounded-md border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] hover:opacity-90 text-[var(--atc-amber)] font-mono text-[11px] font-semibold disabled:opacity-35"
+                    className="py-1.5 px-2 rounded-md border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] hover:opacity-90 text-[var(--atc-amber)] font-mono text-[11px] font-semibold disabled:opacity-35 disabled:cursor-not-allowed"
                   >
                     HANDOFF → GND ({controllerFrequency("GROUND", sim.airport)})
                   </button>
@@ -1475,18 +1429,19 @@ export const ClearanceControlDeck: React.FC = () => {
                       ac.controller === "DEPARTURE" ||
                       (ac.state !== "ROTATE" &&
                         ac.state !== "CLIMB" &&
-                        ac.altitude <= sim.airport.elevationFt + 50)
+                        ac.altitude <= sim.airport.elevationFt + 50) ||
+                      isCommandDisabled("HANDOFF_DEP")
                     }
                     onClick={() =>
-                      issueClearance({
+                      handleIssueClearance({
                         aircraftId: ac.id,
                         controller: "TOWER",
                         type: "HANDOFF",
                         parameters: { targetController: "DEPARTURE" },
-                      })
+                      }, "HANDOFF_DEP")
                     }
                     title="Airborne after takeoff — transfer to Departure Control for climb & SID"
-                    className="py-1.5 px-2 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-[11px] font-semibold disabled:opacity-35"
+                    className="py-1.5 px-2 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-[11px] font-semibold disabled:opacity-35 disabled:cursor-not-allowed"
                   >
                     HANDOFF → DEP ({controllerFrequency("DEPARTURE", sim.airport, "DEPARTURE")})
                   </button>
@@ -1496,18 +1451,19 @@ export const ClearanceControlDeck: React.FC = () => {
                       ac.controller === "GROUND" ||
                       (ac.state !== "STOPPED_ON_RUNWAY" &&
                         ac.state !== "REJECTED_TAKEOFF" &&
-                        ac.state !== "HOLD_POSITION")
+                        ac.state !== "HOLD_POSITION") ||
+                      isCommandDisabled("HANDOFF_GND")
                     }
                     onClick={() =>
-                      issueClearance({
+                      handleIssueClearance({
                         aircraftId: ac.id,
                         controller: "TOWER",
                         type: "HANDOFF",
                         parameters: { targetController: "GROUND" },
-                      })
+                      }, "HANDOFF_GND")
                     }
                     title="Rejected takeoff or stopped on runway — transfer to Ground Control"
-                    className="py-1.5 px-2 rounded-md border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] hover:opacity-90 text-[var(--atc-amber)] font-mono text-[11px] font-semibold disabled:opacity-35"
+                    className="py-1.5 px-2 rounded-md border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] hover:opacity-90 text-[var(--atc-amber)] font-mono text-[11px] font-semibold disabled:opacity-35 disabled:cursor-not-allowed"
                   >
                     HANDOFF → GND ({controllerFrequency("GROUND", sim.airport)})
                   </button>
@@ -1724,9 +1680,12 @@ export const ClearanceControlDeck: React.FC = () => {
                   {depAppGuidance.mode !== "GROUND_PREFLIGHT" && (
                     <button
                       type="button"
-                      disabled={nordoLocked}
-                      onClick={handleApplyGuidance}
-                      className={`w-full py-1.5 px-2 rounded-md border font-mono text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-35 ${
+                      disabled={nordoLocked || isCommandDisabled("GUIDANCE_APPLY")}
+                      onClick={() => {
+                        handleApplyGuidance();
+                        registerCommandClick("GUIDANCE_APPLY");
+                      }}
+                      className={`w-full py-1.5 px-2 rounded-md border font-mono text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-35 disabled:cursor-not-allowed ${
                         isGoAroundOrPattern
                           ? "bg-[var(--atc-accent)] border-[var(--atc-accent-border)] text-slate-950 hover:opacity-90"
                           : "bg-[var(--atc-surface)] border-[var(--atc-cyan-border)] text-[var(--atc-cyan)] hover:bg-[var(--atc-surface-alt)]"
@@ -1774,7 +1733,7 @@ export const ClearanceControlDeck: React.FC = () => {
                         key={hdg}
                         disabled={nordoLocked}
                         onClick={() =>
-                          issueClearance({
+                          handleIssueClearance({
                             aircraftId: ac.id,
                             controller: "DEPARTURE",
                             type: "HEADING",
@@ -1795,9 +1754,9 @@ export const ClearanceControlDeck: React.FC = () => {
                       placeholder={recHdgStr}
                     />
                     <button
-                      disabled={nordoLocked}
+                      disabled={nordoLocked || isCommandDisabled("ASSIGN_HDG")}
                       onClick={() =>
-                        issueClearance({
+                        handleIssueClearance({
                           aircraftId: ac.id,
                           controller: "DEPARTURE",
                           type: "HEADING",
@@ -1805,9 +1764,9 @@ export const ClearanceControlDeck: React.FC = () => {
                             heading: Number(customHeading) || depAppGuidance.recommendedHeading,
                             turnDirection: turnDir,
                           },
-                        })
+                        }, "ASSIGN_HDG")
                       }
-                      className="flex-1 py-1 rounded bg-[var(--atc-accent-bg)] hover:opacity-90 border border-[var(--atc-accent-border)] text-[var(--atc-accent-text)] font-mono text-xs font-semibold disabled:opacity-35"
+                      className="flex-1 py-1 rounded bg-[var(--atc-accent-bg)] hover:opacity-90 border border-[var(--atc-accent-border)] text-[var(--atc-accent-text)] font-mono text-xs font-semibold disabled:opacity-35 disabled:cursor-not-allowed"
                     >
                       ASSIGN HDG {customHeading.padStart(3, "0")}°
                     </button>
@@ -1829,7 +1788,7 @@ export const ClearanceControlDeck: React.FC = () => {
                           key={alt}
                           disabled={nordoLocked}
                           onClick={() =>
-                            issueClearance({
+                            handleIssueClearance({
                               aircraftId: ac.id,
                               controller: "DEPARTURE",
                               type: "ALTITUDE",
@@ -1865,7 +1824,7 @@ export const ClearanceControlDeck: React.FC = () => {
                           key={spd}
                           disabled={nordoLocked}
                           onClick={() =>
-                            issueClearance({
+                            handleIssueClearance({
                               aircraftId: ac.id,
                               controller: "DEPARTURE",
                               type: "SPEED",
@@ -1903,16 +1862,16 @@ export const ClearanceControlDeck: React.FC = () => {
                       return (
                         <button
                           key={`ils-${rwy}`}
-                          disabled={nordoLocked}
+                          disabled={nordoLocked || isCommandDisabled(`ILS_${rwy}`)}
                           onClick={() =>
-                            issueClearance({
+                            handleIssueClearance({
                               aircraftId: ac.id,
                               controller: "DEPARTURE",
                               type: "APPROACH",
                               parameters: { runway: rwy },
-                            })
+                            }, `ILS_${rwy}`)
                           }
-                          className={`py-1.5 rounded border font-mono text-[11px] font-semibold disabled:opacity-35 ${
+                          className={`py-1.5 rounded border font-mono text-[11px] font-semibold disabled:opacity-35 disabled:cursor-not-allowed ${
                             isRecRwy
                               ? "bg-[var(--atc-emerald-bg)] border-[var(--atc-emerald)] ring-1 ring-[var(--atc-emerald)]/50 text-[var(--atc-emerald)] font-extrabold"
                               : "bg-[var(--atc-emerald-bg)] hover:opacity-90 border-[var(--atc-emerald-border)] text-[var(--atc-emerald)]"
@@ -1934,7 +1893,7 @@ export const ClearanceControlDeck: React.FC = () => {
                             key={fixId}
                             disabled={nordoLocked}
                             onClick={() =>
-                              issueClearance({
+                              handleIssueClearance({
                                 aircraftId: ac.id,
                                 controller: "DEPARTURE",
                                 type: "DIRECT",
@@ -1957,31 +1916,31 @@ export const ClearanceControlDeck: React.FC = () => {
 
                 {ac.flightKind === "ARRIVAL" ? (
                   <button
-                    disabled={nordoLocked || ac.controller === "TOWER"}
+                    disabled={nordoLocked || ac.controller === "TOWER" || isCommandDisabled("HANDOFF_TOWER")}
                     onClick={() =>
-                      issueClearance({
+                      handleIssueClearance({
                         aircraftId: ac.id,
                         controller: "DEPARTURE",
                         type: "HANDOFF",
                         parameters: { targetController: "TOWER" },
-                      })
+                      }, "HANDOFF_TOWER")
                     }
-                    className="w-full py-1.5 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-xs font-semibold disabled:opacity-35"
+                    className="w-full py-1.5 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-xs font-semibold disabled:opacity-35 disabled:cursor-not-allowed"
                   >
                     HANDOFF → TOWER ({controllerFrequency("TOWER", sim.airport)})
                   </button>
                 ) : (
                   <button
-                    disabled={nordoLocked || ac.state === "COMPLETED_DEPARTURE"}
+                    disabled={nordoLocked || ac.state === "COMPLETED_DEPARTURE" || isCommandDisabled("HANDOFF_ACC")}
                     onClick={() =>
-                      issueClearance({
+                      handleIssueClearance({
                         aircraftId: ac.id,
                         controller: "DEPARTURE",
                         type: "HANDOFF",
                         parameters: { targetController: "ACC" },
-                      })
+                      }, "HANDOFF_ACC")
                     }
-                    className="w-full py-1.5 rounded-md border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:opacity-90 text-[var(--atc-emerald)] font-mono text-xs font-semibold disabled:opacity-35"
+                    className="w-full py-1.5 rounded-md border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:opacity-90 text-[var(--atc-emerald)] font-mono text-xs font-semibold disabled:opacity-35 disabled:cursor-not-allowed"
                   >
                     HANDOFF → AREA / CENTER ({controllerFrequency("ACC", sim.airport)})
                   </button>

@@ -22,23 +22,192 @@ import { nextId } from "./clearanceEngine.ts";
 import { addRadioMessage, processPilotReadbacks } from "./decisionEngine.ts";
 import { updateAircraftMovement } from "./movementEngine.ts";
 
-const AIRLINES: Array<{ code: string; spoken: string; name: string; types: string[] }> = [
-  { code: "UAL", spoken: "United", name: "United Airlines", types: ["B738", "B752", "A320"] },
-  { code: "DAL", spoken: "Delta", name: "Delta Air Lines", types: ["A321", "B739", "B763"] },
-  { code: "AAL", spoken: "American", name: "American Airlines", types: ["B738", "A319", "B772"] },
+export const AIRLINES: Array<{ code: string; spoken: string; name: string; types: string[] }> = [
+  { code: "UAL", spoken: "United", name: "United Airlines", types: ["B789", "B772", "B739", "B752", "A320"] },
+  { code: "DAL", spoken: "Delta", name: "Delta Air Lines", types: ["A359", "A339", "A321", "B739", "B738"] },
+  { code: "AAL", spoken: "American", name: "American Airlines", types: ["B77W", "B788", "B738", "A321", "A319"] },
   { code: "SWA", spoken: "Southwest", name: "Southwest Airlines", types: ["B737", "B38M"] },
-  { code: "JBU", spoken: "JetBlue", name: "JetBlue Airways", types: ["A320", "A220"] },
-  { code: "FDX", spoken: "FedEx", name: "FedEx Express", types: ["B763", "MD11"] },
+  { code: "JBU", spoken: "JetBlue", name: "JetBlue Airways", types: ["A321", "A320", "A220"] },
+  { code: "FDX", spoken: "FedEx", name: "FedEx Express", types: ["B77F", "MD11", "B763"] },
+  { code: "UPS", spoken: "UPS", name: "UPS Airlines", types: ["B748", "B763", "MD11"] },
+  { code: "RCH", spoken: "Reach", name: "USAF Air Mobility Command", types: ["C17", "C130", "K35R"] },
 ];
 
-const INDIA_AND_INTL_AIRLINES: Array<{ code: string; spoken: string; name: string; types: string[] }> = [
-  { code: "IGO", spoken: "iFly", name: "IndiGo Airlines", types: ["A320", "A321"] },
-  { code: "AIC", spoken: "Air India", name: "Air India", types: ["A320", "B772", "B738"] },
-  { code: "VTI", spoken: "Vistara", name: "Vistara", types: ["A320", "A321", "B739"] },
-  { code: "SEJ", spoken: "SpiceJet", name: "SpiceJet", types: ["B737", "B38M"] },
-  { code: "UAE", spoken: "Emirates", name: "Emirates", types: ["B772", "B763"] },
-  { code: "BAW", spoken: "Speedbird", name: "British Airways", types: ["A320", "B772"] },
+export const INDIA_AND_INTL_AIRLINES: Array<{ code: string; spoken: string; name: string; types: string[] }> = [
+  { code: "IGO", spoken: "iFly", name: "IndiGo Airlines", types: ["A20N", "A321", "A320", "AT76"] },
+  { code: "AIC", spoken: "Air India", name: "Air India", types: ["A359", "B77W", "B788", "A320"] },
+  { code: "VTI", spoken: "Vistara", name: "Vistara", types: ["B789", "A321", "A320"] },
+  { code: "SEJ", spoken: "SpiceJet", name: "SpiceJet", types: ["B737", "B38M", "AT76"] },
+  { code: "AKJ", spoken: "Akasa", name: "Akasa Air", types: ["B38M"] },
+  { code: "UAE", spoken: "Emirates", name: "Emirates", types: ["A388", "B77W", "A359"] },
+  { code: "QTR", spoken: "Qatari", name: "Qatar Airways", types: ["A35K", "B77W", "B789"] },
+  { code: "SIA", spoken: "Singapore", name: "Singapore Airlines", types: ["A388", "A359", "B789"] },
+  { code: "BAW", spoken: "Speedbird", name: "British Airways", types: ["A35K", "B789", "B77W", "A320"] },
+  { code: "DLH", spoken: "Lufthansa", name: "Lufthansa", types: ["B748", "A359", "A321"] },
+  { code: "BZP", spoken: "Blue Dart", name: "Blue Dart Aviation", types: ["B763", "B752", "B738"] },
+  { code: "DHL", spoken: "DHL", name: "DHL Aviation", types: ["B77F", "A332", "B763"] },
+  { code: "IAF", spoken: "Indian Air Force", name: "Indian Air Force", types: ["C17", "C130", "P8", "SU30"] },
+  { code: "NAVY", spoken: "Navy", name: "Indian Naval Air Arm", types: ["P8"] },
 ];
+
+export function resolveWakeCategory(acType: string): "MEDIUM" | "HEAVY" | "SUPER" {
+  const t = acType.toUpperCase();
+  if (t === "A388" || t === "AN25") return "SUPER";
+  if (
+    t === "B772" ||
+    t === "B77W" ||
+    t === "B77F" ||
+    t === "B788" ||
+    t === "B789" ||
+    t === "B763" ||
+    t === "B744" ||
+    t === "B748" ||
+    t === "A332" ||
+    t === "A333" ||
+    t === "A339" ||
+    t === "A359" ||
+    t === "A35K" ||
+    t === "MD11" ||
+    t === "C17" ||
+    t === "K35R" ||
+    t === "A400"
+  ) {
+    return "HEAVY";
+  }
+  return "MEDIUM";
+}
+
+export function isCargoAircraft(callsign: string, acType: string): boolean {
+  const cs = callsign.toUpperCase();
+  const p = cs.slice(0, 3);
+  const t = acType.toUpperCase();
+  return (
+    p === "FDX" ||
+    p === "UPS" ||
+    p === "DHL" ||
+    p === "BZP" ||
+    p === "ATN" ||
+    t === "MD11" ||
+    t === "B77F" ||
+    t === "B748" ||
+    (t === "B763" && (p === "FDX" || p === "UPS" || p === "BZP" || p === "ATN"))
+  );
+}
+
+export function isMilitaryAircraft(callsign: string, acType: string): boolean {
+  const cs = callsign.toUpperCase();
+  const p = cs.slice(0, 3);
+  const t = acType.toUpperCase();
+  return (
+    p === "IAF" ||
+    p === "RCH" ||
+    p === "RRR" ||
+    p === "IAM" ||
+    p === "GAF" ||
+    cs.startsWith("NAVY") ||
+    t === "C17" ||
+    t === "C130" ||
+    t === "A400" ||
+    t === "K35R" ||
+    t === "P8" ||
+    t === "F16" ||
+    t === "SU30"
+  );
+}
+
+/**
+ * Assigns respective parking stand:
+ * - Cargo aircraft -> Cargo logistics apron / stands (C, S1, S2, CARGO_*)
+ * - Military / tactical transport -> Military / remote apron (MIL_*, S3, M1, REMOTE_*)
+ * - Heavy widebody passenger -> Heavy terminal gates (H*, B14, T1, T2)
+ * - Regional turboprop / jet -> Regional / commuter stands
+ * - Standard passenger -> Passenger terminal concourses
+ */
+export function findBestGateForAircraft(
+  airport: AirportLayout,
+  ac: {
+    aircraftType?: string;
+    callsign?: string;
+    isCargo?: boolean;
+    isMilitary?: boolean;
+    wakeCategory?: string;
+  },
+  occupiedGateIds: Set<string>
+): string | null {
+  const allGates = airport.gateIds;
+  if (!allGates || allGates.length === 0) return null;
+
+  const acType = (ac.aircraftType ?? "").toUpperCase();
+  const cs = (ac.callsign ?? "").toUpperCase();
+  const isCargo = ac.isCargo ?? isCargoAircraft(cs, acType);
+  const isMilitary = ac.isMilitary ?? isMilitaryAircraft(cs, acType);
+  const wakeCat = ac.wakeCategory ?? resolveWakeCategory(acType);
+  const isHeavy = wakeCat === "HEAVY" || wakeCat === "SUPER";
+
+  const scoreGate = (gid: string): number => {
+    const node = airport.nodes[`GATE_${gid}`];
+    const upper = gid.toUpperCase();
+    const label = (node?.label ?? "").toUpperCase();
+
+    const isCargoStand =
+      upper.includes("CARGO") ||
+      upper.startsWith("C") ||
+      upper === "S1" ||
+      upper === "S2" ||
+      upper === "N1" ||
+      upper === "K1" ||
+      label.includes("CARGO");
+
+    const isMilStand =
+      upper.includes("MIL") ||
+      upper.startsWith("M") ||
+      upper === "S3" ||
+      upper === "N2" ||
+      upper === "K2" ||
+      upper.includes("REMOTE") ||
+      upper.startsWith("R") ||
+      label.includes("MIL") ||
+      label.includes("REMOTE");
+
+    const isHeavyCapable =
+      upper.includes("HEAVY") ||
+      upper.startsWith("H") ||
+      upper === "B14" ||
+      upper === "T1" ||
+      upper === "T2" ||
+      upper === "A1" ||
+      upper === "G1" ||
+      upper === "G2" ||
+      label.includes("HEAVY");
+
+    if (isCargo) {
+      if (isCargoStand) return 100;
+      if (isMilStand) return 40;
+      return 10;
+    }
+
+    if (isMilitary) {
+      if (isMilStand) return 100;
+      if (isCargoStand) return 50;
+      return 10;
+    }
+
+    if (isHeavy) {
+      if (isCargoStand || isMilStand) return 5;
+      if (isHeavyCapable) return 100;
+      return 50;
+    }
+
+    // Standard passenger flight
+    if (isCargoStand || isMilStand) return 5;
+    if (isHeavyCapable) return 60;
+    return 90;
+  };
+
+  const sorted = [...allGates].sort((a, b) => scoreGate(b) - scoreGate(a));
+  const free = sorted.find((g) => !occupiedGateIds.has(g));
+  return free ?? sorted[0] ?? null;
+}
 
 const DEPARTURE_FIXES = ["ASTER1", "DELTA", "ECHO"];
 
@@ -201,7 +370,9 @@ export function createDepartureAircraft(
     spokenCallsign: opts.spokenCallsign,
     airline: opts.airline ?? "Airline",
     aircraftType: acType,
-    wakeCategory: acType === "B772" || acType === "B763" || acType === "MD11" ? "HEAVY" : "MEDIUM",
+    wakeCategory: resolveWakeCategory(acType),
+    isCargo: isCargoAircraft(opts.callsign, acType),
+    isMilitary: isMilitaryAircraft(opts.callsign, acType),
     flightKind: "DEPARTURE",
     squawk: String(2100 + (state.nextIdCounter % 600)).padStart(4, "0"),
     ...meta,
@@ -281,7 +452,9 @@ export function createArrivalAircraft(
     spokenCallsign: opts.spokenCallsign,
     airline: opts.airline ?? "Airline",
     aircraftType: acType,
-    wakeCategory: acType === "MD11" || acType === "B772" || acType === "B763" ? "HEAVY" : "MEDIUM",
+    wakeCategory: resolveWakeCategory(acType),
+    isCargo: isCargoAircraft(opts.callsign, acType),
+    isMilitary: isMilitaryAircraft(opts.callsign, acType),
     flightKind: "ARRIVAL",
     squawk: String(3100 + (state.nextIdCounter % 600)).padStart(4, "0"),
     ...meta,
@@ -346,15 +519,33 @@ export function createScenarioSimulation(
   const g3 = ap.gateIds[0];
   const g4 = ap.gateIds[1] ?? ap.gateIds[0];
 
+  const usedGates = new Set<string>();
+  const assignGate = (acInfo: {
+    aircraftType: string;
+    callsign: string;
+    isCargo?: boolean;
+    isMilitary?: boolean;
+    wakeCategory?: "MEDIUM" | "HEAVY" | "SUPER";
+  }): string => {
+    const g =
+      findBestGateForAircraft(ap, acInfo, usedGates) ??
+      ap.gateIds.find((id) => !usedGates.has(id)) ??
+      ap.gateIds[0];
+    usedGates.add(g);
+    return g;
+  };
+
   if (scenarioId === "LOW_TRAFFIC") {
+    const ualGate = assignGate({ aircraftType: "B738", callsign: "UAL452", wakeCategory: "MEDIUM" });
+    const dalGate = assignGate({ aircraftType: "B739", callsign: "DAL814", wakeCategory: "MEDIUM" });
     const ual = createDepartureAircraft(state, {
       callsign: "UAL452",
       spokenCallsign: "United 452",
       airline: "United Airlines",
       aircraftType: "B738",
-      gateId: g0,
+      gateId: ualGate,
       targetRunway: rwyDep,
-      requiresPushback: true,
+      requiresPushback: !ualGate.startsWith("S") && !ualGate.toUpperCase().includes("REMOTE"),
       departureFix: ap.departureFixIds[0],
     });
     const finPt = runwayPoint(arrSpec, -6.5, 0);
@@ -369,45 +560,80 @@ export function createScenarioSimulation(
       altitude: elev + 2100,
       speed: 165,
       targetRunway: rwyArr,
-      gateId: g3,
+      gateId: dalGate,
       state: "APPROACH",
       controller: "TOWER",
       assignedApproach: rwyArr,
     });
     state.selectedAircraftId = ual.id;
   } else if (scenarioId === "NORMAL_OPS" || scenarioId === "MEDIUM" || scenarioId === "MIXED" || scenarioId === "LIGHT") {
+    const isIndia = ap.icao.startsWith("VO") || ap.icao.startsWith("VI");
+
+    // Passenger Boeing
+    const ualGate = assignGate({ aircraftType: "B738", callsign: "UAL452", wakeCategory: "MEDIUM" });
     const ual = createDepartureAircraft(state, {
       callsign: "UAL452",
       spokenCallsign: "United 452",
       airline: "United Airlines",
       aircraftType: "B738",
-      gateId: g0,
+      gateId: ualGate,
       targetRunway: rwyDep,
-      requiresPushback: true,
+      requiresPushback: !ualGate.startsWith("S") && !ualGate.toUpperCase().includes("REMOTE"),
       departureFix: ap.departureFixIds[0],
     });
+
+    // Passenger Airbus
+    const aalGate = assignGate({ aircraftType: "A321", callsign: "AAL127", wakeCategory: "MEDIUM" });
     createDepartureAircraft(state, {
       callsign: "AAL127",
       spokenCallsign: "American 127",
       airline: "American Airlines",
       aircraftType: "A321",
-      gateId: g1,
+      gateId: aalGate,
       targetRunway: rwyArr,
-      requiresPushback: true,
+      requiresPushback: !aalGate.startsWith("S") && !aalGate.toUpperCase().includes("REMOTE"),
       departureFix: ap.departureFixIds[ap.departureFixIds.length - 1],
     });
-    if (g2 !== g0 && g2 !== g1) {
+
+    // Cargo Aircraft at dedicated Cargo gate
+    const cargoGate = assignGate({
+      aircraftType: isIndia ? "B763" : "MD11",
+      callsign: isIndia ? "BZP401" : "FDX902",
+      isCargo: true,
+      wakeCategory: "HEAVY",
+    });
+    createDepartureAircraft(state, {
+      callsign: isIndia ? "BZP401" : "FDX902",
+      spokenCallsign: isIndia ? "Blue Dart 401" : "FedEx 902",
+      airline: isIndia ? "Blue Dart Aviation" : "FedEx Express",
+      aircraftType: isIndia ? "B763" : "MD11",
+      gateId: cargoGate,
+      targetRunway: rwyDep,
+      requiresPushback: false,
+      departureFix: ap.departureFixIds[1] ?? ap.departureFixIds[0],
+    });
+
+    // If airport has spare stands, add Military transport at dedicated Military / Remote stand
+    if (ap.gateIds.length >= 6) {
+      const milGate = assignGate({
+        aircraftType: isIndia ? "C17" : "C17",
+        callsign: isIndia ? "IAF702" : "RCH411",
+        isMilitary: true,
+        wakeCategory: "HEAVY",
+      });
       createDepartureAircraft(state, {
-        callsign: "SWA309",
-        spokenCallsign: "Southwest 309",
-        airline: "Southwest Airlines",
-        aircraftType: "B737",
-        gateId: g2,
-        targetRunway: rwyArr,
+        callsign: isIndia ? "IAF702" : "RCH411",
+        spokenCallsign: isIndia ? "Indian Air Force 702" : "Reach 411",
+        airline: isIndia ? "Indian Air Force" : "USAF Air Mobility Command",
+        aircraftType: "C17",
+        gateId: milGate,
+        targetRunway: rwyDep,
         requiresPushback: false,
-        departureFix: ap.departureFixIds[1] ?? ap.departureFixIds[0],
+        departureFix: ap.departureFixIds[0],
       });
     }
+
+    const dalGate = assignGate({ aircraftType: "B739", callsign: "DAL814", wakeCategory: "MEDIUM" });
     const finPt = runwayPoint(depSpec, -4.6, 0);
     createArrivalAircraft(state, {
       callsign: "DAL814",
@@ -420,11 +646,13 @@ export function createScenarioSimulation(
       altitude: elev + 1600,
       speed: 155,
       targetRunway: rwyDep,
-      gateId: g3,
+      gateId: dalGate,
       state: "FINAL",
       controller: "TOWER",
       assignedApproach: rwyDep,
     });
+
+    const jbuGate = assignGate({ aircraftType: "A320", callsign: "JBU618", wakeCategory: "MEDIUM" });
     const appPt = runwayPoint(arrSpec, -10.5, -3.2);
     createArrivalAircraft(state, {
       callsign: "JBU618",
@@ -437,18 +665,21 @@ export function createScenarioSimulation(
       altitude: baseAlt + 4000,
       speed: 200,
       targetRunway: rwyArr,
-      gateId: g4,
+      gateId: jbuGate,
       state: "APPROACH",
       controller: "DEPARTURE",
     });
     state.selectedAircraftId = ual.id;
   } else if (scenarioId === "CROSSINGS_AND_READBACK") {
+    const ualGate = assignGate({ aircraftType: "B738", callsign: "UAL452", wakeCategory: "MEDIUM" });
+    const fdxGate = assignGate({ aircraftType: "B763", callsign: "FDX901", isCargo: true, wakeCategory: "HEAVY" });
+    const dalGate = assignGate({ aircraftType: "A321", callsign: "DAL814", wakeCategory: "MEDIUM" });
     const ual = createDepartureAircraft(state, {
       callsign: "UAL452",
       spokenCallsign: "United 452",
       airline: "United Airlines",
       aircraftType: "B738",
-      gateId: g0,
+      gateId: ualGate,
       targetRunway: rwyArr,
       requiresPushback: false,
       departureFix: ap.departureFixIds[1] ?? ap.departureFixIds[0],
@@ -459,7 +690,7 @@ export function createScenarioSimulation(
       spokenCallsign: "FedEx 901",
       airline: "FedEx Express",
       aircraftType: "B763",
-      gateId: g2,
+      gateId: fdxGate,
       targetRunway: rwyDep,
       requiresPushback: false,
       departureFix: ap.departureFixIds[0],
@@ -476,19 +707,22 @@ export function createScenarioSimulation(
       altitude: elev + 1850,
       speed: 155,
       targetRunway: rwyDep,
-      gateId: g3,
+      gateId: dalGate,
       state: "FINAL",
       controller: "TOWER",
       assignedApproach: rwyDep,
     });
     state.selectedAircraftId = ual.id;
   } else if (scenarioId === "EMERGENCY_AND_NORDO" || scenarioId === "EMERGENCY") {
+    const ualGate = assignGate({ aircraftType: "B738", callsign: "UAL452", wakeCategory: "MEDIUM" });
+    const swaGate = assignGate({ aircraftType: "B737", callsign: "SWA712", wakeCategory: "MEDIUM" });
+    const fdxGate = assignGate({ aircraftType: "MD11", callsign: "FDX901", isCargo: true, wakeCategory: "HEAVY" });
     const ual = createDepartureAircraft(state, {
       callsign: "UAL452",
       spokenCallsign: "United 452",
       airline: "United Airlines",
       aircraftType: "B738",
-      gateId: g0,
+      gateId: ualGate,
       targetRunway: rwyDep,
       requiresPushback: true,
     });
@@ -504,7 +738,7 @@ export function createScenarioSimulation(
       altitude: elev + 1500,
       speed: 150,
       targetRunway: rwyArr,
-      gateId: g2,
+      gateId: swaGate,
       state: "FINAL",
       controller: "TOWER",
       assignedApproach: rwyArr,
@@ -524,7 +758,7 @@ export function createScenarioSimulation(
       altitude: baseAlt + 3400,
       speed: 190,
       targetRunway: rwyDep,
-      gateId: g1,
+      gateId: fdxGate,
       state: "APPROACH",
       controller: "DEPARTURE",
     });
@@ -792,18 +1026,24 @@ export function spawnRandomTraffic(
   if (state.aircraft[callsign]) return null;
   const spokenCallsign = `${airline.spoken} ${flightNum}`;
   const acType = airline.types[state.nextIdCounter % airline.types.length];
+  const isCargo = isCargoAircraft(callsign, acType);
+  const isMilitary = isMilitaryAircraft(callsign, acType);
+  const wakeCat = resolveWakeCategory(acType);
+
+  const occupiedGateIds = new Set<string>();
+  for (const id of state.aircraftOrder) {
+    const a = state.aircraft[id];
+    if (a && a.gateId && a.state !== "COMPLETED_ARRIVAL" && a.state !== "COMPLETED_DEPARTURE") {
+      occupiedGateIds.add(a.gateId);
+    }
+  }
 
   if (chooseKind === "DEPARTURE") {
-    const candidateGates = state.airport.gateIds;
-    const freeGate = candidateGates.find((g) => {
-      const gn = state.airport.nodes[`GATE_${g}`];
-      if (!gn) return false;
-      return !state.aircraftOrder.some((id) => {
-        const a = state.aircraft[id];
-        if (!a || a.state === "COMPLETED_ARRIVAL" || a.state === "COMPLETED_DEPARTURE") return false;
-        return Math.hypot(a.x - gn.x, a.y - gn.y) < 0.12;
-      });
-    });
+    const freeGate = findBestGateForAircraft(
+      state.airport,
+      { aircraftType: acType, callsign, isCargo, isMilitary, wakeCategory: wakeCat },
+      occupiedGateIds
+    );
     if (!freeGate) return null;
     const rwy = state.airport.runwayIds[state.nextIdCounter % state.airport.runwayIds.length];
     const ac = createDepartureAircraft(state, {
@@ -813,7 +1053,7 @@ export function spawnRandomTraffic(
       aircraftType: acType,
       gateId: freeGate,
       targetRunway: rwy,
-      requiresPushback: !freeGate.startsWith("S"),
+      requiresPushback: !freeGate.startsWith("S") && !freeGate.toUpperCase().includes("REMOTE"),
     });
     updateAircraftStates(state);
     return ac;
@@ -823,8 +1063,12 @@ export function spawnRandomTraffic(
   const rwy: RunwayId =
     state.airport.runwayIds[state.nextIdCounter % state.airport.runwayIds.length];
   const rwySpec = state.airport.runways[rwy];
-  const gates = state.airport.gateIds;
-  const gateId = gates[state.nextIdCounter % gates.length];
+  const gateId =
+    findBestGateForAircraft(
+      state.airport,
+      { aircraftType: acType, callsign, isCargo, isMilitary, wakeCategory: wakeCat },
+      occupiedGateIds
+    ) ?? state.airport.gateIds[state.nextIdCounter % state.airport.gateIds.length];
   const spawnPt = runwayPoint(rwySpec, -11.5, fromLeft ? 3.8 : -3.8);
   const baseAlt = Math.round(state.airport.elevationFt / 500) * 500;
   const ac = createArrivalAircraft(state, {

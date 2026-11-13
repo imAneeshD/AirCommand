@@ -51,18 +51,56 @@ export interface OpenSkyMetadataResponse {
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-  });
-  const data = (await res.json()) as T & { error?: string };
-  if (!res.ok) {
-    throw new Error(data.error ?? `Request failed (${res.status})`);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...init,
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+    });
+  } catch (netErr) {
+    throw new Error(`Network offline or server unreachable: ${(netErr as Error).message}`);
   }
-  return data;
+
+  const contentType = res.headers.get("content-type") ?? "";
+  const isJson = contentType.includes("application/json");
+
+  if (!res.ok) {
+    let errMsg = `Request failed (${res.status})`;
+    if (isJson) {
+      try {
+        const errData = (await res.json()) as { error?: string; message?: string };
+        errMsg = errData.error || errData.message || errMsg;
+      } catch {}
+    } else {
+      try {
+        const text = await res.text();
+        if (text && text.length < 120) errMsg = text.trim();
+      } catch {}
+    }
+    throw new Error(errMsg);
+  }
+
+  if (!isJson) {
+    try {
+      const text = await res.text();
+      if (!text || text.trim().length === 0) {
+        throw new Error(`Server returned empty response (${res.status})`);
+      }
+      return JSON.parse(text) as T;
+    } catch (parseErr) {
+      throw new Error(`Invalid server response (${res.status})`);
+    }
+  }
+
+  try {
+    return (await res.json()) as T;
+  } catch {
+    throw new Error(`Could not parse JSON response (${res.status})`);
+  }
 }
 
 export const apiClient = {

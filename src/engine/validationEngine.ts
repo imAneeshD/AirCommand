@@ -230,6 +230,15 @@ export function canAircraftExecuteAction(
     }
 
     case "GO_AROUND": {
+      if (
+        aircraft.state === "GO_AROUND" ||
+        aircraft.state === "MISSED_APPROACH"
+      ) {
+        return {
+          allowed: true,
+          reason: "Aircraft actively executing go-around / missed approach procedure.",
+        };
+      }
       const gaClr = getLatestActiveClearance(aircraft, "GO_AROUND");
       if (gaClr) {
         return {
@@ -522,7 +531,8 @@ export function canAircraftMove(
 
     case "GO_AROUND":
     case "MISSED_APPROACH":
-      return canAircraftExecuteAction(aircraft, "GO_AROUND", simulation).allowed;
+      // Airborne missed approach / go-around aircraft must continuously fly and climb out safely
+      return true;
   }
 }
 
@@ -617,6 +627,35 @@ export function findBlockingTrafficAhead(
 
     const dot = (dx * fwdX + dy * fwdY) / dist;
     if (dot > effDot && dist < closestDist) {
+      // Do NOT block if the other aircraft is on a completely different taxiway / path
+      if (
+        aircraft.assignedRouteNodeIds &&
+        aircraft.routeStepIndex < aircraft.assignedRouteNodeIds.length - 1
+      ) {
+        const curId = aircraft.assignedRouteNodeIds[aircraft.routeStepIndex];
+        const nextId = aircraft.assignedRouteNodeIds[aircraft.routeStepIndex + 1];
+        const n1 = simulation.airport.nodes[curId];
+        const n2 = simulation.airport.nodes[nextId];
+        if (n1 && n2) {
+          const segDx = n2.x - n1.x;
+          const segDy = n2.y - n1.y;
+          const segLenSq = segDx * segDx + segDy * segDy;
+          if (segLenSq > 0.0000001) {
+            const t = Math.max(0, Math.min(1, ((other.x - n1.x) * segDx + (other.y - n1.y) * segDy) / segLenSq));
+            const projX = n1.x + t * segDx;
+            const projY = n1.y + t * segDy;
+            const perpDist = Math.hypot(other.x - projX, other.y - projY);
+
+            // Standard taxiway corridor half-width is ~20m (0.0108 NM).
+            // If the lateral offset to our active route segment is > 0.018 NM (~33m),
+            // other aircraft is on an adjacent parallel taxiway, ramp, or different branch!
+            if (perpDist > 0.018) {
+              continue;
+            }
+          }
+        }
+      }
+
       closest = other;
       closestDist = dist;
     }

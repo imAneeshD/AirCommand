@@ -4,7 +4,10 @@ import {
   AlertTriangle,
   CheckCircle,
   Crosshair,
+  GripVertical,
   Layers,
+  LayoutGrid,
+  List,
   PanelLeftClose,
   PanelLeftOpen,
   PlaneLanding,
@@ -24,6 +27,7 @@ import { getActiveCallingSignals } from "../utils/radioSignals.ts";
 import { Accordion } from "./Accordion.tsx";
 
 type StripFilter = "ALL" | "STATION" | "DEP" | "ARR";
+type StripViewMode = "LIST" | "KANBAN";
 
 function stateBadgeStyle(ac: Aircraft): string {
   if (
@@ -93,11 +97,29 @@ export const FlightStripRack: React.FC = () => {
   useAtcStore((s) => s.tickVersion);
   const focusAircraft = useAtcStore((s) => s.focusAircraft);
   const respondToHandoff = useAtcStore((s) => s.respondToHandoff);
+  const claimAircraftStation = useAtcStore((s) => s.claimAircraftStation);
+  const issueClearance = useAtcStore((s) => s.issueClearance);
   const roomState = useAtcStore((s) => s.roomState);
   const minimized = useAtcStore((s) => s.minimizedPanels.left);
   const togglePanelMinimized = useAtcStore((s) => s.togglePanelMinimized);
-  const stripRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const stripRefs = useRef<Record<string, HTMLElement | null>>({});
 
+  const [viewMode, setViewMode] = useState<StripViewMode>(() => {
+    try {
+      const saved = localStorage.getItem("aircommand_strip_view_mode");
+      if (saved === "KANBAN" || saved === "LIST") return saved;
+    } catch {}
+    return "LIST";
+  });
+
+  const toggleViewMode = (mode: StripViewMode) => {
+    setViewMode(mode);
+    try {
+      localStorage.setItem("aircommand_strip_view_mode", mode);
+    } catch {}
+  };
+
+  const [dragOverRole, setDragOverRole] = useState<ControllerRole | null>(null);
   const [filter, setFilter] = useState<StripFilter>(
     sim.config.activePlayerStation === "ALL" ? "ALL" : "STATION"
   );
@@ -113,7 +135,7 @@ export const FlightStripRack: React.FC = () => {
     if (el && typeof el.scrollIntoView === "function") {
       el.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }
-  }, [sim.selectedAircraftId, filter]);
+  }, [sim.selectedAircraftId, filter, viewMode]);
 
   const activeFlights = sim.aircraftOrder
     .map((id) => sim.aircraft[id])
@@ -162,6 +184,278 @@ export const FlightStripRack: React.FC = () => {
   );
   const deadlockedIds = getDeadlockedAircraftIds(sim);
 
+  const handleDragStart = (e: React.DragEvent, aircraftId: string) => {
+    e.dataTransfer.setData("text/plain", aircraftId);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDropToColumn = (e: React.DragEvent, targetRole: ControllerRole) => {
+    e.preventDefault();
+    setDragOverRole(null);
+    const aircraftId = e.dataTransfer.getData("text/plain");
+    if (!aircraftId) return;
+    const ac = sim.aircraft[aircraftId];
+    if (!ac || ac.controller === targetRole) return;
+    claimAircraftStation(aircraftId, targetRole);
+  };
+
+  // Render Full Detailed Strip (Used in List View and in Player's Kanban Column)
+  const renderFullStrip = (ac: Aircraft, draggable = false) => {
+    const isSelected = sim.selectedAircraftId === ac.id;
+    const activeClrs = getActiveClearances(ac);
+    const pendingRb = getPendingReadbackClearances(ac);
+    const movable = canAircraftMove(ac, sim);
+    const ctrl = controllerBadge(ac.controller, ac.flightKind);
+    const hasReq = Boolean(ac.pendingRequest && !ac.pendingRequest.resolved);
+    const isCalling = activeCallerIds.has(ac.id);
+    const ho = pendingHandoffsByAcId.get(ac.id);
+
+    return (
+      <div
+        key={ac.id}
+        ref={(el) => {
+          stripRefs.current[ac.id] = el;
+        }}
+        draggable={draggable}
+        onDragStart={draggable ? (e) => handleDragStart(e, ac.id) : undefined}
+        onClick={() => focusAircraft(ac.id)}
+        className={`w-full text-left rounded-lg border p-2 transition-all cursor-pointer ${
+          draggable ? "cursor-grab active:cursor-grabbing" : ""
+        } ${
+          isSelected
+            ? "bg-[var(--atc-accent-soft)] border-[var(--atc-accent)] border-l-4 ring-2 ring-[var(--atc-accent)]/60 shadow-md"
+            : isCalling
+            ? "bg-[var(--atc-amber-bg)]/45 border-[var(--atc-amber-border)] shadow-sm"
+            : "bg-[var(--atc-surface)]/80 border-[var(--atc-border)] hover:border-[var(--atc-border-strong)]"
+        }`}
+      >
+        <div className="flex items-center justify-between gap-1">
+          <div className="flex items-center gap-1.5 min-w-0">
+            {draggable && <GripVertical className="w-2.5 h-2.5 text-[var(--atc-muted)] shrink-0 opacity-60" />}
+            {ac.flightKind === "DEPARTURE" ? (
+              <PlaneTakeoff className="w-3.5 h-3.5 text-[var(--atc-cyan)] shrink-0" />
+            ) : (
+              <PlaneLanding className="w-3.5 h-3.5 text-[var(--atc-emerald)] shrink-0" />
+            )}
+            <span className="font-mono font-bold text-xs text-[var(--atc-text)] truncate">
+              {ac.callsign}
+            </span>
+            <span className="text-[10px] font-mono text-[var(--atc-muted)] shrink-0">
+              {ac.aircraftType}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1 shrink-0">
+            {isSelected && (
+              <span
+                title="Currently selected aircraft (focused on scope)"
+                className="px-1.5 py-0.5 rounded bg-[var(--atc-accent)] text-slate-950 text-[8px] font-mono font-extrabold inline-flex items-center gap-0.5 shadow-sm"
+              >
+                <Crosshair className="w-2.5 h-2.5" />
+                SEL
+              </span>
+            )}
+            {deadlockedIds.has(ac.id) && (
+              <span
+                title="Blocked on taxiway — click strip to resolve"
+                className="px-1.5 py-0.5 rounded bg-[var(--atc-red-bg)] text-[var(--atc-red)] border border-[var(--atc-red-border)] text-[8px] font-mono font-extrabold animate-pulse"
+              >
+                BLK
+              </span>
+            )}
+            {isCalling && (
+              <span
+                title="Actively transmitting voice on radio"
+                className="px-1.5 py-0.5 rounded bg-[var(--atc-amber-bg)] text-[var(--atc-amber)] border border-[var(--atc-amber-border)] text-[9px] font-mono font-bold inline-flex items-center gap-1"
+              >
+                <span className="inline-flex items-end gap-[1.5px] h-2.5" aria-hidden="true">
+                  <span className="w-[2px] h-1.5 bg-amber-500 rounded-full animate-pulse" />
+                  <span className="w-[2px] h-2.5 bg-amber-500 rounded-full animate-bounce" />
+                  <span className="w-[2px] h-1 bg-amber-500 rounded-full animate-pulse" />
+                </span>
+                TX
+              </span>
+            )}
+            {ac.commStatus === "RADIO_FAILURE" && (
+              <span className="px-1 py-0.5 rounded bg-[var(--atc-amber-bg)] text-[var(--atc-amber)] border border-[var(--atc-amber-border)] text-[9px] font-mono font-bold">
+                7600
+              </span>
+            )}
+            {ac.operationMode === "EMERGENCY_OPERATION" && (
+              <span className="px-1 py-0.5 rounded bg-[var(--atc-red-bg)] text-[var(--atc-red)] border border-[var(--atc-red-border)] text-[9px] font-mono font-bold animate-pulse">
+                7700
+              </span>
+            )}
+            <span
+              className={`px-1.5 py-0.5 rounded border text-[9px] font-mono font-bold ${ctrl.cls}`}
+            >
+              {ctrl.letter}
+            </span>
+          </div>
+        </div>
+
+        <div className="mt-1 flex items-center justify-between text-[10px] font-mono text-[var(--atc-muted)]">
+          <span className="truncate">
+            {ac.flightKind === "DEPARTURE"
+              ? `${ac.gateId ?? "RAMP"} → ${ac.targetRunway}`
+              : `${ac.assignedApproach ?? ac.targetRunway} → ${ac.gateId ?? "GATE"}`}
+          </span>
+          <span
+            className="shrink-0"
+            title={formatAltitudeReadout(ac, sim.airport.elevationFt).detailed}
+          >
+            {formatAltitudeReadout(ac, sim.airport.elevationFt).strip} • {Math.round(ac.speed)}kt
+          </span>
+        </div>
+
+        <div className="mt-1.5 flex items-center justify-between gap-1">
+          <span
+            className={`px-1.5 py-0.5 rounded border text-[9px] font-mono font-semibold truncate ${stateBadgeStyle(ac)}`}
+            title={ac.state}
+          >
+            {getAircraftPhaseLabel(ac)}
+          </span>
+
+          <span
+            className={`text-[9px] font-mono px-1.5 py-0.5 rounded shrink-0 ${
+              movable
+                ? "text-[var(--atc-emerald)] bg-[var(--atc-emerald-bg)] font-semibold"
+                : "text-[var(--atc-muted)] bg-[var(--atc-surface-alt)]"
+            }`}
+          >
+            {movable ? "CLEARED" : "HOLD"}
+          </span>
+        </div>
+
+        {/* Incoming Handoff Request with 1-click ACCEPT Button */}
+        {ho && (
+          <div className="mt-1.5 px-2 py-1 rounded bg-[var(--atc-cyan-bg)] border border-[var(--atc-cyan-border)] flex items-center justify-between gap-1 text-[10px] font-mono shadow-sm">
+            <span className="font-bold text-[var(--atc-cyan)] flex items-center gap-1 truncate">
+              <Radio className="w-3 h-3 animate-spin-slow shrink-0" />
+              INCOMING HANDOFF
+            </span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                respondToHandoff(ho.id, true);
+              }}
+              className="px-2 py-0.5 rounded border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:bg-[var(--atc-surface)] hover:border-[var(--atc-emerald)] text-[var(--atc-emerald)] font-mono font-bold text-[9px] transition-colors shrink-0 flex items-center gap-1 cursor-pointer"
+            >
+              <CheckCircle className="w-2.5 h-2.5" />
+              ACCEPT
+            </button>
+          </div>
+        )}
+
+        {/* Pilot Request Banner with Inline Approval Button (Only shown in strip as requested) */}
+        {!ac.hasReadbackError && pendingRb.length === 0 && hasReq && ac.pendingRequest && !ho && (
+          <div className="mt-1.5 p-1.5 rounded bg-[var(--atc-amber-bg)] border border-[var(--atc-amber-border)] text-[10px] font-mono text-[var(--atc-amber)] flex items-center justify-between gap-1 shadow-sm">
+            <span className="flex items-center gap-1 font-bold truncate">
+              <AlertTriangle className="w-3 h-3 shrink-0" />
+              REQ: {ac.pendingRequest.type}
+              {ac.pendingRequest.runway
+                ? ` ${ac.pendingRequest.runway}`
+                : ac.holdingAtRunway
+                ? ` (${ac.holdingAtRunway})`
+                : ""}
+            </span>
+            {ac.pendingRequest.type === "RUNWAY_CHANGE" && ac.pendingRequest.runway && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  issueClearance({
+                    aircraftId: ac.id,
+                    controller: ac.controller,
+                    type: ac.flightKind === "ARRIVAL" ? "APPROACH" : "TAXI",
+                    parameters: { runway: ac.pendingRequest!.runway },
+                  });
+                }}
+                className="px-2 py-0.5 rounded border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:bg-[var(--atc-surface)] text-[var(--atc-emerald)] font-bold text-[9px] transition-colors shrink-0 cursor-pointer"
+              >
+                APPROVE
+              </button>
+            )}
+          </div>
+        )}
+
+        {ac.hasReadbackError && (
+          <div className="mt-1.5 px-1.5 py-0.5 rounded bg-[var(--atc-red-bg)] border border-[var(--atc-red-border)] text-[10px] font-mono text-[var(--atc-red)] flex items-center gap-1">
+            <ShieldAlert className="w-3 h-3 shrink-0" />
+            READBACK ERROR
+          </div>
+        )}
+
+        {!ac.hasReadbackError && pendingRb.length > 0 && (
+          <div className="mt-1.5 px-1.5 py-0.5 rounded bg-[var(--atc-cyan-bg)] border border-[var(--atc-cyan-border)] text-[10px] font-mono text-[var(--atc-cyan)] flex items-center gap-1">
+            <Radio className="w-3 h-3 shrink-0 animate-pulse" />
+            Readback: {pendingRb[pendingRb.length - 1].type}
+          </div>
+        )}
+
+        {activeClrs.length > 0 && !hasReq && !ac.hasReadbackError && (
+          <div className="mt-1 text-[10px] font-mono text-[var(--atc-muted)] truncate">
+            Active: {activeClrs[activeClrs.length - 1].type}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Render Minimal Strip (For other controller lanes in Kanban view, as requested)
+  const renderMinimalStrip = (ac: Aircraft) => {
+    const isSelected = sim.selectedAircraftId === ac.id;
+    const isCalling = activeCallerIds.has(ac.id);
+
+    return (
+      <div
+        key={ac.id}
+        ref={(el) => {
+          stripRefs.current[ac.id] = el;
+        }}
+        draggable={true}
+        onDragStart={(e) => handleDragStart(e, ac.id)}
+        onClick={() => focusAircraft(ac.id)}
+        className={`w-full text-left rounded-md border p-1.5 transition-all cursor-grab active:cursor-grabbing select-none ${
+          isSelected
+            ? "bg-[var(--atc-accent-soft)] border-[var(--atc-accent)] border-l-4 ring-1 ring-[var(--atc-accent)]/60 shadow-sm"
+            : isCalling
+            ? "bg-[var(--atc-amber-bg)]/40 border-[var(--atc-amber-border)] shadow-xs"
+            : "bg-[var(--atc-surface)]/80 border-[var(--atc-border)] hover:border-[var(--atc-border-strong)]"
+        }`}
+      >
+        <div className="flex items-center justify-between gap-1">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <GripVertical className="w-2.5 h-2.5 text-[var(--atc-muted)] shrink-0 opacity-60" />
+            {ac.flightKind === "DEPARTURE" ? (
+              <PlaneTakeoff className="w-3 h-3 text-[var(--atc-cyan)] shrink-0" />
+            ) : (
+              <PlaneLanding className="w-3 h-3 text-[var(--atc-emerald)] shrink-0" />
+            )}
+            <span className="font-mono font-bold text-xs text-[var(--atc-text)] truncate">
+              {ac.callsign}
+            </span>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            {isSelected && (
+              <span className="px-1 py-0.2 rounded bg-[var(--atc-accent)] text-slate-950 text-[7px] font-mono font-extrabold">
+                SEL
+              </span>
+            )}
+            <span className="text-[9px] font-mono text-[var(--atc-muted)]">
+              {ac.aircraftType}
+            </span>
+          </div>
+        </div>
+        <div className="mt-1 flex items-center justify-between text-[9px] font-mono text-[var(--atc-muted)]">
+          <span className="truncate">{getAircraftPhaseLabel(ac)}</span>
+          <span className="shrink-0">{Math.round(ac.speed)}kt</span>
+        </div>
+      </div>
+    );
+  };
+
   if (minimized) {
     return (
       <aside
@@ -203,8 +497,18 @@ export const FlightStripRack: React.FC = () => {
     );
   }
 
+  const kanbanRoles: Array<{ role: ControllerRole; label: string; short: string; colorCls: string }> = [
+    { role: "GROUND", label: "GROUND", short: "GND", colorCls: "text-[var(--atc-amber)]" },
+    { role: "TOWER", label: "TOWER", short: "TWR", colorCls: "text-[var(--atc-cyan)]" },
+    { role: "DEPARTURE", label: "DEP / APP", short: "DEP", colorCls: "text-[var(--atc-emerald)]" },
+  ];
+
   return (
-    <aside className="w-72 xl:w-[300px] bg-[var(--atc-panel)] border-r border-[var(--atc-border)] flex flex-col shrink-0 min-h-0 p-2.5 gap-2.5 overflow-hidden transition-colors">
+    <aside
+      className={`${
+        viewMode === "KANBAN" ? "w-[560px] xl:w-[640px]" : "w-72 xl:w-[300px]"
+      } bg-[var(--atc-panel)] border-r border-[var(--atc-border)] flex flex-col shrink-0 min-h-0 p-2.5 gap-2.5 overflow-hidden transition-all duration-200`}
+    >
       {/* Flight Strips Accordion */}
       <Accordion
         title="Flight Strips"
@@ -216,281 +520,218 @@ export const FlightStripRack: React.FC = () => {
           </span>
         }
         rightSlot={
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              togglePanelMinimized("left");
-            }}
-            aria-label="Minimize Flight Strips panel"
-            title="Minimize Flight Strips panel"
-            className="p-0.5 rounded text-[var(--atc-muted)] hover:text-[var(--atc-text)] hover:bg-[var(--atc-border)]/40 transition-colors"
-          >
-            <PanelLeftClose className="w-3.5 h-3.5" />
-          </button>
+          <div className="flex items-center gap-1.5">
+            {/* View Mode Toggle: LIST vs KANBAN */}
+            <div className="flex items-center gap-0.5 p-0.5 rounded border border-[var(--atc-border)] bg-[var(--atc-surface-alt)]">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleViewMode("LIST");
+                }}
+                aria-label="List view"
+                title="List View"
+                className={`p-1 rounded text-[10px] font-mono flex items-center gap-1 transition-colors ${
+                  viewMode === "LIST"
+                    ? "bg-[var(--atc-surface)] text-[var(--atc-text)] font-bold shadow-xs border border-[var(--atc-border)]"
+                    : "text-[var(--atc-muted)] hover:text-[var(--atc-text)]"
+                }`}
+              >
+                <List className="w-3 h-3" />
+                <span className="hidden sm:inline">LIST</span>
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleViewMode("KANBAN");
+                }}
+                aria-label="Kanban view"
+                title="Kanban View: Drag-and-drop handoffs between Ground, Tower, and Departure"
+                className={`p-1 rounded text-[10px] font-mono flex items-center gap-1 transition-colors ${
+                  viewMode === "KANBAN"
+                    ? "bg-[var(--atc-surface)] text-[var(--atc-text)] font-bold shadow-xs border border-[var(--atc-border)]"
+                    : "text-[var(--atc-muted)] hover:text-[var(--atc-text)]"
+                }`}
+              >
+                <LayoutGrid className="w-3 h-3" />
+                <span className="hidden sm:inline">KANBAN</span>
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                togglePanelMinimized("left");
+              }}
+              aria-label="Minimize Flight Strips panel"
+              title="Minimize Flight Strips panel"
+              className="p-0.5 rounded text-[var(--atc-muted)] hover:text-[var(--atc-text)] hover:bg-[var(--atc-border)]/40 transition-colors"
+            >
+              <PanelLeftClose className="w-3.5 h-3.5" />
+            </button>
+          </div>
         }
         className="flex-1 min-h-0 flex flex-col"
         bodyClassName="flex-1 min-h-0 flex flex-col p-2 gap-2"
       >
-        {/* Minimal Filter Pills */}
-        <div className="grid grid-cols-4 gap-1 p-1 rounded-md bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] text-[10px] font-mono shrink-0">
-          {(
-            [
-              { id: "ALL", label: "ALL" },
-              {
-                id: "STATION",
-                label:
-                  sim.config.activePlayerStation === "ALL"
-                    ? "AUTO"
-                    : pendingHandoffsByAcId.size > 0
-                    ? `MY (${sim.config.activePlayerStation[0]}) · ${pendingHandoffsByAcId.size} REQ`
-                    : `MY (${sim.config.activePlayerStation[0]})`,
-              },
-              { id: "DEP", label: "DEP" },
-              { id: "ARR", label: "ARR" },
-            ] as const
-          ).map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setFilter(tab.id)}
-              className={`py-1 rounded transition-all ${
-                filter === tab.id
-                  ? "bg-[var(--atc-surface)] text-[var(--atc-text)] font-bold shadow-sm border border-[var(--atc-border)]"
-                  : "text-[var(--atc-muted)] hover:text-[var(--atc-text)]"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Scrollable Strips */}
-        <div className="flex-1 overflow-y-auto space-y-1.5 pr-0.5 min-h-0">
-          {sim.selectedAircraftId &&
-            sim.aircraft[sim.selectedAircraftId] &&
-            !strips.some((s) => s.id === sim.selectedAircraftId) &&
-            (() => {
-              const pinned = sim.aircraft[sim.selectedAircraftId!];
-              if (
-                !pinned ||
-                pinned.state === "COMPLETED_ARRIVAL" ||
-                pinned.state === "COMPLETED_DEPARTURE"
-              ) {
-                return null;
-              }
-              return (
+        {viewMode === "LIST" ? (
+          <>
+            {/* Minimal Filter Pills */}
+            <div className="grid grid-cols-4 gap-1 p-1 rounded-md bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] text-[10px] font-mono shrink-0">
+              {(
+                [
+                  { id: "ALL", label: "ALL" },
+                  {
+                    id: "STATION",
+                    label:
+                      sim.config.activePlayerStation === "ALL"
+                        ? "AUTO"
+                        : pendingHandoffsByAcId.size > 0
+                        ? `MY (${sim.config.activePlayerStation[0]}) · ${pendingHandoffsByAcId.size} REQ`
+                        : `MY (${sim.config.activePlayerStation[0]})`,
+                  },
+                  { id: "DEP", label: "DEP" },
+                  { id: "ARR", label: "ARR" },
+                ] as const
+              ).map((tab) => (
                 <button
-                  type="button"
-                  onClick={() => focusAircraft(pinned.id)}
-                  className="w-full text-left rounded-lg border-2 border-[var(--atc-accent)] border-l-4 bg-[var(--atc-accent-soft)] p-2 shadow-sm flex items-center justify-between gap-2"
+                  key={tab.id}
+                  onClick={() => setFilter(tab.id)}
+                  className={`py-1 rounded transition-all cursor-pointer ${
+                    filter === tab.id
+                      ? "bg-[var(--atc-surface)] text-[var(--atc-text)] font-bold shadow-sm border border-[var(--atc-border)]"
+                      : "text-[var(--atc-muted)] hover:text-[var(--atc-text)]"
+                  }`}
                 >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <Crosshair className="w-3 h-3 text-[var(--atc-accent-text)] shrink-0" />
-                      <span className="font-mono font-extrabold text-xs text-[var(--atc-text)]">
-                        {pinned.callsign}
-                      </span>
-                      <span className="px-1.5 py-0.2 rounded bg-[var(--atc-accent)] text-slate-950 text-[8px] font-mono font-extrabold">
-                        SELECTED
-                      </span>
-                    </div>
-                    <div className="text-[10px] font-mono text-[var(--atc-muted)] truncate mt-0.5">
-                      On {pinned.controller} • {getAircraftPhaseLabel(pinned)}
-                    </div>
-                  </div>
-                  <span className="text-[9px] font-mono text-[var(--atc-accent-text)] font-bold shrink-0">
-                    FOCUS
-                  </span>
+                  {tab.label}
                 </button>
-              );
-            })()}
-
-          {strips.length === 0 && (
-            <div className="text-xs text-[var(--atc-muted)] font-mono text-center py-8">
-              No active flights in this filter.
+              ))}
             </div>
-          )}
 
-          {strips.map((ac) => {
-            const isSelected = sim.selectedAircraftId === ac.id;
-            const activeClrs = getActiveClearances(ac);
-            const pendingRb = getPendingReadbackClearances(ac);
-            const movable = canAircraftMove(ac, sim);
-            const ctrl = controllerBadge(ac.controller, ac.flightKind);
-            const hasReq = Boolean(ac.pendingRequest && !ac.pendingRequest.resolved);
-            const isCalling = activeCallerIds.has(ac.id);
-            const ho = pendingHandoffsByAcId.get(ac.id);
-
-            return (
-              <button
-                key={ac.id}
-                ref={(el) => {
-                  stripRefs.current[ac.id] = el;
-                }}
-                onClick={() => focusAircraft(ac.id)}
-                className={`w-full text-left rounded-lg border p-2 transition-all ${
-                  isSelected
-                    ? "bg-[var(--atc-accent-soft)] border-[var(--atc-accent)] border-l-4 ring-2 ring-[var(--atc-accent)]/60 shadow-md"
-                    : isCalling
-                    ? "bg-[var(--atc-amber-bg)]/45 border-[var(--atc-amber-border)] shadow-sm"
-                    : "bg-[var(--atc-surface)]/80 border-[var(--atc-border)] hover:border-[var(--atc-border-strong)]"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-1">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    {ac.flightKind === "DEPARTURE" ? (
-                      <PlaneTakeoff className="w-3.5 h-3.5 text-[var(--atc-cyan)] shrink-0" />
-                    ) : (
-                      <PlaneLanding className="w-3.5 h-3.5 text-[var(--atc-emerald)] shrink-0" />
-                    )}
-                    <span className="font-mono font-bold text-xs text-[var(--atc-text)] truncate">
-                      {ac.callsign}
-                    </span>
-                    <span className="text-[10px] font-mono text-[var(--atc-muted)] shrink-0">
-                      {ac.aircraftType}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-1 shrink-0">
-                    {isSelected && (
-                      <span
-                        title="Currently selected aircraft (focused on scope)"
-                        className="px-1.5 py-0.5 rounded bg-[var(--atc-accent)] text-slate-950 text-[8px] font-mono font-extrabold inline-flex items-center gap-0.5 shadow-sm"
-                      >
-                        <Crosshair className="w-2.5 h-2.5" />
-                        SEL
-                      </span>
-                    )}
-                    {deadlockedIds.has(ac.id) && (
-                      <span
-                        title="Blocked on taxiway — click strip and use 1-click Auto-Resolve / Push Back / Wait & Pass"
-                        className="px-1.5 py-0.5 rounded bg-[var(--atc-red-bg)] text-[var(--atc-red)] border border-[var(--atc-red-border)] text-[8px] font-mono font-extrabold animate-pulse"
-                      >
-                        BLK
-                      </span>
-                    )}
-                    {isCalling && (
-                      <span
-                        title="Actively transmitting voice on radio"
-                        className="px-1.5 py-0.5 rounded bg-[var(--atc-amber-bg)] text-[var(--atc-amber)] border border-[var(--atc-amber-border)] text-[9px] font-mono font-bold inline-flex items-center gap-1"
-                      >
-                        <span className="inline-flex items-end gap-[1.5px] h-2.5" aria-hidden="true">
-                          <span className="w-[2px] h-1.5 bg-amber-500 rounded-full animate-pulse" />
-                          <span className="w-[2px] h-2.5 bg-amber-500 rounded-full animate-bounce" />
-                          <span className="w-[2px] h-1 bg-amber-500 rounded-full animate-pulse" />
-                        </span>
-                        TX
-                      </span>
-                    )}
-                    {ac.commStatus === "RADIO_FAILURE" && (
-                      <span className="px-1 py-0.5 rounded bg-[var(--atc-amber-bg)] text-[var(--atc-amber)] border border-[var(--atc-amber-border)] text-[9px] font-mono font-bold">
-                        7600
-                      </span>
-                    )}
-                    {ac.operationMode === "EMERGENCY_OPERATION" && (
-                      <span className="px-1 py-0.5 rounded bg-[var(--atc-red-bg)] text-[var(--atc-red)] border border-[var(--atc-red-border)] text-[9px] font-mono font-bold animate-pulse">
-                        7700
-                      </span>
-                    )}
-                    <span
-                      className={`px-1.5 py-0.5 rounded border text-[9px] font-mono font-bold ${ctrl.cls}`}
-                    >
-                      {ctrl.letter}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="mt-1 flex items-center justify-between text-[10px] font-mono text-[var(--atc-muted)]">
-                  <span className="truncate">
-                    {ac.flightKind === "DEPARTURE"
-                      ? `${ac.gateId ?? "RAMP"} → ${ac.targetRunway}`
-                      : `${ac.assignedApproach ?? ac.targetRunway} → ${ac.gateId ?? "GATE"}`}
-                  </span>
-                  <span
-                    className="shrink-0"
-                    title={formatAltitudeReadout(ac, sim.airport.elevationFt).detailed}
-                  >
-                    {formatAltitudeReadout(ac, sim.airport.elevationFt).strip} • {Math.round(ac.speed)}kt
-                  </span>
-                </div>
-
-                <div className="mt-1.5 flex items-center justify-between gap-1">
-                  <span
-                    className={`px-1.5 py-0.5 rounded border text-[9px] font-mono font-semibold truncate ${stateBadgeStyle(ac)}`}
-                    title={ac.state}
-                  >
-                    {getAircraftPhaseLabel(ac)}
-                  </span>
-
-                  <span
-                    className={`text-[9px] font-mono px-1.5 py-0.5 rounded shrink-0 ${
-                      movable
-                        ? "text-[var(--atc-emerald)] bg-[var(--atc-emerald-bg)] font-semibold"
-                        : "text-[var(--atc-muted)] bg-[var(--atc-surface-alt)]"
-                    }`}
-                  >
-                    {movable ? "CLEARED" : "HOLD"}
-                  </span>
-                </div>
-
-                {(() => {
-                  const ho = pendingHandoffsByAcId.get(ac.id);
-                  if (!ho) return null;
+            {/* Scrollable Strips */}
+            <div className="flex-1 overflow-y-auto space-y-1.5 pr-0.5 min-h-0">
+              {sim.selectedAircraftId &&
+                sim.aircraft[sim.selectedAircraftId] &&
+                !strips.some((s) => s.id === sim.selectedAircraftId) &&
+                (() => {
+                  const pinned = sim.aircraft[sim.selectedAircraftId!];
+                  if (
+                    !pinned ||
+                    pinned.state === "COMPLETED_ARRIVAL" ||
+                    pinned.state === "COMPLETED_DEPARTURE"
+                  ) {
+                    return null;
+                  }
                   return (
-                    <div className="mt-1.5 px-2 py-1 rounded bg-[var(--atc-cyan-bg)] border border-[var(--atc-cyan-border)] flex items-center justify-between gap-1 text-[10px] font-mono shadow-sm">
-                      <span className="font-bold text-[var(--atc-cyan)] flex items-center gap-1 truncate">
-                        <Radio className="w-3 h-3 animate-spin-slow shrink-0" />
-                        INCOMING HANDOFF
+                    <button
+                      type="button"
+                      onClick={() => focusAircraft(pinned.id)}
+                      className="w-full text-left rounded-lg border-2 border-[var(--atc-accent)] border-l-4 bg-[var(--atc-accent-soft)] p-2 shadow-sm flex items-center justify-between gap-2"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <Crosshair className="w-3 h-3 text-[var(--atc-accent-text)] shrink-0" />
+                          <span className="font-mono font-extrabold text-xs text-[var(--atc-text)]">
+                            {pinned.callsign}
+                          </span>
+                          <span className="px-1.5 py-0.2 rounded bg-[var(--atc-accent)] text-slate-950 text-[8px] font-mono font-extrabold">
+                            SELECTED
+                          </span>
+                        </div>
+                        <div className="text-[10px] font-mono text-[var(--atc-muted)] truncate mt-0.5">
+                          On {pinned.controller} • {getAircraftPhaseLabel(pinned)}
+                        </div>
+                      </div>
+                      <span className="text-[9px] font-mono text-[var(--atc-accent-text)] font-bold shrink-0">
+                        FOCUS
                       </span>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          respondToHandoff(ho.id, true);
-                        }}
-                        className="px-2 py-0.5 rounded border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:bg-[var(--atc-surface)] hover:border-[var(--atc-emerald)] text-[var(--atc-emerald)] font-mono font-bold text-[9px] transition-colors shrink-0 flex items-center gap-1"
-                      >
-                        <CheckCircle className="w-2.5 h-2.5" />
-                        ACCEPT
-                      </button>
-                    </div>
+                    </button>
                   );
                 })()}
 
-                {ac.hasReadbackError && (
-                  <div className="mt-1.5 px-1.5 py-0.5 rounded bg-[var(--atc-red-bg)] border border-[var(--atc-red-border)] text-[10px] font-mono text-[var(--atc-red)] flex items-center gap-1">
-                    <ShieldAlert className="w-3 h-3 shrink-0" />
-                    READBACK ERROR
-                  </div>
-                )}
+              {strips.length === 0 && (
+                <div className="text-xs text-[var(--atc-muted)] font-mono text-center py-8">
+                  No active flights in this filter.
+                </div>
+              )}
 
-                {!ac.hasReadbackError && pendingRb.length > 0 && (
-                  <div className="mt-1.5 px-1.5 py-0.5 rounded bg-[var(--atc-cyan-bg)] border border-[var(--atc-cyan-border)] text-[10px] font-mono text-[var(--atc-cyan)] flex items-center gap-1">
-                    <Radio className="w-3 h-3 shrink-0 animate-pulse" />
-                    Readback: {pendingRb[pendingRb.length - 1].type}
-                  </div>
-                )}
+              {strips.map((ac) => renderFullStrip(ac, false))}
+            </div>
+          </>
+        ) : (
+          /* Kanban Board View with Drag & Drop Handoffs */
+          <div className="flex-1 flex gap-2 min-h-0 overflow-x-auto pb-1">
+            {kanbanRoles.map(({ role, label, colorCls }) => {
+              const isPlayerStation =
+                sim.config.activePlayerStation === "ALL" || sim.config.activePlayerStation === role;
+              const isAuto = sim.config.stationControl[role] === "AUTONOMOUS";
+              const colFlights = activeFlights.filter((ac) => ac.controller === role);
+              const isOver = dragOverRole === role;
 
-                {!ac.hasReadbackError && pendingRb.length === 0 && hasReq && ac.pendingRequest && !ho && (
-                  <div className="mt-1.5 px-1.5 py-0.5 rounded bg-[var(--atc-amber-bg)] border border-[var(--atc-amber-border)] text-[10px] font-mono text-[var(--atc-amber)] flex items-center gap-1 truncate font-medium">
-                    <AlertTriangle className="w-3 h-3 shrink-0" />
-                    REQ: {ac.pendingRequest.type}
-                    {ac.holdingAtRunway ? ` (${ac.holdingAtRunway})` : ""}
+              return (
+                <div
+                  key={role}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                  }}
+                  onDragEnter={() => setDragOverRole(role)}
+                  onDragLeave={(e) => {
+                    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+                    setDragOverRole(null);
+                  }}
+                  onDrop={(e) => handleDropToColumn(e, role)}
+                  className={`flex-1 flex flex-col min-w-[170px] rounded-lg border p-1.5 transition-all min-h-0 ${
+                    isOver
+                      ? "border-[var(--atc-accent)] bg-[var(--atc-accent-soft)]/50 ring-2 ring-[var(--atc-accent)]/50"
+                      : isPlayerStation
+                      ? "border-[var(--atc-border-strong)] bg-[var(--atc-surface-alt)]/40"
+                      : "border-[var(--atc-border)] bg-[var(--atc-surface-alt)]/20"
+                  }`}
+                >
+                  {/* Column Header */}
+                  <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-[var(--atc-border)] shrink-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[11px] font-mono font-bold ${colorCls}`}>
+                        {label}
+                      </span>
+                      <span
+                        className={`text-[8px] font-mono px-1 rounded border ${
+                          isPlayerStation
+                            ? "bg-[var(--atc-accent)] text-slate-950 font-bold border-transparent"
+                            : "bg-[var(--atc-surface)] text-[var(--atc-muted)] border-[var(--atc-border)]"
+                        }`}
+                      >
+                        {isPlayerStation ? "YOU" : isAuto ? "AI" : "AUTO"}
+                      </span>
+                    </div>
+                    <span className="px-1.5 py-0.2 rounded bg-[var(--atc-surface)] border border-[var(--atc-border)] text-[9px] font-mono font-bold text-[var(--atc-text)]">
+                      {colFlights.length}
+                    </span>
                   </div>
-                )}
 
-                {activeClrs.length > 0 && !hasReq && !ac.hasReadbackError && (
-                  <div className="mt-1 text-[10px] font-mono text-[var(--atc-muted)] truncate">
-                    Active: {activeClrs[activeClrs.length - 1].type}
+                  {/* Column Cards */}
+                  <div className="flex-1 overflow-y-auto space-y-1.5 pr-0.5 min-h-0">
+                    {colFlights.length === 0 ? (
+                      <div className="text-[10px] text-[var(--atc-muted)] font-mono text-center py-6 italic opacity-60">
+                        Drop aircraft here to transfer
+                      </div>
+                    ) : (
+                      colFlights.map((ac) =>
+                        isPlayerStation ? renderFullStrip(ac, true) : renderMinimalStrip(ac)
+                      )
+                    )}
                   </div>
-                )}
-              </button>
-            );
-          })}
-        </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </Accordion>
 
-      {/* Collapsible Station Workload Accordion (matching reference minimal summary) */}
+      {/* Collapsible Station Workload Accordion */}
       <Accordion
         title="Station Workload"
         icon={<Activity className="w-3.5 h-3.5" />}
