@@ -529,49 +529,7 @@ export const ClearanceControlDeck: React.FC = () => {
 
       {/* Scrollable Organized Accordion Stack */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2.5 min-h-0">
-        {/* Urgent Contextual Banners (Always visible when triggered) */}
-        {ac.pendingRequest && !ac.pendingRequest.resolved && (
-          <div className="rounded-lg border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] p-2.5">
-            <div className="text-[10px] font-mono font-bold text-[var(--atc-amber)] uppercase flex items-center gap-1">
-              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-              REQUEST ({ac.pendingRequest.type})
-            </div>
-            <div className="text-xs text-[var(--atc-text)] mt-1 italic">
-              "{ac.pendingRequest.message}"
-            </div>
-            {ac.pendingRequest.type === "RUNWAY_CHANGE" && ac.pendingRequest.runway && (
-              <div className="mt-2 flex gap-2">
-                <button
-                  disabled={nordoLocked || isCommandDisabled("REQUEST_APPROVE")}
-                  onClick={() =>
-                    handleIssueClearance({
-                      aircraftId: ac.id,
-                      controller: ac.controller,
-                      type: ac.flightKind === "ARRIVAL" ? "APPROACH" : "TAXI",
-                      parameters: { runway: ac.pendingRequest!.runway },
-                    }, "REQUEST_APPROVE")
-                  }
-                  className="flex-1 py-1.5 px-2 rounded-md border border-[var(--atc-green-border)] bg-[var(--atc-green-bg)] hover:opacity-90 text-[var(--atc-green)] font-mono text-xs font-semibold disabled:opacity-35 disabled:cursor-not-allowed"
-                >
-                  APPROVE RWY {ac.pendingRequest.runway}
-                </button>
-                <button
-                  disabled={nordoLocked || isCommandDisabled("REQUEST_UNABLE")}
-                  onClick={() =>
-                    handleIssueClearance({
-                      aircraftId: ac.id,
-                      controller: ac.controller,
-                      type: "UNABLE",
-                    }, "REQUEST_UNABLE")
-                  }
-                  className="py-1.5 px-3 rounded-md border border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] hover:opacity-90 text-[var(--atc-red)] font-mono text-xs font-semibold disabled:opacity-35 disabled:cursor-not-allowed"
-                >
-                  UNABLE
-                </button>
-              </div>
-            )}
-          </div>
-        )}
+        {/* Urgent Readback Error Banner (Only shown when error exists) */}
 
         {ac.hasReadbackError && errClearance && (
           <div className="rounded-lg border border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] p-2.5 space-y-2">
@@ -858,49 +816,18 @@ export const ClearanceControlDeck: React.FC = () => {
             </div>
           </div>
         ) : roleLocked && ac.controller !== lockedRole ? (
-          pendingForSelectedAc ? (
-            <div className="rounded-lg border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] p-3 space-y-2.5 shadow-sm font-mono">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-[var(--atc-emerald)] flex items-center gap-1.5">
-                  <Radio className="w-3.5 h-3.5 animate-spin-slow shrink-0" />
-                  Incoming Handoff ({controllerCallsign(pendingForSelectedAc.fromController, sim.airport, ac.flightKind)} → {lockedRole})
-                </span>
-                <span className="text-[10px] text-[var(--atc-muted)]">
-                  {controllerFrequency(lockedRole, sim.airport, ac.flightKind)} MHz
-                </span>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => respondToHandoff(pendingForSelectedAc.id, true)}
-                  className="flex-1 py-2 px-3 rounded-md border border-[var(--atc-emerald-border)] bg-[var(--atc-surface)] hover:bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-sm transition-colors"
-                >
-                  <CheckCircle className="w-4 h-4 shrink-0" />
-                  ACCEPT HANDOFF
-                </button>
-                <button
-                  type="button"
-                  onClick={() => respondToHandoff(pendingForSelectedAc.id, false)}
-                  className="py-2 px-3 rounded-md border border-[var(--atc-red-border)] bg-[var(--atc-surface)] hover:bg-[var(--atc-red-bg)] text-[var(--atc-red)] font-semibold text-xs cursor-pointer transition-colors"
-                >
-                  REJECT
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] p-2.5 font-mono text-[11px] flex items-center justify-between gap-2 shadow-sm">
-              <span className="truncate text-[var(--atc-text-secondary)]">
-                On frequency: <strong className="text-[var(--atc-text)]">{controllerCallsign(ac.controller, sim.airport, ac.flightKind)}</strong>
-              </span>
-              <button
-                type="button"
-                onClick={() => claimAircraftStation(ac.id, lockedRole)}
-                className="py-1 px-2.5 rounded border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:bg-[var(--atc-surface)] text-[var(--atc-cyan)] font-bold text-[10px] shrink-0 transition-colors"
-              >
-                TAKE OVER
-              </button>
-            </div>
-          )
+          <div className="rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] p-2.5 font-mono text-[11px] flex items-center justify-between gap-2 shadow-sm">
+            <span className="truncate text-[var(--atc-text-secondary)]">
+              On frequency: <strong className="text-[var(--atc-text)]">{controllerCallsign(ac.controller, sim.airport, ac.flightKind)}</strong>
+            </span>
+            <button
+              type="button"
+              onClick={() => claimAircraftStation(ac.id, lockedRole)}
+              className="py-1 px-2.5 rounded border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:bg-[var(--atc-surface)] text-[var(--atc-cyan)] font-bold text-[10px] shrink-0 transition-colors"
+            >
+              TAKE OVER
+            </button>
+          </div>
         ) : (
         /* ACCORDION 1: Clearances & Actions (Open by default) */
         <Accordion

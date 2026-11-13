@@ -22,7 +22,7 @@ import { getAglAltitudeFt, isSurfaceAircraft } from "../utils/telemetry.ts";
 import { AircraftPhotoFrame } from "./AircraftPhotoFrame.tsx";
 
 type ScopeBasemapLayer = "hybrid" | "satellite" | "chart";
-export type RunwayLightsMode = "SHOW" | "PLANE_ONLY";
+export type RunwayLightsMode = "SHOW" | "PLANE_ONLY" | "OFF";
 
 interface ScreenPt {
   x: number;
@@ -346,14 +346,15 @@ export const RadarScopeCanvas: React.FC = () => {
   const [runwayLightsMode, setRunwayLightsMode] = useState<RunwayLightsMode>(() => {
     try {
       const saved = localStorage.getItem("aircommand_rwy_lights_mode");
-      if (saved === "SHOW" || saved === "PLANE_ONLY") return saved;
+      if (saved === "SHOW" || saved === "PLANE_ONLY" || saved === "OFF") return saved;
     } catch {}
     return "SHOW";
   });
 
   const toggleRunwayLightsMode = () => {
     setRunwayLightsMode((prev) => {
-      const next = prev === "SHOW" ? "PLANE_ONLY" : "SHOW";
+      const next: RunwayLightsMode =
+        prev === "SHOW" ? "PLANE_ONLY" : prev === "PLANE_ONLY" ? "OFF" : "SHOW";
       try {
         localStorage.setItem("aircommand_rwy_lights_mode", next);
       } catch {}
@@ -786,17 +787,31 @@ export const RadarScopeCanvas: React.FC = () => {
           onClick={toggleRunwayLightsMode}
           title={
             runwayLightsMode === "SHOW"
-              ? "Runway Lights: SHOW ALL (All runway edge, centerline, threshold, and approach lights illuminated across the airfield). Click to switch to Plane Only."
-              : "Runway Lights: PLANE ONLY (Runway lights hidden from empty runways; only illuminated when a plane is actively using, approaching, or assigned to that runway). Click to show all."
+              ? "Runway Lights: SHOW ALL. Click to switch to PLANE ONLY."
+              : runwayLightsMode === "PLANE_ONLY"
+              ? "Runway Lights: PLANE ONLY (active runways with planes). Click to switch to COMPLETE OFF."
+              : "Runway Lights: COMPLETE OFF. Click to switch to SHOW ALL."
           }
-          className={`px-2.5 py-1 rounded-md border text-[10px] font-mono font-bold flex items-center gap-1.5 shadow-[var(--atc-shadow)] backdrop-blur-sm transition-colors ${
+          className={`px-2.5 py-1 rounded-md border text-[10px] font-mono font-bold flex items-center gap-1.5 shadow-[var(--atc-shadow)] backdrop-blur-sm transition-colors cursor-pointer ${
             runwayLightsMode === "SHOW"
               ? "bg-amber-500/20 border-amber-400 text-amber-400"
+              : runwayLightsMode === "PLANE_ONLY"
+              ? "bg-sky-500/20 border-sky-400 text-sky-400"
               : "bg-[var(--atc-surface)]/95 border-[var(--atc-border)] text-[var(--atc-muted)] hover:text-[var(--atc-text)]"
           }`}
         >
-          <Sparkles className={`w-3 h-3 ${runwayLightsMode === "SHOW" ? "text-amber-400" : ""}`} />
-          <span>RWY LIGHTS: {runwayLightsMode === "SHOW" ? "SHOW" : "PLANE ONLY"}</span>
+          <Sparkles
+            className={`w-3 h-3 ${
+              runwayLightsMode === "SHOW"
+                ? "text-amber-400"
+                : runwayLightsMode === "PLANE_ONLY"
+                ? "text-sky-400"
+                : "text-[var(--atc-muted)]"
+            }`}
+          />
+          <span>
+            RWY LIGHTS: {runwayLightsMode === "SHOW" ? "SHOW" : runwayLightsMode === "PLANE_ONLY" ? "PLANE ONLY" : "OFF"}
+          </span>
         </button>
       </div>
 

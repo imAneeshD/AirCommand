@@ -171,14 +171,14 @@ export function inspectGroundConflict(
   if (!isSurfaceContender(ac, elev)) return null;
   if (ac.state === "PUSHING_BACK" || ac.state === "PUSHBACK_APPROVED") return null;
 
-  let blocker = findBlockingTrafficAhead(ac, sim, 0.068);
+  let blocker = findBlockingTrafficAhead(ac, sim, 0.08);
   if (!blocker && ac.yieldToAircraftId) {
     const candidate = sim.aircraft[ac.yieldToAircraftId];
     if (isSurfaceContender(candidate, elev)) {
       blocker = candidate;
     }
   }
-  if (!blocker && ac.state === "HOLD_POSITION") {
+  if (!blocker && (ac.state === "HOLD_POSITION" || ac.speed <= 3.5)) {
     // Also detect close lateral / nose congestion within 0.065 NM when paused on taxiway
     let nearest: Aircraft | null = null;
     let nearestDist = 0.065;
@@ -195,12 +195,41 @@ export function inspectGroundConflict(
     blocker = nearest;
   }
 
+  // Check if blocker is on a completely different taxiway corridor / branch
+  if (blocker && ac.assignedRouteNodeIds && ac.assignedRouteNodeIds.length >= 2) {
+    const startIdx = Math.max(0, ac.routeStepIndex);
+    const endIdx = Math.min(ac.assignedRouteNodeIds.length - 1, startIdx + 2);
+    let minPerpDist = Infinity;
+    for (let i = startIdx; i < endIdx; i++) {
+      const n1 = sim.airport.nodes[ac.assignedRouteNodeIds[i]];
+      const n2 = sim.airport.nodes[ac.assignedRouteNodeIds[i + 1]];
+      if (!n1 || !n2) continue;
+      const segDx = n2.x - n1.x;
+      const segDy = n2.y - n1.y;
+      const segLenSq = segDx * segDx + segDy * segDy;
+      if (segLenSq > 0.0000001) {
+        const t = Math.max(0, Math.min(1, ((blocker.x - n1.x) * segDx + (blocker.y - n1.y) * segDy) / segLenSq));
+        const projX = n1.x + t * segDx;
+        const projY = n1.y + t * segDy;
+        const perp = Math.hypot(blocker.x - projX, blocker.y - projY);
+        if (perp < minPerpDist) {
+          minPerpDist = perp;
+        }
+      }
+    }
+    // Standard taxiway corridor width is ~20m (0.0108 NM).
+    // If perpendicular distance > 0.018 NM (~33m), it's on an adjacent parallel taxiway or different branch!
+    if (minPerpDist > 0.018) {
+      blocker = null;
+    }
+  }
+
   const isYieldWaiting = Boolean(ac.state === "HOLD_POSITION" && ac.yieldToAircraftId);
   const isTaxiingStopped =
     (ac.state === "TAXIING" || ac.state === "CROSSING_RUNWAY") &&
     Boolean(blocker) &&
     ac.speed <= 3.5;
-  const isManualHoldWithBlocker = ac.state === "HOLD_POSITION" && Boolean(blocker);
+  const isManualHoldWithBlocker = (ac.state === "HOLD_POSITION" || ac.state === "HOLDING_SHORT") && Boolean(blocker);
 
   if (!isYieldWaiting && !isTaxiingStopped && !isManualHoldWithBlocker) {
     return null;
@@ -209,7 +238,7 @@ export function inspectGroundConflict(
   const distToBlocker = blocker ? Math.hypot(blocker.x - ac.x, blocker.y - ac.y) : Infinity;
 
   // Strict User Rules:
-  // 1. Only show traffic in taxiway when planes are coming in opposite direction to one another.
+  // 1. Only show traffic in taxiway when planes are coming in opposite direction to one another, or stopped/deadlocked ahead.
   // 2. Distance must be less than 100-200m (<= 0.108 NM).
   // 3. Do NOT show traffic if planes are moving in same direction with proper distance.
   const DIST_200M_NM = 200 / 1852; // ~0.108 NM
@@ -224,39 +253,23 @@ export function inspectGroundConflict(
     : 0;
 
   if (blocker && headingDiff < 70 && !isYieldWaiting) {
-    // Same direction traffic with proper distance or normal holding
-    if (distToBlocker >= PROPER_FOLLOWING_DIST_NM || ac.state === "HOLD_POSITION") {
+    // Same direction traffic with proper distance or normal moving flow
+    if (distToBlocker >= PROPER_FOLLOWING_DIST_NM || blocker.speed > 3.5) {
       return null;
     }
   }
 
-  let isComingStraightAtUs = false;
-  if (blocker && distToBlocker <= DIST_200M_NM) {
-    const dx = blocker.x - ac.x;
-    const dy = blocker.y - ac.y;
-    const radOther = (blocker.heading * Math.PI) / 180;
-    const otherFwdX = Math.sin(radOther);
-    const otherFwdY = Math.cos(radOther);
-    const dotOtherTowardsUs = ((-dx * otherFwdX) + (-dy * otherFwdY)) / distToBlocker;
-    isComingStraightAtUs = (dotOtherTowardsUs > 0.45 && headingDiff > 90) || headingDiff > 120;
-  }
-
-  // If not yield-waiting and not coming in opposite direction, suppress alert
-  if (!isYieldWaiting && blocker && !isComingStraightAtUs && headingDiff <= 90) {
-    return null;
-  }
-
+  const isOpposingOrIntersecting = headingDiff >= 70;
   const mutualDeadlock = Boolean(
     blocker &&
       distToBlocker <= 0.054 &&
-      isComingStraightAtUs &&
-      (findBlockingTrafficAhead(blocker, sim, 0.054)?.id === ac.id || distToBlocker <= 0.045)
+      (isOpposingOrIntersecting || (blocker.speed <= 3.5 && ac.speed <= 3.5))
   );
 
   const bypassRoute = findBestBypassRoute(sim, ac, blocker);
   const stepBack = findBestStepBackNode(sim.airport, ac, blocker);
 
-  const isBlocked = Boolean(blocker && distToBlocker <= 0.054 && (isComingStraightAtUs || mutualDeadlock));
+  const isBlocked = Boolean(blocker && distToBlocker <= DIST_200M_NM);
 
   const recommendedAction: GroundConflictReport["recommendedAction"] =
     bypassRoute && bypassRoute.conflictLevel === "CLEAR"
