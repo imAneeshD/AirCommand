@@ -801,13 +801,60 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
   }
 
   if (gateIds.length === 0) {
-    const defaultGates = ["T1", "T2", "T3", "T4", "T5", "T6"];
+    const defaultGates = ["T1", "T2", "T3", "T4", "CARGO_1", "CARGO_2", "MIL_1", "MIL_2"];
     defaultGates.forEach((gid, i) => {
-      const along = primaryRwy.lengthNm * (0.28 + i * 0.085);
-      const gp = runwayPoint(primaryRwy, along, 0.34);
-      const pb = runwayPoint(primaryRwy, along, 0.272);
+      const isSouth = gid.startsWith("CARGO") || gid.startsWith("MIL");
+      const along = primaryRwy.lengthNm * (0.22 + (i % 4) * 0.14);
+      const offset = isSouth ? -0.34 : 0.34;
+      const pbOffset = isSouth ? -0.272 : 0.272;
+      const gp = runwayPoint(primaryRwy, along, offset);
+      const pb = runwayPoint(primaryRwy, along, pbOffset);
       attachGateToNearestTaxiway(gid, gp.x, gp.y, pb.x, pb.y);
+      const gn = nodes[`GATE_${gid}`];
+      if (gn) {
+        gn.label = gid.startsWith("CARGO")
+          ? `CARGO ${gid.slice(-1)}`
+          : gid.startsWith("MIL")
+          ? `MIL ${gid.slice(-1)}`
+          : i < 2
+          ? `${gid} (HEAVY)`
+          : gid;
+      }
     });
+  } else {
+    // Ensure every real-world airfield has designated Cargo and Military/Remote stands
+    const hasCargoGate = gateIds.some(
+      (g) => g.toUpperCase().includes("CARGO") || g.toUpperCase().startsWith("C")
+    );
+    const hasMilGate = gateIds.some(
+      (g) =>
+        g.toUpperCase().includes("MIL") ||
+        g.toUpperCase().startsWith("M") ||
+        g.toUpperCase().includes("REMOTE") ||
+        g.toUpperCase().startsWith("R")
+    );
+
+    if (!hasCargoGate && taxiwayNodes.length > 0) {
+      ["CARGO_1", "CARGO_2"].forEach((cid, i) => {
+        const along = primaryRwy.lengthNm * (0.2 + i * 0.1);
+        const gp = runwayPoint(primaryRwy, along, -0.34);
+        const pb = runwayPoint(primaryRwy, along, -0.27);
+        attachGateToNearestTaxiway(cid, gp.x, gp.y, pb.x, pb.y);
+        const gn = nodes[`GATE_${cid}`];
+        if (gn) gn.label = `CARGO ${i + 1}`;
+      });
+    }
+
+    if (!hasMilGate && taxiwayNodes.length > 0) {
+      ["MIL_1", "MIL_2"].forEach((mid, i) => {
+        const along = primaryRwy.lengthNm * (0.7 + i * 0.1);
+        const gp = runwayPoint(primaryRwy, along, -0.34);
+        const pb = runwayPoint(primaryRwy, along, -0.27);
+        attachGateToNearestTaxiway(mid, gp.x, gp.y, pb.x, pb.y);
+        const gn = nodes[`GATE_${mid}`];
+        if (gn) gn.label = `MIL ${i + 1}`;
+      });
+    }
   }
 
   // 4. Localizer IAFs, Navaids, Arrival & Departure Fixes

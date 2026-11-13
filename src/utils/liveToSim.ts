@@ -6,6 +6,7 @@ import {
   createArrivalAircraft,
   createBaseSimulation,
   createDepartureAircraft,
+  findBestGateForAircraft,
   spawnRandomTraffic,
 } from "../engine/simulation.ts";
 import { updateAircraftStates } from "../engine/aircraftEngine.ts";
@@ -44,8 +45,15 @@ const CARRIER_DIRECTORY: Record<string, { airline: string; spoken: string; defau
   AAL: { airline: "American Airlines", spoken: "American", defaultType: "B738" },
   SWA: { airline: "Southwest Airlines", spoken: "Southwest", defaultType: "B737" },
   JBU: { airline: "JetBlue Airways", spoken: "JetBlue", defaultType: "A320" },
-  FDX: { airline: "FedEx Express", spoken: "FedEx", defaultType: "MD11" },
-  UPS: { airline: "UPS Airlines", spoken: "UPS", defaultType: "B763" },
+  FDX: { airline: "FedEx Express", spoken: "FedEx", defaultType: "B77F" },
+  UPS: { airline: "UPS Airlines", spoken: "UPS", defaultType: "B748" },
+  DHL: { airline: "DHL Aviation", spoken: "DHL", defaultType: "B77F" },
+  BZP: { airline: "Blue Dart Aviation", spoken: "Blue Dart", defaultType: "B763" },
+  ATN: { airline: "Amazon Prime Air", spoken: "Prime Air", defaultType: "B763" },
+  IAF: { airline: "Indian Air Force", spoken: "Indian Air Force", defaultType: "C17" },
+  RCH: { airline: "USAF Air Mobility Command", spoken: "Reach", defaultType: "C17" },
+  RRR: { airline: "Royal Air Force", spoken: "Ascot", defaultType: "A400" },
+  NAVY: { airline: "Indian Naval Air Arm", spoken: "Navy", defaultType: "P8" },
   SVA: { airline: "Saudia", spoken: "Saudia", defaultType: "B772" },
   MEA: { airline: "Middle East Airlines", spoken: "Cedar Jet", defaultType: "A321" },
   JZR: { airline: "Jazeera Airways", spoken: "Jazeera", defaultType: "A320" },
@@ -115,8 +123,23 @@ function pickClosestUnusedGate(
   xNm: number,
   yNm: number,
   usedGates: Set<string>,
-  fallbackIndex: number
+  fallbackIndex: number,
+  acInfo?: {
+    aircraftType?: string;
+    callsign?: string;
+    isCargo?: boolean;
+    isMilitary?: boolean;
+    wakeCategory?: "MEDIUM" | "HEAVY" | "SUPER";
+  }
 ): string {
+  if (acInfo) {
+    const matched = findBestGateForAircraft(layout, acInfo, usedGates);
+    if (matched) {
+      usedGates.add(matched);
+      return matched;
+    }
+  }
+
   const candidates = layout.gateIds.filter((g) => !usedGates.has(g));
   const pool = candidates.length > 0 ? candidates : layout.gateIds;
   let best = pool[fallbackIndex % pool.length];

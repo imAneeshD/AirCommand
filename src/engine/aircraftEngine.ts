@@ -541,6 +541,7 @@ export function updateAircraftStates(state: SimulationState): void {
           ac.stateEnteredAt = state.time;
         } else if (along > rwy.lengthNm * 0.45 && ac.altitude > elev + 18) {
           // Missed approach protection if crossing past touchdown zone still high on glideslope
+          ac.minimumsGoAroundTriggered = true;
           ac.state = "GO_AROUND";
           ac.stateEnteredAt = state.time;
           ac.verticalSpeed = 1800; // Immediate positive climb rate

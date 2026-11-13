@@ -230,6 +230,15 @@ export function canAircraftExecuteAction(
     }
 
     case "GO_AROUND": {
+      if (
+        aircraft.state === "GO_AROUND" ||
+        aircraft.state === "MISSED_APPROACH"
+      ) {
+        return {
+          allowed: true,
+          reason: "Aircraft actively executing go-around / missed approach procedure.",
+        };
+      }
       const gaClr = getLatestActiveClearance(aircraft, "GO_AROUND");
       if (gaClr) {
         return {
@@ -522,7 +531,8 @@ export function canAircraftMove(
 
     case "GO_AROUND":
     case "MISSED_APPROACH":
-      return canAircraftExecuteAction(aircraft, "GO_AROUND", simulation).allowed;
+      // Airborne missed approach / go-around aircraft must continuously fly and climb out safely
+      return true;
   }
 }
 

@@ -165,7 +165,9 @@ export interface Aircraft {
   spokenCallsign: string;
   airline: string;
   aircraftType: string;
-  wakeCategory: "MEDIUM" | "HEAVY";
+  wakeCategory: "MEDIUM" | "HEAVY" | "SUPER";
+  isCargo?: boolean;
+  isMilitary?: boolean;
   flightKind: FlightKind;
   squawk: string;
   originIcao?: string;

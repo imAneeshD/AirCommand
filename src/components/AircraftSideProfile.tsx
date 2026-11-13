@@ -26,7 +26,12 @@ function getFuselageDimensions(style: AirframeStyle): {
 } {
   switch (style) {
     case "WIDE_BOEING":
+    case "WIDE_AIRBUS":
       return { noseX: 318, tailX: 74, topY: 46, botY: 73, tailTopY: 18 };
+    case "MILITARY_TRANSPORT":
+      return { noseX: 315, tailX: 72, topY: 45, botY: 74, tailTopY: 16 };
+    case "TURBOPROP_REGIONAL":
+      return { noseX: 304, tailX: 84, topY: 51, botY: 69, tailTopY: 24 };
     case "TRIJET_MD11":
       return { noseX: 316, tailX: 72, topY: 47, botY: 73, tailTopY: 18 };
     case "NARROW_AIRBUS":
