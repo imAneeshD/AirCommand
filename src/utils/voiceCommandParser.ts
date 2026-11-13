@@ -454,21 +454,24 @@ export function parseAtcVoiceCommand(rawTranscript: string, sim: SimulationState
     }
   }
 
-  // Handoff: "contact tower" / "contact ground" / "contact departure"
-  const handoffMatch = normalized.match(/\bcontact\b.*\b(ground|tower|departure|approach)\b/);
+  // Handoff: "contact tower" / "contact ground" / "contact departure" / "contact approach" / "contact center" / "contact area"
+  const handoffMatch = normalized.match(/\bcontact\b.*\b(ground|tower|departure|approach|center|area|control)\b/);
   if (handoffMatch) {
-    const roleMap: Record<string, ControllerRole> = {
+    const roleMap: Record<string, ControllerRole | "ACC"> = {
       ground: "GROUND",
       tower: "TOWER",
       departure: "DEPARTURE",
       approach: "DEPARTURE",
+      center: "ACC",
+      area: "ACC",
+      control: "ACC",
     };
     const targetController = roleMap[handoffMatch[1]];
     if (targetController) {
       return makeResult(
         "HANDOFF",
         { targetController },
-        `${ac.callsign}: Contact ${targetController}`
+        `${ac.callsign}: Contact ${targetController === "ACC" ? "Area Control" : targetController}`
       );
     }
   }

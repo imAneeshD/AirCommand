@@ -1,0 +1,191 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createScenarioSimulation, stepSimulation } from "../src/engine/simulation.ts";
+import { submitClearanceDecision, controllerCallsign, controllerFrequency } from "../src/engine/decisionEngine.ts";
+import { getAglAltitudeFt, isSurfaceAircraft } from "../src/utils/telemetry.ts";
+
+function stepUntilCondition(sim: ReturnType<typeof createScenarioSimulation>, pred: () => boolean, maxSteps = 30): void {
+  for (let i = 0; i < maxSteps; i++) {
+    if (pred()) return;
+    stepSimulation(sim, 0.5);
+  }
+}
+
+test("Arrival Traffic Flow: Area -> Approach ('Asteria Approach') -> Tower -> Ground -> Gate", () => {
+  const sim = createScenarioSimulation("LIGHT");
+  const arrival = Object.values(sim.aircraft).find((a) => a.flightKind === "ARRIVAL")!;
+  assert.ok(arrival, "Must have an arrival aircraft in LIGHT scenario");
+
+  // Inbound arrival begins under Approach Control
+  arrival.controller = "DEPARTURE";
+
+  // Approach control station check
+  const appCallsign = controllerCallsign("DEPARTURE", sim.airport, arrival.flightKind);
+  assert.match(appCallsign, /Approach$/, `Arrival radar controller must be 'Approach', got ${appCallsign}`);
+  const appFreq = controllerFrequency("DEPARTURE", sim.airport, arrival.flightKind);
+  assert.ok(appFreq.length > 0, "Must return valid approach frequency");
+
+  // Approach hands off arrival to Tower
+  const hoTwr = submitClearanceDecision(
+    sim,
+    {
+      aircraftId: arrival.id,
+      controller: "DEPARTURE",
+      type: "HANDOFF",
+      parameters: { targetController: "TOWER", bypassPending: true },
+    },
+    "PLAYER"
+  );
+  assert.ok(hoTwr.ok, `Handoff to Tower failed: ${hoTwr.reason}`);
+  stepUntilCondition(sim, () => arrival.controller === "TOWER");
+  assert.equal(arrival.controller, "TOWER");
+  assert.equal(arrival.pendingRequest?.type, "LANDING");
+  assert.match(arrival.pendingRequest?.message ?? "", /Tower/);
+
+  // Tower clears to land
+  const clrLand = submitClearanceDecision(
+    sim,
+    {
+      aircraftId: arrival.id,
+      controller: "TOWER",
+      type: "LAND",
+      parameters: { runway: arrival.targetRunway },
+    },
+    "PLAYER"
+  );
+  assert.ok(clrLand.ok, `Landing clearance failed: ${clrLand.reason}`);
+
+  // Once landed on surface, handoff to Ground
+  arrival.state = "VACATING_RUNWAY";
+  arrival.altitude = sim.airport.elevationFt;
+  const hoGnd = submitClearanceDecision(
+    sim,
+    {
+      aircraftId: arrival.id,
+      controller: "TOWER",
+      type: "HANDOFF",
+      parameters: { targetController: "GROUND", bypassPending: true },
+    },
+    "PLAYER"
+  );
+  assert.ok(hoGnd.ok, `Handoff to Ground failed: ${hoGnd.reason}`);
+  stepUntilCondition(sim, () => arrival.controller === "GROUND");
+  assert.equal(arrival.controller, "GROUND");
+  assert.equal(arrival.pendingRequest?.type, "GATE_TAXI");
+  assert.match(arrival.pendingRequest?.message ?? "", /Ground/);
+});
+
+test("Go-Around Flow: Tower issues GO_AROUND -> climbs safely above field elevation -> hands off to Approach ('Asteria Approach')", () => {
+  const sim = createScenarioSimulation("LIGHT");
+  const elev = sim.airport.elevationFt;
+  const expectedGaAlt = Math.round((elev + 3000) / 500) * 500;
+
+  const arrival = Object.values(sim.aircraft).find((a) => a.flightKind === "ARRIVAL")!;
+  arrival.controller = "TOWER";
+  arrival.state = "FINAL";
+  arrival.altitude = elev + 280;
+
+  const gaRes = submitClearanceDecision(
+    sim,
+    {
+      aircraftId: arrival.id,
+      controller: "TOWER",
+      type: "GO_AROUND",
+      parameters: { altitude: expectedGaAlt, heading: 90 },
+    },
+    "PLAYER"
+  );
+  assert.ok(gaRes.ok, `GO_AROUND failed: ${gaRes.reason}`);
+  assert.equal(arrival.state, "GO_AROUND");
+  assert.equal(arrival.assignedAltitude, expectedGaAlt);
+  assert.ok(arrival.verticalSpeed >= 1200, "Must immediately pitch up with positive climb rate");
+
+  // Must not be tagged as surface or 0ft AGL
+  assert.equal(isSurfaceAircraft(arrival, elev), false);
+  const agl = getAglAltitudeFt(arrival, elev);
+  assert.ok(agl > 100, `AGL altitude during go-around must be positive, got ${agl}`);
+
+  // Advance simulation to climb
+  stepSimulation(sim, 3.0);
+  assert.ok(arrival.altitude > elev + 300, "Aircraft must climb above field elevation");
+
+  // Handoff to Approach Control (NOT Departure!)
+  const hoApp = submitClearanceDecision(
+    sim,
+    {
+      aircraftId: arrival.id,
+      controller: "TOWER",
+      type: "HANDOFF",
+      parameters: { targetController: "DEPARTURE", bypassPending: true },
+    },
+    "PLAYER"
+  );
+  assert.ok(hoApp.ok, `Handoff to Approach failed: ${hoApp.reason}`);
+  stepUntilCondition(sim, () => arrival.controller === "DEPARTURE");
+  assert.equal(arrival.controller, "DEPARTURE");
+  assert.equal(arrival.pendingRequest?.type, "APPROACH_VECTORS");
+  assert.match(arrival.pendingRequest?.message ?? "", /Approach/);
+  assert.match(arrival.pendingRequest?.message ?? "", /missed approach/);
+});
+
+test("Departure Traffic Flow: Ground -> Tower -> Departure ('Asteria Departure') -> Area / Center (ACC)", () => {
+  const sim = createScenarioSimulation("LIGHT");
+  const dep = Object.values(sim.aircraft).find((a) => a.flightKind === "DEPARTURE")!;
+  assert.ok(dep, "Must have a departure aircraft");
+
+  // Callsign verification for departure
+  const depCallsign = controllerCallsign("DEPARTURE", sim.airport, dep.flightKind);
+  assert.match(depCallsign, /Departure$/, `Departure controller must be 'Departure', got ${depCallsign}`);
+
+  // Ground hands off to Tower at runway
+  dep.controller = "GROUND";
+  dep.state = "HOLDING_SHORT";
+  const hoTwr = submitClearanceDecision(
+    sim,
+    {
+      aircraftId: dep.id,
+      controller: "GROUND",
+      type: "HANDOFF",
+      parameters: { targetController: "TOWER", bypassPending: true },
+    },
+    "PLAYER"
+  );
+  assert.ok(hoTwr.ok, `Handoff to Tower failed: ${hoTwr.reason}`);
+  stepUntilCondition(sim, () => dep.controller === "TOWER");
+  assert.equal(dep.controller, "TOWER");
+  assert.equal(dep.pendingRequest?.type, "TAKEOFF");
+
+  // Airborne climb -> Tower hands off to Departure
+  dep.state = "CLIMB";
+  dep.altitude = sim.airport.elevationFt + 1200;
+  const hoDep = submitClearanceDecision(
+    sim,
+    {
+      aircraftId: dep.id,
+      controller: "TOWER",
+      type: "HANDOFF",
+      parameters: { targetController: "DEPARTURE", bypassPending: true },
+    },
+    "PLAYER"
+  );
+  assert.ok(hoDep.ok, `Handoff to Departure failed: ${hoDep.reason}`);
+  stepUntilCondition(sim, () => dep.controller === "DEPARTURE");
+  assert.equal(dep.controller, "DEPARTURE");
+  assert.equal(dep.pendingRequest?.type, "CLIMB_HIGHER");
+
+  // Departure hands off to Area Control (ACC)
+  const hoAcc = submitClearanceDecision(
+    sim,
+    {
+      aircraftId: dep.id,
+      controller: "DEPARTURE",
+      type: "HANDOFF",
+      parameters: { targetController: "ACC", bypassPending: true },
+    },
+    "PLAYER"
+  );
+  assert.ok(hoAcc.ok, `Handoff to Area Control failed: ${hoAcc.reason}`);
+  stepUntilCondition(sim, () => dep.state === "COMPLETED_DEPARTURE");
+  assert.equal(dep.state, "COMPLETED_DEPARTURE");
+  assert.ok(sim.metrics.departuresCompleted >= 1);
+});

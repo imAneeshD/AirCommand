@@ -125,7 +125,8 @@ export function updateAircraftStates(state: SimulationState): void {
   const baseAlt = Math.round(elev / 500) * 500;
   const gndName = controllerCallsign("GROUND", state.airport);
   const twrName = controllerCallsign("TOWER", state.airport);
-  const depName = controllerCallsign("DEPARTURE", state.airport);
+  const depName = controllerCallsign("DEPARTURE", state.airport, "DEPARTURE");
+  const appName = controllerCallsign("DEPARTURE", state.airport, "ARRIVAL");
 
   for (const id of state.aircraftOrder) {
     const ac = state.aircraft[id];
@@ -395,7 +396,7 @@ export function updateAircraftStates(state: SimulationState): void {
             ac,
             "APPROACH_CLEARANCE",
             ac.controller,
-            `${controllerCallsign(ac.controller, state.airport)}, ${ac.spokenCallsign}, approaching initial fix, request ILS runway ${runwaySpokenName(ac.targetRunway)}.`,
+            `${controllerCallsign(ac.controller, state.airport, ac.flightKind)}, ${ac.spokenCallsign}, approaching initial fix, request ILS runway ${runwaySpokenName(ac.targetRunway)}.`,
             ac.targetRunway
           );
         }
@@ -629,12 +630,16 @@ export function updateAircraftStates(state: SimulationState): void {
 
       case "MISSED_APPROACH": {
         if (ac.commStatus === "NORMAL" && ac.altitude >= elev + 1600) {
+          const recipientName =
+            ac.controller === "DEPARTURE"
+              ? appName
+              : controllerCallsign(ac.controller, state.airport, ac.flightKind);
           issuePilotRequestIfNeeded(
             state,
             ac,
             "APPROACH_VECTORS",
             ac.controller,
-            `${controllerCallsign(ac.controller, state.airport)}, ${ac.spokenCallsign}, climbing on missed approach, request vectors back to ILS runway ${runwaySpokenName(ac.targetRunway)}.`,
+            `${recipientName}, ${ac.spokenCallsign}, climbing on missed approach, request vectors back to ILS runway ${runwaySpokenName(ac.targetRunway)}.`,
             ac.targetRunway
           );
         }

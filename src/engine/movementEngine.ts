@@ -641,18 +641,20 @@ function integrateAirborneFlight(
       smoothSetVs(0);
     }
   } else {
+    const defaultAirAlt = Math.round((elev + 3000) / 500) * 500;
     const targetAlt =
       ac.assignedAltitude !== null &&
+      ac.assignedAltitude >= elev + 400 &&
       (ac.state === "GO_AROUND" ||
         ac.state === "MISSED_APPROACH" ||
         canAircraftExecuteAction(ac, "CHANGE_ALTITUDE", state).allowed)
         ? ac.assignedAltitude
         : ac.state === "GO_AROUND" || ac.state === "MISSED_APPROACH"
-        ? Math.round(elev / 500) * 500 + 3000
+        ? defaultAirAlt
         : ac.state === "CLIMB"
-        ? Math.round(elev / 500) * 500 + 3000
+        ? defaultAirAlt
         : ac.state === "APPROACH"
-        ? Math.round(elev / 500) * 500 + 3000
+        ? defaultAirAlt
         : null;
 
     if (targetAlt !== null) {
