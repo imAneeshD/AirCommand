@@ -33,7 +33,10 @@ import type {
   SessionPerformanceReport,
   SimulationState,
 } from "../types/atc.ts";
-import { convertLiveTracksToSimulation } from "../utils/liveToSim.ts";
+import {
+  convertLiveTracksToSimulation,
+  mergeLiveTracksIntoSimulation,
+} from "../utils/liveToSim.ts";
 import { offlineDb } from "../utils/offlineDb.ts";
 import { convertAirportBundleToLayout } from "../utils/osmToAirport.ts";
 import { radioAudio } from "../utils/radioAudio.ts";
@@ -158,6 +161,7 @@ interface AtcStore {
     providedTracks?: LiveAdsbTrack[],
     initialRole?: PlayerRoleMode
   ) => Promise<{ ok: boolean; count: number; error?: string }>;
+  pollLiveTraffic: () => Promise<void>;
   saveEditedAirportGeometry: (
     icao: string,
     geojson: AirportGeoJsonCollection
@@ -760,7 +764,49 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
     saveSelectedAirportId(activeRecord.icao);
     saveSelectedScenarioId(scen);
 
-    const fresh = createScenarioSimulation(scen, initialRole, activeRecord.icao, customLayout);
+    // Fetch live ADS-B traffic snapshot if online
+    let liveTracks: LiveAdsbTrack[] = [];
+    let fetchedAtMs = Date.now();
+    if (get().isOnline) {
+      try {
+        const snap = await apiClient.getLiveAdsb(activeRecord.lat, activeRecord.lon, 1.8);
+        if (snap.tracks && snap.tracks.length > 0) {
+          liveTracks = snap.tracks;
+          fetchedAtMs = snap.fetchedAtMs;
+        }
+      } catch {
+        // Fall back gracefully to scenario if network/cooldown occurs
+      }
+    }
+
+    let fresh: SimulationState;
+    let feedbackText: string;
+
+    if (liveTracks.length > 0) {
+      const conv = convertLiveTracksToSimulation({
+        airportRecord: activeRecord,
+        customLayout,
+        tracks: liveTracks,
+        activeStation: initialRole,
+        scenarioId: scen,
+        fetchedAtMs,
+      });
+      fresh = conv.sim;
+      fresh.liveSnapshotMeta = {
+        ...fresh.liveSnapshotMeta!,
+        liveSyncEnabled: true,
+        lastSyncStatus: "SYNCED",
+        lastLivePollAtMs: fetchedAtMs,
+        activeLiveCount: conv.convertedCount,
+      };
+      feedbackText = `Loaded ${activeRecord.name} (${activeRecord.icao}) with ${conv.convertedCount} real live ADS-B flights (${conv.groundCount} ground, ${conv.airborneCount} airborne).`;
+    } else {
+      fresh = createScenarioSimulation(scen, initialRole, activeRecord.icao, customLayout);
+      feedbackText = `Loaded ${activeRecord.name} (${activeRecord.icao}) [${activeRecord.dataQuality}] in ${
+        initialRole === "ALL" ? "ALL AUTO" : initialRole
+      } mode.`;
+    }
+
     set({
       appMode: "SIMULATION",
       showAirportSelector: false,
@@ -777,12 +823,34 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
       hoverPreviewRoute: null,
       lastFeedback: {
         ok: true,
-        text: `Loaded ${activeRecord.name} (${activeRecord.icao}) [${activeRecord.dataQuality}] in ${
-          initialRole === "ALL" ? "ALL AUTO" : initialRole
-        } mode.`,
+        text: feedbackText,
         at: 0,
       },
     });
+  },
+
+  pollLiveTraffic: async () => {
+    const { sim, selectedAirportRecord, isOnline, roomState, appMode } = get();
+    if (!isOnline || appMode !== "SIMULATION" || (roomState && roomState.status === "ACTIVE")) return;
+    const targetRecord = selectedAirportRecord || offlineDb.getBundledFallbackAirport(sim.airport.icao);
+    if (!targetRecord || !targetRecord.lat || !targetRecord.lon) return;
+
+    try {
+      const snap = await apiClient.getLiveAdsb(targetRecord.lat, targetRecord.lon, 1.8);
+      if (!snap || !snap.tracks) return;
+
+      const { addedCount, updatedCount } = mergeLiveTracksIntoSimulation({
+        sim,
+        airportRecord: targetRecord,
+        tracks: snap.tracks,
+      });
+
+      if (addedCount > 0 || updatedCount > 0) {
+        set((s) => ({ tickVersion: s.tickVersion + 1 }));
+      }
+    } catch {
+      // OpenSky cooldown or transient network error
+    }
   },
 
   launchSimulationFromLiveTraffic: async (record, providedTracks, initialRole = "ALL") => {
@@ -1198,6 +1266,15 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
     saveSelectedAirportId(airportId);
     const scen = scenarioId ?? sim.scenarioId;
     saveSelectedScenarioId(scen);
+
+    if (!LEGACY_IDS.has(airportId)) {
+      const bundled = offlineDb.getBundledFallbackAirport(airportId);
+      if (bundled) {
+        void get().launchRealAirportSimulation(bundled, scen, initialRole);
+        return;
+      }
+    }
+
     const fresh = createScenarioSimulation(scen, initialRole, airportId);
     set({
       appMode: "SIMULATION",

@@ -20,7 +20,7 @@ import {
 } from "../src/engine/simulation.ts";
 import type { AircraftState, AirportGeoJsonCollection, LiveAdsbTrack } from "../src/types/atc.ts";
 import { formatUserDateTime, formatWallClockAtSimOffset } from "../src/utils/dateTime.ts";
-import { convertLiveTracksToSimulation } from "../src/utils/liveToSim.ts";
+import { convertLiveTracksToSimulation, mergeLiveTracksIntoSimulation } from "../src/utils/liveToSim.ts";
 import { hitTestAircraftOrLabel, placeAircraftLabels } from "../src/utils/labelLayout.ts";
 import { getActiveCallingSignals } from "../src/utils/radioSignals.ts";
 import { computePilotSpeechProfile } from "../src/utils/radioAudio.ts";
@@ -541,6 +541,71 @@ test("convertLiveTracksToSimulation maps real ADS-B flights onto real airport in
       stepSimulation(converted.sim, 0.5);
     }
     assert.ok(converted.sim.time >= 19.5);
+    assert.equal(converted.sim.liveSnapshotMeta?.liveSyncEnabled, true);
+
+    // Live sync "in between as well": updates telemetry and spawns new incoming live tracks
+    const updatedTracks: LiveAdsbTrack[] = [
+      {
+        readonly: true,
+        icao24: "800a03",
+        callsign: "UAE804",
+        registration: "A6-EPF",
+        aircraftType: "B77W",
+        originCountry: "United Arab Emirates",
+        lat: 28.59, // Moved closer to runway
+        lon: 77.15,
+        baroAltFt: 4200, // Descended from 6500 to 4200
+        geoAltFt: 4300,
+        groundSpeedKts: 190, // Slowed down from 215 to 190
+        trackDeg: 280, // Turned onto approach
+        verticalRateFpm: -800,
+        onGround: false,
+        lastUpdatedMs: Date.now(),
+        stale: false,
+        trail: [],
+      },
+      // Brand new flight entering terminal airspace
+      {
+        readonly: true,
+        icao24: "800a04",
+        callsign: "BAW143",
+        registration: "G-ZBKA",
+        aircraftType: "B788",
+        originCountry: "United Kingdom",
+        lat: 28.75,
+        lon: 77.30,
+        baroAltFt: 9500,
+        geoAltFt: 9600,
+        groundSpeedKts: 260,
+        trackDeg: 210,
+        verticalRateFpm: -650,
+        onGround: false,
+        lastUpdatedMs: Date.now(),
+        stale: false,
+        trail: [],
+      },
+    ];
+
+    const mergeResult = mergeLiveTracksIntoSimulation({
+      sim: converted.sim,
+      airportRecord: vidp,
+      tracks: updatedTracks,
+    });
+
+    assert.equal(mergeResult.updatedCount, 1);
+    assert.equal(mergeResult.addedCount, 1);
+    assert.equal(converted.sim.aircraft["UAE804"].altitude, 4200);
+    assert.equal(converted.sim.aircraft["UAE804"].speed, 190);
+    assert.equal(converted.sim.aircraft["UAE804"].heading, 280);
+
+    const newArrival = converted.sim.aircraft["BAW143"];
+    assert.ok(newArrival);
+    assert.equal(newArrival.callsign, "BAW143");
+    assert.equal(newArrival.airline, "British Airways");
+    assert.equal(newArrival.altitude, 9500);
+    assert.equal(newArrival.speed, 260);
+    assert.equal(newArrival.heading, 210);
+    assert.equal(converted.sim.liveSnapshotMeta?.activeLiveCount, 4);
   } finally {
     env.cleanup();
   }

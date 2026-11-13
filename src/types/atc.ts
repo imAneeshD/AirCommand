@@ -671,6 +671,10 @@ export interface SimulationState {
     fetchedAtMs: number;
     convertedCount: number;
     source: string;
+    lastLivePollAtMs?: number;
+    activeLiveCount?: number;
+    liveSyncEnabled?: boolean;
+    lastSyncStatus?: "SYNCED" | "FETCHING" | "RATE_LIMITED" | "OFFLINE";
   };
 }
 

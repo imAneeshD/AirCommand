@@ -117,10 +117,17 @@ export const TopBar: React.FC = () => {
               </span>
               {sim.liveSnapshotMeta && (
                 <span
-                  title={`Imported ${sim.liveSnapshotMeta.convertedCount} real ADS-B flights (${sim.liveSnapshotMeta.source})`}
-                  className="px-1.5 py-0.2 rounded bg-[var(--atc-emerald-bg)] border border-[var(--atc-emerald-border)] text-[var(--atc-emerald)] text-[9px] font-bold"
+                  title={`Live ADS-B Traffic: ${sim.liveSnapshotMeta.activeLiveCount ?? sim.liveSnapshotMeta.convertedCount} real flights (${sim.liveSnapshotMeta.source})`}
+                  className={`px-1.5 py-0.2 rounded text-[9px] font-bold flex items-center gap-1 ${
+                    sim.liveSnapshotMeta.liveSyncEnabled
+                      ? "bg-sky-500/20 border border-sky-400/80 text-sky-400"
+                      : "bg-[var(--atc-emerald-bg)] border border-[var(--atc-emerald-border)] text-[var(--atc-emerald)]"
+                  }`}
                 >
-                  LIVE SEEDED ({sim.liveSnapshotMeta.convertedCount})
+                  {sim.liveSnapshotMeta.liveSyncEnabled && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
+                  )}
+                  LIVE ADS-B ({sim.liveSnapshotMeta.activeLiveCount ?? sim.liveSnapshotMeta.convertedCount})
                 </span>
               )}
             </div>
