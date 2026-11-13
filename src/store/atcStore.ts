@@ -625,7 +625,9 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
   sim: createScenarioSimulation(
     initialSavedScenario,
     "ALL",
-    initialSavedAirport ?? "KAST"
+    initialSavedAirport ?? "KAST",
+    undefined,
+    { randomize: true }
   ),
   tickVersion: 0,
   lastSpokenRadioId: null,
@@ -765,7 +767,8 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
         get().sim.scenarioId,
         get().sim.config.activePlayerStation,
         icao,
-        customLayout
+        customLayout,
+        { randomize: true }
       );
       set({
         sim: fresh,
@@ -829,7 +832,7 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
       };
       feedbackText = `Loaded ${activeRecord.name} (${activeRecord.icao}) with ${conv.convertedCount} real live ADS-B flights (${conv.groundCount} ground, ${conv.airborneCount} airborne).`;
     } else {
-      fresh = createScenarioSimulation(scen, initialRole, activeRecord.icao, customLayout);
+      fresh = createScenarioSimulation(scen, initialRole, activeRecord.icao, customLayout, { randomize: true });
       feedbackText = `Loaded ${activeRecord.name} (${activeRecord.icao}) [${activeRecord.dataQuality}] in ${
         initialRole === "ALL" ? "ALL AUTO" : initialRole
       } mode.`;
@@ -896,7 +899,7 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
       const station = sim.config.activePlayerStation;
 
       // Pure simulated scenario traffic with automatic traffic generation
-      const freshSim = createScenarioSimulation(scen, station, sim.airport.icao, customLayout);
+      const freshSim = createScenarioSimulation(scen, station, sim.airport.icao, customLayout, { randomize: true });
       freshSim.liveSnapshotMeta = {
         airportIcao: sim.airport.icao,
         fetchedAtMs: Date.now(),
@@ -1098,7 +1101,8 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
           get().sim.scenarioId,
           get().sim.config.activePlayerStation,
           icao,
-          customLayout
+          customLayout,
+          { randomize: true }
         );
         set({
           sim: fresh,
@@ -1548,7 +1552,8 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
       scenarioId,
       sim.config.activePlayerStation,
       sim.airport.id,
-      customLayout
+      customLayout,
+      { randomize: true }
     );
     set({
       sim: fresh,
@@ -1579,7 +1584,7 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
       }
     }
 
-    const fresh = createScenarioSimulation(scen, initialRole, airportId);
+    const fresh = createScenarioSimulation(scen, initialRole, airportId, undefined, { randomize: true });
     set({
       appMode: "SIMULATION",
       sim: fresh,
