@@ -6,6 +6,7 @@ import {
   headingDiffDeg,
 } from "../data/asteriaAirport.ts";
 import type { Aircraft, ControllerRole, RunwayId, SimulationState } from "../types/atc.ts";
+import { computeDepAppGuidance } from "../utils/depAppGuidance.ts";
 import { buildResolutionCommands, inspectGroundConflict } from "../utils/groundConflict.ts";
 import { getPendingReadbackClearances } from "./clearanceEngine.ts";
 import { submitClearanceDecision } from "./decisionEngine.ts";
@@ -52,7 +53,8 @@ function isFinalApproachCrowded(
     if (
       other.state !== "FINAL" &&
       other.state !== "CLEARED_TO_LAND" &&
-      other.state !== "LANDING"
+      other.state !== "LANDING" &&
+      other.state !== "APPROACH"
     ) {
       continue;
     }
@@ -122,6 +124,24 @@ function isRampClearForPushback(
   return true;
 }
 
+function findNearestGroundNodeId(
+  airport: SimulationState["airport"],
+  x: number,
+  y: number
+): string | undefined {
+  let bestId: string | undefined;
+  let bestDist = Infinity;
+  for (const node of Object.values(airport.nodes)) {
+    if (node.kind === "RUNWAY_ENTRY" || node.kind === "RUNWAY_CROSSING" || node.runwayId) continue;
+    const d = Math.hypot(node.x - x, node.y - y);
+    if (d < bestDist) {
+      bestDist = d;
+      bestId = node.id;
+    }
+  }
+  return bestDist < 0.45 ? bestId : undefined;
+}
+
 function runAutonomousGround(state: SimulationState): void {
   for (const id of state.aircraftOrder) {
     const ac = state.aircraft[id];
@@ -156,8 +176,8 @@ function runAutonomousGround(state: SimulationState): void {
             state,
             ac.id
           );
-          const chosen = routes.find((r) => r.conflictLevel !== "BLOCKED");
-          if (chosen) {
+          const chosen = routes.find((r) => r.conflictLevel !== "BLOCKED") ?? routes[0];
+          if (chosen && chosen.conflictLevel !== "BLOCKED") {
             submitClearanceDecision(
               state,
               {
@@ -231,7 +251,11 @@ function runAutonomousGround(state: SimulationState): void {
             "AUTONOMOUS"
           );
         }
-      } else if (ac.holdingShortReason === "DEPARTURE_RUNWAY") {
+      } else if (
+        ac.holdingShortReason === "DEPARTURE_RUNWAY" ||
+        ac.holdingAtRunway === ac.targetRunway ||
+        (!ac.holdingShortReason && ac.flightKind === "DEPARTURE")
+      ) {
         submitClearanceDecision(
           state,
           {
@@ -242,33 +266,82 @@ function runAutonomousGround(state: SimulationState): void {
           },
           "AUTONOMOUS"
         );
-      } else if (ac.flightKind === "ARRIVAL" && ac.gateId && ac.currentNodeId) {
-        const routes = getSuggestedTaxiRoutes(
-          state.airport,
-          ac.currentNodeId,
-          ac.targetRunway,
-          ac.gateId,
-          true,
-          state,
-          ac.id
-        );
-        const chosen = routes.find((r) => r.conflictLevel !== "BLOCKED");
-        if (chosen) {
-          submitClearanceDecision(
+      } else if (ac.flightKind === "ARRIVAL") {
+        const startNodeId = ac.currentNodeId ?? findNearestGroundNodeId(state.airport, ac.x, ac.y);
+        const destGate = ac.gateId ?? state.airport.gateIds[0];
+        if (startNodeId && destGate) {
+          const routes = getSuggestedTaxiRoutes(
+            state.airport,
+            startNodeId,
+            ac.targetRunway,
+            destGate,
+            true,
             state,
-            {
-              aircraftId: ac.id,
-              controller: "GROUND",
-              type: "TAXI",
-              parameters: {
-                runway: ac.targetRunway,
-                routeTaxiways: chosen.taxiways,
-                destinationNodeId: chosen.destinationNodeId,
-                routeNodeIds: chosen.nodeIds,
-              },
-            },
-            "AUTONOMOUS"
+            ac.id
           );
+          const chosen = routes.find((r) => r.conflictLevel !== "BLOCKED") ?? routes[0];
+          if (chosen) {
+            submitClearanceDecision(
+              state,
+              {
+                aircraftId: ac.id,
+                controller: "GROUND",
+                type: "TAXI",
+                parameters: {
+                  runway: ac.targetRunway,
+                  routeTaxiways: chosen.taxiways,
+                  destinationNodeId: chosen.destinationNodeId,
+                  routeNodeIds: chosen.nodeIds,
+                },
+              },
+              "AUTONOMOUS"
+            );
+          }
+        }
+      }
+      continue;
+    }
+
+    // Resume taxiing for aircraft in HOLD_POSITION once traffic is clear
+    if (ac.state === "HOLD_POSITION") {
+      if (ac.yieldToAircraftId) {
+        const blocker = state.aircraft[ac.yieldToAircraftId];
+        const blockerNear = blocker && Math.hypot(blocker.x - ac.x, blocker.y - ac.y) < 0.12;
+        if (blockerNear) continue;
+        ac.yieldToAircraftId = undefined;
+      }
+      if (state.time - ac.stateEnteredAt >= 3.0) {
+        const startNodeId = ac.currentNodeId ?? findNearestGroundNodeId(state.airport, ac.x, ac.y);
+        if (startNodeId) {
+          const isArr = ac.flightKind === "ARRIVAL";
+          const destGate = ac.gateId ?? state.airport.gateIds[0];
+          const routes = getSuggestedTaxiRoutes(
+            state.airport,
+            startNodeId,
+            ac.targetRunway,
+            destGate,
+            isArr,
+            state,
+            ac.id
+          );
+          const chosen = routes.find((r) => r.conflictLevel !== "BLOCKED") ?? routes[0];
+          if (chosen && chosen.conflictLevel !== "BLOCKED") {
+            submitClearanceDecision(
+              state,
+              {
+                aircraftId: ac.id,
+                controller: "GROUND",
+                type: "TAXI",
+                parameters: {
+                  runway: ac.targetRunway,
+                  routeTaxiways: chosen.taxiways,
+                  destinationNodeId: chosen.destinationNodeId,
+                  routeNodeIds: chosen.nodeIds,
+                },
+              },
+              "AUTONOMOUS"
+            );
+          }
         }
       }
       continue;
@@ -276,7 +349,7 @@ function runAutonomousGround(state: SimulationState): void {
 
     // Automatically break mutual taxiway deadlocks under Autonomous Ground control
     if (
-      (ac.state === "TAXIING" || ac.state === "HOLD_POSITION") &&
+      ac.state === "TAXIING" &&
       ac.speed <= 1 &&
       state.time - ac.stateEnteredAt >= 3.5 &&
       !ac.yieldToAircraftId &&
@@ -302,7 +375,6 @@ function runAutonomousTower(state: SimulationState): void {
   const elev = state.airport.elevationFt;
   const baseAlt = Math.round(elev / 500) * 500;
 
-  // Priority 1: Arrivals on FINAL or APPROACH under TOWER control
   for (const id of state.aircraftOrder) {
     const ac = state.aircraft[id];
     if (
@@ -315,13 +387,15 @@ function runAutonomousTower(state: SimulationState): void {
     }
     if (handleAutonomousReadbackError(state, ac, "TOWER")) continue;
 
-    if (ac.flightKind === "ARRIVAL" && ac.state === "FINAL") {
+    // Priority 1: Arrivals on FINAL or APPROACH under TOWER control
+    if (ac.flightKind === "ARRIVAL" && (ac.state === "FINAL" || ac.state === "APPROACH")) {
       const rwy = ac.assignedApproach ?? ac.targetRunway;
       const rwySpec = state.airport.runways[rwy];
+      const along = rwySpec ? alongRunwayNm(rwySpec, ac.x, ac.y) : -10;
       const rwyOccupied = isRunwayActiveForTakeoffOrCrossing(state, rwy, ac.id);
       const aheadLanding = isFinalApproachCrowded(state, rwy, 2.5, ac.id);
 
-      if (!rwyOccupied && !aheadLanding) {
+      if (!rwyOccupied && !aheadLanding && along >= -8.5 && along < -0.3) {
         submitClearanceDecision(
           state,
           {
@@ -332,7 +406,7 @@ function runAutonomousTower(state: SimulationState): void {
           },
           "AUTONOMOUS"
         );
-      } else if (rwySpec && alongRunwayNm(rwySpec, ac.x, ac.y) >= -1.4) {
+      } else if (rwySpec && along >= -1.2 && (rwyOccupied || aheadLanding)) {
         submitClearanceDecision(
           state,
           {
@@ -347,6 +421,7 @@ function runAutonomousTower(state: SimulationState): void {
       continue;
     }
 
+    // Priority 2: Landed arrivals vacating runway
     if (
       ac.flightKind === "ARRIVAL" &&
       (ac.state === "ROLLOUT" || ac.state === "VACATING_RUNWAY") &&
@@ -389,10 +464,12 @@ function runAutonomousTower(state: SimulationState): void {
       continue;
     }
 
+    // Priority 3: Landed arrival clear of runway -> hand off to Ground
     if (
       ac.flightKind === "ARRIVAL" &&
       ac.state === "HOLDING_SHORT" &&
-      ac.holdingShortReason === "ROUTE_END"
+      (ac.holdingShortReason === "ROUTE_END" ||
+        ac.holdingAtRunway === undefined)
     ) {
       submitClearanceDecision(
         state,
@@ -407,39 +484,61 @@ function runAutonomousTower(state: SimulationState): void {
       continue;
     }
 
+    // Priority 4: Departures at runway threshold holding short
     if (
       ac.flightKind === "DEPARTURE" &&
       ac.state === "HOLDING_SHORT" &&
-      ac.holdingShortReason === "DEPARTURE_RUNWAY"
+      (ac.holdingShortReason === "DEPARTURE_RUNWAY" ||
+        ac.holdingAtRunway === ac.targetRunway ||
+        !ac.holdingShortReason)
     ) {
       const rwy = ac.targetRunway;
-      const safeLineUp =
-        !isRunwayActiveForTakeoffOrCrossing(state, rwy, ac.id) &&
-        !isFinalApproachCrowded(state, rwy, 3.8, ac.id);
-      if (safeLineUp) {
+      const safeTakeoff =
+        !isRunwayOccupied(state, rwy, ac.id).occupied &&
+        !isFinalApproachCrowded(state, rwy, 4.2, ac.id) &&
+        !hasRecentDepartureClimbOnRunway(state, rwy, ac.id);
+
+      if (safeTakeoff) {
         submitClearanceDecision(
           state,
           {
             aircraftId: ac.id,
             controller: "TOWER",
-            type: "LINE_UP",
-            parameters: { runway: rwy },
+            type: "TAKEOFF",
+            parameters: { runway: rwy, initialAltitude: baseAlt + 3000 },
           },
           "AUTONOMOUS"
         );
+      } else {
+        const safeLineUp =
+          !isRunwayActiveForTakeoffOrCrossing(state, rwy, ac.id) &&
+          !isFinalApproachCrowded(state, rwy, 3.2, ac.id);
+        if (safeLineUp) {
+          submitClearanceDecision(
+            state,
+            {
+              aircraftId: ac.id,
+              controller: "TOWER",
+              type: "LINE_UP",
+              parameters: { runway: rwy },
+            },
+            "AUTONOMOUS"
+          );
+        }
       }
       continue;
     }
 
+    // Priority 5: Departures lined up on runway waiting for takeoff
     if (ac.flightKind === "DEPARTURE" && ac.state === "LINE_UP_WAIT") {
       const rwy = ac.targetRunway;
       const rwySpec = state.airport.runways[rwy];
       if (!rwySpec) continue;
       const aligned =
-        Math.abs(crossTrackRunwayNm(rwySpec, ac.x, ac.y)) < 0.015 &&
-        alongRunwayNm(rwySpec, ac.x, ac.y) >= -0.02 &&
-        headingDiffDeg(ac.heading, rwySpec.heading) < 6 &&
-        ac.speed < 2;
+        Math.abs(crossTrackRunwayNm(rwySpec, ac.x, ac.y)) < 0.03 &&
+        alongRunwayNm(rwySpec, ac.x, ac.y) >= -0.05 &&
+        headingDiffDeg(ac.heading, rwySpec.heading) < 18 &&
+        ac.speed < 4;
       if (!aligned) continue;
 
       const safeTakeoff =
@@ -461,7 +560,8 @@ function runAutonomousTower(state: SimulationState): void {
       continue;
     }
 
-    if (ac.state === "CLIMB" && ac.altitude >= elev + 800) {
+    // Priority 6: Airborne departures climbing through Tower altitude -> hand off to Departure
+    if (ac.state === "CLIMB" && ac.altitude >= elev + 700) {
       submitClearanceDecision(
         state,
         {
@@ -475,9 +575,10 @@ function runAutonomousTower(state: SimulationState): void {
       continue;
     }
 
+    // Priority 7: Go-arounds climbing out -> hand off to Departure
     if (
       (ac.state === "GO_AROUND" || ac.state === "MISSED_APPROACH") &&
-      ac.altitude >= elev + 1400
+      ac.altitude >= elev + 1200
     ) {
       submitClearanceDecision(
         state,
@@ -489,6 +590,7 @@ function runAutonomousTower(state: SimulationState): void {
         },
         "AUTONOMOUS"
       );
+      continue;
     }
   }
 }
@@ -533,6 +635,7 @@ function runAutonomousDeparture(state: SimulationState): void {
     }
     if (handleAutonomousReadbackError(state, ac, "DEPARTURE")) continue;
 
+    // Outbound departures climbing to cruise altitude
     if (
       ac.flightKind === "DEPARTURE" &&
       (ac.state === "CLIMB" || ac.state === "CRUISE_OUTBOUND")
@@ -550,14 +653,17 @@ function runAutonomousDeparture(state: SimulationState): void {
         );
         continue;
       }
-      if (!ac.assignedDirectFix && ac.assignedDepartureFix && ac.altitude >= elev + 1900) {
+      const depFix =
+        ac.assignedDepartureFix ??
+        state.airport.departureFixIds[0];
+      if (!ac.assignedDirectFix && depFix && ac.altitude >= elev + 1800) {
         submitClearanceDecision(
           state,
           {
             aircraftId: ac.id,
             controller: "DEPARTURE",
             type: "DIRECT",
-            parameters: { fixId: ac.assignedDepartureFix },
+            parameters: { fixId: depFix },
           },
           "AUTONOMOUS"
         );
@@ -579,9 +685,9 @@ function runAutonomousDeparture(state: SimulationState): void {
 
       const distFromAirport = Math.hypot(ac.x, ac.y);
       if (
-        (distFromAirport >= 9.5 && ac.altitude >= elev + 2800) ||
-        (ac.state === "CRUISE_OUTBOUND" && ac.altitude >= elev + 2500) ||
-        distFromAirport >= 14
+        (distFromAirport >= 8.5 && ac.altitude >= elev + 2600) ||
+        (ac.state === "CRUISE_OUTBOUND" && ac.altitude >= elev + 2400) ||
+        distFromAirport >= 13
       ) {
         submitClearanceDecision(
           state,
@@ -597,69 +703,81 @@ function runAutonomousDeparture(state: SimulationState): void {
       }
     }
 
-    if (ac.flightKind === "ARRIVAL" && ac.state === "APPROACH") {
+    // Inbound arrivals under Departure/Approach control
+    if (ac.flightKind === "ARRIVAL") {
       const rwy = ac.targetRunway;
       const rwySpec = state.airport.runways[rwy];
       if (!rwySpec) continue;
-      const iaf = state.airport.iafByRunway[rwy];
       const along = alongRunwayNm(rwySpec, ac.x, ac.y);
-      const recipHeading = ((rwySpec.heading + 180) % 360) || 360;
+      const guidance = computeDepAppGuidance(state.airport, ac, rwy);
 
-      if (along > -4.5 && ac.assignedApproach === null) {
-        if (ac.assignedHeading !== recipHeading) {
-          submitClearanceDecision(
-            state,
-            {
-              aircraftId: ac.id,
-              controller: "DEPARTURE",
-              type: "HEADING",
-              parameters: { heading: recipHeading, turnDirection: "LEFT" },
+      // 1. Proactively hand off to Tower when within 11 NM or on final
+      if ((along >= -11.0 && along <= -1.0) || ac.state === "FINAL") {
+        submitClearanceDecision(
+          state,
+          {
+            aircraftId: ac.id,
+            controller: "DEPARTURE",
+            type: "HANDOFF",
+            parameters: { targetController: "TOWER" },
+          },
+          "AUTONOMOUS"
+        );
+      }
+
+      // 2. Clear ILS Approach when within intercept corridor
+      if (ac.assignedApproach === null && along >= -13.5 && along <= -2.5) {
+        submitClearanceDecision(
+          state,
+          {
+            aircraftId: ac.id,
+            controller: "DEPARTURE",
+            type: "APPROACH",
+            parameters: { runway: rwy },
+          },
+          "AUTONOMOUS"
+        );
+        continue;
+      }
+
+      // 3. Steer aircraft to localizer intercept heading
+      if (
+        ac.assignedHeading === null ||
+        headingDiffDeg(ac.assignedHeading, guidance.recommendedHeading) > 8
+      ) {
+        submitClearanceDecision(
+          state,
+          {
+            aircraftId: ac.id,
+            controller: "DEPARTURE",
+            type: "HEADING",
+            parameters: {
+              heading: guidance.recommendedHeading,
+              turnDirection: guidance.recommendedTurnDirection,
             },
-            "AUTONOMOUS"
-          );
-          continue;
-        }
-      } else if (ac.assignedApproach === null) {
-        if (iaf && ac.assignedDirectFix !== iaf) {
-          submitClearanceDecision(
-            state,
-            {
-              aircraftId: ac.id,
-              controller: "DEPARTURE",
-              type: "DIRECT",
-              parameters: { fixId: iaf },
-            },
-            "AUTONOMOUS"
-          );
-          continue;
-        }
-        if (ac.assignedAltitude === null || ac.assignedAltitude > baseAlt + 2800) {
-          submitClearanceDecision(
-            state,
-            {
-              aircraftId: ac.id,
-              controller: "DEPARTURE",
-              type: "ALTITUDE",
-              parameters: { altitude: baseAlt + 2500 },
-            },
-            "AUTONOMOUS"
-          );
-          continue;
-        }
-        if (along <= -5.5 && along >= -11.8) {
-          submitClearanceDecision(
-            state,
-            {
-              aircraftId: ac.id,
-              controller: "DEPARTURE",
-              type: "APPROACH",
-              parameters: { runway: rwy },
-            },
-            "AUTONOMOUS"
-          );
-          continue;
-        }
-      } else if (ac.assignedSpeed === null || ac.assignedSpeed > 175) {
+          },
+          "AUTONOMOUS"
+        );
+        continue;
+      }
+
+      // 4. Descend to approach altitude
+      if (ac.assignedAltitude === null || ac.assignedAltitude > baseAlt + 2800) {
+        submitClearanceDecision(
+          state,
+          {
+            aircraftId: ac.id,
+            controller: "DEPARTURE",
+            type: "ALTITUDE",
+            parameters: { altitude: baseAlt + 2500 },
+          },
+          "AUTONOMOUS"
+        );
+        continue;
+      }
+
+      // 5. Approach speed control
+      if (ac.assignedSpeed === null || ac.assignedSpeed > 175) {
         submitClearanceDecision(
           state,
           {
@@ -672,19 +790,8 @@ function runAutonomousDeparture(state: SimulationState): void {
         );
         continue;
       }
-    }
 
-    if (ac.flightKind === "ARRIVAL" && ac.state === "FINAL") {
-      submitClearanceDecision(
-        state,
-        {
-          aircraftId: ac.id,
-          controller: "DEPARTURE",
-          type: "HANDOFF",
-          parameters: { targetController: "TOWER" },
-        },
-        "AUTONOMOUS"
-      );
+      continue;
     }
   }
 }

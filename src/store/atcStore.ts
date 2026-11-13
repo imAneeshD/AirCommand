@@ -198,6 +198,7 @@ interface AtcStore {
     difficulty?: DifficultyLevel;
   }) => void;
   startMultiplayerRoom: () => void;
+  claimAircraftStation: (aircraftId: string, targetController: ControllerRole) => void;
   respondToHandoff: (handoffId: string, accept: boolean) => void;
   sendMultiplayerChat: (text: string) => void;
   endMultiplayerSession: () => void;
@@ -1195,11 +1196,96 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
       }
     }
 
+    if (sim.handoffs) {
+      sim.handoffs = [...sim.handoffs];
+    }
+
     set((s) => ({
       tickVersion: s.tickVersion + 1,
       lastFeedback: {
         ok: true,
         text: `Handoff accepted. ${h.callsign} transferred to ${h.toController}.`,
+        at: sim.time,
+      },
+    }));
+  },
+
+  claimAircraftStation: (aircraftId, targetController) => {
+    const { sim } = get();
+    const ac = sim.aircraft[aircraftId];
+    if (!ac) return;
+
+    const fromRole = ac.controller;
+    ac.controller = targetController;
+    ac.lastTransmissionAt = sim.time;
+
+    // Resolve any existing pending handoff for this aircraft
+    if (sim.handoffs) {
+      for (const h of sim.handoffs) {
+        if (h.aircraftId === aircraftId && h.status === "PENDING") {
+          h.status = "ACCEPTED";
+          h.respondedAt = sim.time;
+        }
+      }
+      sim.handoffs = [...sim.handoffs];
+    }
+
+    if (targetController === "TOWER" && ac.flightKind === "ARRIVAL") {
+      const rwy = ac.assignedApproach ?? ac.targetRunway;
+      const msgText = `${controllerCallsign("TOWER", sim.airport)}, ${ac.spokenCallsign}, inbound ILS runway ${runwaySpokenName(rwy)}, request landing clearance.`;
+      ac.pendingRequest = {
+        id: nextId(sim, "req"),
+        type: "LANDING",
+        controller: "TOWER",
+        message: msgText,
+        requestedAt: sim.time,
+        runway: rwy,
+        resolved: false,
+      };
+      addRadioMessage(sim, {
+        sender: ac.callsign,
+        recipient: controllerCallsign("TOWER", sim.airport),
+        controller: "TOWER",
+        aircraftId: ac.id,
+        category: "PILOT_REQUEST",
+        text: msgText,
+      });
+    } else if (targetController === "GROUND" && ac.flightKind === "ARRIVAL") {
+      const msgText = `${controllerCallsign("GROUND", sim.airport)}, ${ac.spokenCallsign}, clear of runway, request taxi to gate.`;
+      ac.pendingRequest = {
+        id: nextId(sim, "req"),
+        type: "TAXI",
+        controller: "GROUND",
+        message: msgText,
+        requestedAt: sim.time,
+        resolved: false,
+      };
+      addRadioMessage(sim, {
+        sender: ac.callsign,
+        recipient: controllerCallsign("GROUND", sim.airport),
+        controller: "GROUND",
+        aircraftId: ac.id,
+        category: "PILOT_REQUEST",
+        text: msgText,
+      });
+    }
+
+    addRadioMessage(sim, {
+      sender: "CONSOLE",
+      recipient: "ATC",
+      controller: targetController,
+      aircraftId: ac.id,
+      category: "SYSTEM",
+      text: `Assumed frequency control of ${ac.callsign} (${fromRole} → ${targetController}). Ready for clearance.`,
+    });
+
+    radioAudio.playRadioClick("ATC");
+
+    set((s) => ({
+      tickVersion: s.tickVersion + 1,
+      lastFeedback: {
+        ok: true,
+        text: `Assumed control of ${ac.callsign} on ${targetController}.`,
         at: sim.time,
       },
     }));
@@ -1478,7 +1564,8 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
     if (
       sim.config.activePlayerStation !== "ALL" &&
       sim.config.autoManageOtherStations &&
-      controller !== sim.config.activePlayerStation
+      controller !== sim.config.activePlayerStation &&
+      cmd.type !== "HANDOFF"
     ) {
       const msg = `${controller} is automated while you are on ${sim.config.activePlayerStation}. Switch to ${controller} to issue this clearance manually.`;
       radioAudio.playRadioClick("ERROR");
@@ -1490,7 +1577,12 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
     }
 
     const movementTypes = new Set(["PUSHBACK", "TAXI", "CROSS_RUNWAY", "LINE_UP", "TAKEOFF"]);
-    if (radioAudio.voiceEnabled && movementTypes.has(cmd.type) && ac) {
+    if (
+      radioAudio.voiceEnabled &&
+      movementTypes.has(cmd.type) &&
+      ac &&
+      controller === sim.config.activePlayerStation
+    ) {
       ac.voiceGated = true;
       // Safety release fallback in case browser speech synthesis hangs or fails
       setTimeout(() => {

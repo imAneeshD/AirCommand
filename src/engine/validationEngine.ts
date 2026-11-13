@@ -419,7 +419,12 @@ export function canAircraftMove(
   simulation: SimulationState
 ): boolean {
   // If voice transmission is actively speaking this clearance, aircraft holds until voice ends
-  if (aircraft.voiceGated && aircraft.altitude <= simulation.airport.elevationFt + 50) {
+  if (
+    aircraft.voiceGated &&
+    simulation.config.activePlayerStation !== "ALL" &&
+    aircraft.controller === simulation.config.activePlayerStation &&
+    aircraft.altitude <= simulation.airport.elevationFt + 50
+  ) {
     return false;
   }
 

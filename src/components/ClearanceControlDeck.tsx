@@ -46,6 +46,7 @@ export const ClearanceControlDeck: React.FC = () => {
   const roomState = useAtcStore((s) => s.roomState);
   const assignedRole = useAtcStore((s) => s.assignedRole);
   const respondToHandoff = useAtcStore((s) => s.respondToHandoff);
+  const claimAircraftStation = useAtcStore((s) => s.claimAircraftStation);
 
   const issueClearance = useAtcStore((s) => s.issueClearance);
   const selectAircraft = useAtcStore((s) => s.selectAircraft);
@@ -99,7 +100,7 @@ export const ClearanceControlDeck: React.FC = () => {
       ...(roomState?.handoffs ?? []),
     ];
     return combined.filter((h, idx, arr) => arr.findIndex((x) => x.id === h.id) === idx);
-  }, [sim.handoffs, roomState?.handoffs]);
+  }, [sim.handoffs, roomState?.handoffs, sim.time]);
 
   const pendingHandoffsForUser = useMemo(() => {
     return allHandoffs.filter((h) => h.status === "PENDING" && h.toController === lockedRole);
@@ -944,17 +945,12 @@ export const ClearanceControlDeck: React.FC = () => {
               <button
                 type="button"
                 onClick={() => {
-                  issueClearance({
-                    aircraftId: ac.id,
-                    controller: ac.controller,
-                    type: "HANDOFF",
-                    parameters: { targetController: lockedRole, bypassPending: true },
-                  });
+                  claimAircraftStation(ac.id, lockedRole);
                 }}
-                className="w-full py-1.5 px-3 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:bg-[var(--atc-surface)] hover:border-[var(--atc-cyan)] text-[var(--atc-cyan)] font-mono text-xs font-bold transition-colors flex items-center justify-center gap-1.5"
+                className="w-full py-1.5 px-3 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:bg-[var(--atc-surface)] hover:border-[var(--atc-cyan)] text-[var(--atc-cyan)] font-mono text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <Radio className="w-3.5 h-3.5" />
-                ACCEPT / TAKE OVER TO {lockedRole}
+                ASSUME FREQUENCY / TAKE OVER ({ac.callsign} → {lockedRole})
               </button>
             )}
 

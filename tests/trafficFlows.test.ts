@@ -269,3 +269,57 @@ test("Holding short runway: Ground request is HANDOFF to Tower, next required op
   stepUntilCondition(sim, () => dep.controller === "TOWER");
   assert.equal(dep.controller, "TOWER");
 });
+
+test("Single active role with other roles autonomous: auto controllers progress aircraft without getting stuck", () => {
+  const sim = createScenarioSimulation("LIGHT");
+  sim.config.activePlayerStation = "TOWER";
+  sim.config.autoManageOtherStations = true;
+  sim.config.stationControl = {
+    GROUND: "AUTONOMOUS",
+    TOWER: "PLAYER",
+    DEPARTURE: "AUTONOMOUS",
+  };
+
+  // 1. Inbound arrival under auto DEPARTURE should be handed off to Tower proactively when in approach range
+  const arrival = Object.values(sim.aircraft).find((a) => a.flightKind === "ARRIVAL")!;
+  arrival.controller = "DEPARTURE";
+  arrival.state = "APPROACH";
+  arrival.x = -6.0;
+  arrival.y = 0;
+  arrival.heading = 90;
+
+  // Run autonomous controllers
+  stepSimulation(sim, 2.0);
+
+  // Auto Departure should have issued handoff to TOWER
+  const pendingHandoff = sim.handoffs.find(
+    (h) => h.aircraftId === arrival.id && h.status === "PENDING" && h.toController === "TOWER"
+  );
+  assert.ok(pendingHandoff, "Auto Departure must issue handoff to Tower for approaching arrival");
+
+  // 2. Test holding short departure with auto Tower
+  sim.config.activePlayerStation = "GROUND";
+  sim.config.stationControl = {
+    GROUND: "PLAYER",
+    TOWER: "AUTONOMOUS",
+    DEPARTURE: "AUTONOMOUS",
+  };
+
+  const dep = Object.values(sim.aircraft).find((a) => a.flightKind === "DEPARTURE")!;
+  dep.controller = "TOWER";
+  dep.state = "HOLDING_SHORT";
+  dep.holdingShortReason = "DEPARTURE_RUNWAY";
+  dep.targetRunway = "09L";
+  dep.x = 0;
+  dep.y = 0;
+
+  // Step simulation - auto Tower should line up or clear takeoff
+  stepSimulation(sim, 2.0);
+  assert.ok(
+    dep.state === "LINE_UP_WAIT" ||
+      dep.state === "TAKEOFF_CLEARED" ||
+      dep.state === "TAKEOFF_ROLL" ||
+      dep.clearances.some((c) => c.type === "TAKEOFF" || c.type === "LINE_UP"),
+    `Auto Tower must issue LINE_UP or TAKEOFF, current state: ${dep.state}`
+  );
+});

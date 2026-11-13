@@ -800,6 +800,7 @@ export function submitClearanceDecision(
         };
         state.handoffs.push(handoff);
         if (state.handoffs.length > 50) state.handoffs.splice(0, state.handoffs.length - 50);
+        state.handoffs = [...state.handoffs];
 
         const fromLabel = controllerCallsign(command.controller, state.airport, aircraft.flightKind);
         const toLabel = controllerCallsign(targetController, state.airport, aircraft.flightKind);
