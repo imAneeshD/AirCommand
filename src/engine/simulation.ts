@@ -346,13 +346,22 @@ export function createDepartureAircraft(
     requiresPushback?: boolean;
     departureFix?: string;
     controller?: ControllerRole;
+    originIcao?: string;
+    originName?: string;
+    destinationIcao?: string;
+    destinationName?: string;
+    bearingDeg?: number;
   }
 ): Aircraft {
   const gateNodeId = `GATE_${opts.gateId}`;
   const gateNode = state.airport.nodes[gateNodeId];
   const id = opts.id ?? opts.callsign;
   const acType = opts.aircraftType ?? "B738";
-  const meta = deriveFlightMetadata(opts.callsign, "DEPARTURE", state.airport, acType);
+  const meta = deriveFlightMetadata(opts.callsign, "DEPARTURE", state.airport, acType, opts.bearingDeg);
+  if (opts.originIcao) meta.originIcao = opts.originIcao;
+  if (opts.originName) meta.originName = opts.originName;
+  if (opts.destinationIcao) meta.destinationIcao = opts.destinationIcao;
+  if (opts.destinationName) meta.destinationName = opts.destinationName;
   const pbNode = state.airport.nodes[`PB_${opts.gateId}`];
   const gateFacingHeading = pbNode
     ? (() => {
@@ -441,11 +450,20 @@ export function createArrivalAircraft(
     state?: "APPROACH" | "FINAL";
     controller?: ControllerRole;
     assignedApproach?: RunwayId | null;
+    originIcao?: string;
+    originName?: string;
+    destinationIcao?: string;
+    destinationName?: string;
+    bearingDeg?: number;
   }
 ): Aircraft {
   const id = opts.id ?? opts.callsign;
   const acType = opts.aircraftType ?? "A320";
-  const meta = deriveFlightMetadata(opts.callsign, "ARRIVAL", state.airport, acType);
+  const meta = deriveFlightMetadata(opts.callsign, "ARRIVAL", state.airport, acType, opts.bearingDeg);
+  if (opts.originIcao) meta.originIcao = opts.originIcao;
+  if (opts.originName) meta.originName = opts.originName;
+  if (opts.destinationIcao) meta.destinationIcao = opts.destinationIcao;
+  if (opts.destinationName) meta.destinationName = opts.destinationName;
   const ac: Aircraft = {
     id,
     callsign: opts.callsign,

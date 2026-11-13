@@ -296,6 +296,8 @@ export function convertLiveTracksToSimulation(opts: {
         requiresPushback: !shouldBeTaxied && !gateId.startsWith("S") && !gateId.toUpperCase().includes("REMOTE"),
         departureFix: layout.departureFixIds[idx % layout.departureFixIds.length],
         controller: "GROUND",
+        originIcao: opts.airportRecord.icao,
+        originName: `${opts.airportRecord.city} (${opts.airportRecord.name})`,
       });
       depAc.icao24 = track.icao24;
       if (track.registration) depAc.registration = track.registration;
@@ -348,8 +350,14 @@ export function convertLiveTracksToSimulation(opts: {
       simY = Math.sin(idx) * 2.0;
     }
 
-    if (isClimbingDeparture) {
-      const heading = track.trackDeg ?? Math.round(((Math.atan2(simX, simY) * 180) / Math.PI + 360) % 360);
+    const bearingFromField = Math.round(((Math.atan2(simX, simY) * 180) / Math.PI + 360) % 360);
+    const inboundTowardField = Math.round(((Math.atan2(-simX, -simY) * 180) / Math.PI + 360) % 360);
+    const realHdg = track.trackDeg ?? (isClimbingDeparture ? bearingFromField : inboundTowardField);
+    const angleOffInbound = Math.abs(headingDiffDeg(realHdg, inboundTowardField));
+    const isOutboundDeparture = isClimbingDeparture || angleOffInbound > 95;
+
+    if (isOutboundDeparture) {
+      const heading = realHdg;
       const rwyId = pickBestRunway(layout, heading, "DEPARTURE");
       const gateId = pickClosestUnusedGate(layout, 0, 0, usedGates, idx);
       const alt = clamp(Math.round(altFtRaw / 100) * 100, elev + 900, elev + 9500);
@@ -366,6 +374,9 @@ export function convertLiveTracksToSimulation(opts: {
         targetRunway: rwyId,
         requiresPushback: false,
         controller: "DEPARTURE",
+        originIcao: opts.airportRecord.icao,
+        originName: `${opts.airportRecord.city} (${opts.airportRecord.name})`,
+        bearingDeg: heading,
       });
       depAc.icao24 = track.icao24;
       if (track.registration) depAc.registration = track.registration;
@@ -376,7 +387,7 @@ export function convertLiveTracksToSimulation(opts: {
       depAc.heading = heading;
       depAc.altitude = alt;
       depAc.speed = spd;
-      depAc.verticalSpeed = clamp(vRate, 800, 2200);
+      depAc.verticalSpeed = clamp(vRate, 600, 2400);
       depAc.assignedHeading = heading;
       depAc.assignedAltitude = targetAlt;
       depAc.assignedSpeed = spd;
@@ -407,11 +418,8 @@ export function convertLiveTracksToSimulation(opts: {
       return;
     }
 
-    // Inbound Arrival: preserve true track heading or point toward airport center
-    const inboundTowardField = Math.round(((Math.atan2(-simX, -simY) * 180) / Math.PI + 360) % 360);
-    const realHdg = track.trackDeg ?? inboundTowardField;
-    // If real track points roughly toward field (within 110 deg), use real track; else aim toward IAF/airport
-    const heading = headingDiffDeg(realHdg, inboundTowardField) <= 105 ? realHdg : inboundTowardField;
+    // Inbound Arrival: flying toward the airfield, heading preserved
+    const heading = realHdg;
     const targetRwy = pickBestRunway(layout, heading, "ARRIVAL");
     const gateId = pickClosestUnusedGate(layout, 0, 0, usedGates, idx);
     const alt = clamp(Math.round(altFtRaw / 100) * 100, elev + 1600, elev + 9000);
@@ -433,6 +441,9 @@ export function convertLiveTracksToSimulation(opts: {
       state: "APPROACH",
       controller: "DEPARTURE",
       assignedApproach: null,
+      destinationIcao: opts.airportRecord.icao,
+      destinationName: `${opts.airportRecord.city} (${opts.airportRecord.name})`,
+      bearingDeg: bearingFromField,
     });
     arrAc.icao24 = track.icao24;
     if (track.registration) arrAc.registration = track.registration;
