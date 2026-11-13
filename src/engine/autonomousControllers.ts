@@ -576,6 +576,21 @@ function runAutonomousDeparture(state: SimulationState): void {
         );
         continue;
       }
+
+      const distFromAirport = Math.hypot(ac.x, ac.y);
+      if (distFromAirport >= 12 && ac.altitude >= elev + 4000) {
+        submitClearanceDecision(
+          state,
+          {
+            aircraftId: ac.id,
+            controller: "DEPARTURE",
+            type: "HANDOFF",
+            parameters: { targetController: "ACC" },
+          },
+          "AUTONOMOUS"
+        );
+        continue;
+      }
     }
 
     if (ac.flightKind === "ARRIVAL" && ac.state === "APPROACH") {

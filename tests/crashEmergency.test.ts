@@ -138,13 +138,14 @@ test("Off-runway touchdown / ground excursion at speed triggers immediate crash 
     spokenCallsign: "Delta eight fourteen",
     targetRunway: "09R",
     gateId: "GATE3",
-    state: "LANDING",
+    state: "FINAL",
     x: pastEndX,
     y: pastEndY,
     heading: rwy.heading,
     altitude: elev,
     speed: 110,
   });
+  ac.state = "LANDING";
 
   // Step simulation - should detect high-speed off-runway excursion and declare crash
   stepSimulation(sim, 0.5);

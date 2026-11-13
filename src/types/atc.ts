@@ -554,7 +554,7 @@ export interface ControllerHandoff {
   aircraftId: string;
   callsign: string;
   fromController: ControllerRole;
-  toController: ControllerRole;
+  toController: ControllerRole | "ACC";
   issuedAt: number;
   respondedAt?: number;
   status: "PENDING" | "ACCEPTED" | "REJECTED";

@@ -675,7 +675,11 @@ export const ClearanceControlDeck: React.FC = () => {
           defaultOpen={true}
           badge={
             <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-[var(--atc-accent-bg)] text-[var(--atc-accent-text)]">
-              {deckTab === "DEPARTURE" ? "DEP/APP" : deckTab}
+              {deckTab === "DEPARTURE"
+                ? ac?.flightKind === "ARRIVAL"
+                  ? "APPROACH"
+                  : "DEPARTURE"
+                : deckTab}
             </span>
           }
           rightSlot={
@@ -701,7 +705,11 @@ export const ClearanceControlDeck: React.FC = () => {
           {roleLocked ? (
             <div className="flex items-center gap-2 px-1 py-0.5">
               <span className="px-2.5 py-1 rounded-md bg-[var(--atc-surface)] border border-[var(--atc-accent-border)] text-[var(--atc-accent-text)] text-[11px] font-mono font-bold">
-                {lockedRole === "DEPARTURE" ? "DEP/APP" : lockedRole}
+                {lockedRole === "DEPARTURE"
+                  ? ac?.flightKind === "ARRIVAL"
+                    ? "APPROACH"
+                    : "DEPARTURE"
+                  : lockedRole}
               </span>
               <span className="text-[10px] text-[var(--atc-muted)] font-mono">
                 Your station · other roles are AI-managed
@@ -722,7 +730,13 @@ export const ClearanceControlDeck: React.FC = () => {
                         : "text-[var(--atc-muted)] hover:text-[var(--atc-text)]"
                     }`}
                   >
-                    <span>{role === "DEPARTURE" ? "DEP/APP" : role}</span>
+                    <span>
+                      {role === "DEPARTURE"
+                        ? ac.flightKind === "ARRIVAL"
+                          ? "APPROACH"
+                          : "DEPARTURE"
+                        : role}
+                    </span>
                     {isRoleAuto && (
                       <span className="text-[8px] px-1 rounded bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)]">
                         AI
@@ -1064,17 +1078,18 @@ export const ClearanceControlDeck: React.FC = () => {
                             ac.state !== "CLEARED_TO_LAND" &&
                             ac.state !== "LANDING")
                         }
-                        onClick={() =>
+                        onClick={() => {
+                          const gaAlt = Math.round((sim.airport.elevationFt + 3000) / 500) * 500;
                           issueClearance({
                             aircraftId: ac.id,
                             controller: "TOWER",
                             type: "GO_AROUND",
-                            parameters: { altitude: 3000, heading: 90 },
-                          })
-                        }
+                            parameters: { altitude: gaAlt, heading: 90 },
+                          });
+                        }}
                         className="w-full py-2 rounded-md border border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] hover:opacity-90 text-[var(--atc-red)] font-mono text-xs font-semibold disabled:opacity-35"
                       >
-                        GO AROUND (CLIMB 3000)
+                        GO AROUND (CLIMB {Math.round((sim.airport.elevationFt + 3000) / 500) * 500})
                       </button>
                     </div>
 
@@ -1162,36 +1177,100 @@ export const ClearanceControlDeck: React.FC = () => {
                 );
               })()}
 
-              <div className="grid grid-cols-2 gap-1.5">
-                <button
-                  disabled={nordoLocked || ac.controller === "DEPARTURE"}
-                  onClick={() =>
-                    issueClearance({
-                      aircraftId: ac.id,
-                      controller: "TOWER",
-                      type: "HANDOFF",
-                      parameters: { targetController: "DEPARTURE" },
-                    })
-                  }
-                  className="py-1.5 px-2 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-[11px] font-semibold disabled:opacity-35"
-                >
-                  HANDOFF → DEP ({controllerFrequency("DEPARTURE", sim.airport)})
-                </button>
-                <button
-                  disabled={nordoLocked || ac.controller === "GROUND"}
-                  onClick={() =>
-                    issueClearance({
-                      aircraftId: ac.id,
-                      controller: "TOWER",
-                      type: "HANDOFF",
-                      parameters: { targetController: "GROUND" },
-                    })
-                  }
-                  className="py-1.5 px-2 rounded-md border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] hover:opacity-90 text-[var(--atc-amber)] font-mono text-[11px] font-semibold disabled:opacity-35"
-                >
-                  HANDOFF → GND ({controllerFrequency("GROUND", sim.airport)})
-                </button>
-              </div>
+              {ac.flightKind === "ARRIVAL" ? (
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    disabled={
+                      nordoLocked ||
+                      ac.controller === "DEPARTURE" ||
+                      (ac.state !== "GO_AROUND" && ac.state !== "MISSED_APPROACH")
+                    }
+                    onClick={() =>
+                      issueClearance({
+                        aircraftId: ac.id,
+                        controller: "TOWER",
+                        type: "HANDOFF",
+                        parameters: { targetController: "DEPARTURE" },
+                      })
+                    }
+                    title={
+                      ac.state === "GO_AROUND" || ac.state === "MISSED_APPROACH"
+                        ? "Transfer climbing missed approach aircraft back to Approach Control for re-vectoring"
+                        : "Available when arrival executes Go-Around / Missed Approach"
+                    }
+                    className="py-1.5 px-2 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-[11px] font-semibold disabled:opacity-35"
+                  >
+                    HANDOFF → APP ({controllerFrequency("DEPARTURE", sim.airport, "ARRIVAL")})
+                  </button>
+                  <button
+                    disabled={
+                      nordoLocked ||
+                      ac.controller === "GROUND" ||
+                      (ac.state !== "TOUCHDOWN" &&
+                        ac.state !== "ROLLOUT" &&
+                        ac.state !== "VACATING_RUNWAY" &&
+                        ac.altitude > sim.airport.elevationFt + 50)
+                    }
+                    onClick={() =>
+                      issueClearance({
+                        aircraftId: ac.id,
+                        controller: "TOWER",
+                        type: "HANDOFF",
+                        parameters: { targetController: "GROUND" },
+                      })
+                    }
+                    title="Vacated runway — transfer to Ground Control for taxi to gate stand"
+                    className="py-1.5 px-2 rounded-md border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] hover:opacity-90 text-[var(--atc-amber)] font-mono text-[11px] font-semibold disabled:opacity-35"
+                  >
+                    HANDOFF → GND ({controllerFrequency("GROUND", sim.airport)})
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    disabled={
+                      nordoLocked ||
+                      ac.controller === "DEPARTURE" ||
+                      (ac.state !== "ROTATE" &&
+                        ac.state !== "CLIMB" &&
+                        ac.altitude <= sim.airport.elevationFt + 50)
+                    }
+                    onClick={() =>
+                      issueClearance({
+                        aircraftId: ac.id,
+                        controller: "TOWER",
+                        type: "HANDOFF",
+                        parameters: { targetController: "DEPARTURE" },
+                      })
+                    }
+                    title="Airborne after takeoff — transfer to Departure Control for climb & SID"
+                    className="py-1.5 px-2 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-[11px] font-semibold disabled:opacity-35"
+                  >
+                    HANDOFF → DEP ({controllerFrequency("DEPARTURE", sim.airport, "DEPARTURE")})
+                  </button>
+                  <button
+                    disabled={
+                      nordoLocked ||
+                      ac.controller === "GROUND" ||
+                      (ac.state !== "STOPPED_ON_RUNWAY" &&
+                        ac.state !== "REJECTED_TAKEOFF" &&
+                        ac.state !== "HOLD_POSITION")
+                    }
+                    onClick={() =>
+                      issueClearance({
+                        aircraftId: ac.id,
+                        controller: "TOWER",
+                        type: "HANDOFF",
+                        parameters: { targetController: "GROUND" },
+                      })
+                    }
+                    title="Rejected takeoff or stopped on runway — transfer to Ground Control"
+                    className="py-1.5 px-2 rounded-md border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] hover:opacity-90 text-[var(--atc-amber)] font-mono text-[11px] font-semibold disabled:opacity-35"
+                  >
+                    HANDOFF → GND ({controllerFrequency("GROUND", sim.airport)})
+                  </button>
+                </div>
+              )}
 
               {/* Nested Collapsible Light Gun unless NORDO */}
               <Accordion
@@ -1634,20 +1713,37 @@ export const ClearanceControlDeck: React.FC = () => {
                   </div>
                 </div>
 
-                <button
-                  disabled={nordoLocked || ac.controller === "TOWER"}
-                  onClick={() =>
-                    issueClearance({
-                      aircraftId: ac.id,
-                      controller: "DEPARTURE",
-                      type: "HANDOFF",
-                      parameters: { targetController: "TOWER" },
-                    })
-                  }
-                  className="w-full py-1.5 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-xs font-semibold disabled:opacity-35"
-                >
-                  HANDOFF → TOWER ({controllerFrequency("TOWER", sim.airport)})
-                </button>
+                {ac.flightKind === "ARRIVAL" ? (
+                  <button
+                    disabled={nordoLocked || ac.controller === "TOWER"}
+                    onClick={() =>
+                      issueClearance({
+                        aircraftId: ac.id,
+                        controller: "DEPARTURE",
+                        type: "HANDOFF",
+                        parameters: { targetController: "TOWER" },
+                      })
+                    }
+                    className="w-full py-1.5 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-xs font-semibold disabled:opacity-35"
+                  >
+                    HANDOFF → TOWER ({controllerFrequency("TOWER", sim.airport)})
+                  </button>
+                ) : (
+                  <button
+                    disabled={nordoLocked || ac.state === "COMPLETED_DEPARTURE"}
+                    onClick={() =>
+                      issueClearance({
+                        aircraftId: ac.id,
+                        controller: "DEPARTURE",
+                        type: "HANDOFF",
+                        parameters: { targetController: "ACC" },
+                      })
+                    }
+                    className="w-full py-1.5 rounded-md border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:opacity-90 text-[var(--atc-emerald)] font-mono text-xs font-semibold disabled:opacity-35"
+                  >
+                    HANDOFF → AREA / CENTER ({controllerFrequency("ACC", sim.airport)})
+                  </button>
+                )}
               </div>
             );
           })()}

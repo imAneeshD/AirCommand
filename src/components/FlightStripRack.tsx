@@ -15,7 +15,7 @@ import { getActiveClearances, getPendingReadbackClearances } from "../engine/cle
 import { getAircraftPhaseLabel } from "../engine/simulation.ts";
 import { canAircraftMove } from "../engine/validationEngine.ts";
 import { useAtcStore } from "../store/atcStore.ts";
-import type { Aircraft, ControllerRole } from "../types/atc.ts";
+import type { Aircraft, ControllerRole, FlightKind } from "../types/atc.ts";
 import { formatAltitudeReadout } from "../utils/telemetry.ts";
 import { getDeadlockedAircraftIds } from "../utils/groundConflict.ts";
 import { radioAudio } from "../utils/radioAudio.ts";
@@ -58,23 +58,32 @@ function stateBadgeStyle(ac: Aircraft): string {
   return "bg-[var(--atc-surface-alt)] text-[var(--atc-text-secondary)] border-[var(--atc-border)]";
 }
 
-function controllerBadge(ctrl: ControllerRole): { letter: string; cls: string } {
+function controllerBadge(ctrl: ControllerRole, flightKind?: FlightKind): { letter: string; cls: string; title: string } {
   switch (ctrl) {
     case "GROUND":
       return {
         letter: "G",
+        title: "Ground Control",
         cls: "bg-[var(--atc-amber-bg)] text-[var(--atc-amber)] border-[var(--atc-amber-border)]",
       };
     case "TOWER":
       return {
         letter: "T",
+        title: "Tower Control",
         cls: "bg-[var(--atc-cyan-bg)] text-[var(--atc-cyan)] border-[var(--atc-cyan-border)]",
       };
     case "DEPARTURE":
-      return {
-        letter: "D",
-        cls: "bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] border-[var(--atc-emerald-border)]",
-      };
+      return flightKind === "ARRIVAL"
+        ? {
+            letter: "A",
+            title: "Approach Control (APP)",
+            cls: "bg-[var(--atc-accent-bg)] text-[var(--atc-accent-text)] border-[var(--atc-accent-border)]",
+          }
+        : {
+            letter: "D",
+            title: "Departure Control (DEP)",
+            cls: "bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] border-[var(--atc-emerald-border)]",
+          };
   }
 }
 
@@ -289,7 +298,7 @@ export const FlightStripRack: React.FC = () => {
             const activeClrs = getActiveClearances(ac);
             const pendingRb = getPendingReadbackClearances(ac);
             const movable = canAircraftMove(ac, sim);
-            const ctrl = controllerBadge(ac.controller);
+            const ctrl = controllerBadge(ac.controller, ac.flightKind);
             const hasReq = Boolean(ac.pendingRequest && !ac.pendingRequest.resolved);
             const isCalling = activeCallerIds.has(ac.id);
 

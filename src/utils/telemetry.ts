@@ -25,7 +25,12 @@ const SURFACE_STATES = new Set<AircraftState>([
 
 export function isSurfaceAircraft(ac: Aircraft, elevationFt: number): boolean {
   if (SURFACE_STATES.has(ac.state)) return true;
-  if (ac.state === "ROTATE" || ac.state === "CLIMB" || ac.state === "GO_AROUND") {
+  if (
+    ac.state === "ROTATE" ||
+    ac.state === "CLIMB" ||
+    ac.state === "GO_AROUND" ||
+    ac.state === "MISSED_APPROACH"
+  ) {
     return false;
   }
   return ac.altitude - elevationFt <= 12;
