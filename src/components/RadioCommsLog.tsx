@@ -553,21 +553,21 @@ export const RadioCommsLog: React.FC = () => {
                         [{h.status}]
                       </span>
                     </div>
-                    {h.status === "PENDING" && assignedRole === h.toController && (
+                    {h.status === "PENDING" && (
                       <div className="flex items-center gap-1 shrink-0">
                         <button
                           onClick={() => respondToHandoff(h.id, true)}
-                          className="p-1 rounded bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] border border-[var(--atc-emerald-border)]"
+                          className="px-2 py-0.5 rounded bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] border border-[var(--atc-emerald-border)] text-[10px] font-bold"
                           title="Accept Handoff"
                         >
-                          <Check className="w-3 h-3" />
+                          ACCEPT
                         </button>
                         <button
                           onClick={() => respondToHandoff(h.id, false)}
-                          className="p-1 rounded bg-[var(--atc-red-bg)] text-[var(--atc-red)] border border-[var(--atc-red-border)]"
+                          className="px-2 py-0.5 rounded bg-[var(--atc-red-bg)] text-[var(--atc-red)] border border-[var(--atc-red-border)] text-[10px] font-bold"
                           title="Reject Handoff"
                         >
-                          <X className="w-3 h-3" />
+                          REJECT
                         </button>
                       </div>
                     )}

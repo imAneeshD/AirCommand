@@ -645,6 +645,7 @@ export interface SimulationState {
   aircraftOrder: string[];
   selectedAircraftId: string | null;
   radioLog: RadioMessage[];
+  handoffs: ControllerHandoff[];
   incidents: SafetyIncident[];
   config: SimulationConfig;
   metrics: SimulationMetrics;

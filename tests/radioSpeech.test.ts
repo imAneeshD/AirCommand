@@ -185,3 +185,114 @@ test("Single-role synchronous clearance waits for acknowledgeSyncClearance befor
   assert.equal(msgs.filter((m) => m.category === "ATC_CLEARANCE").length, 1);
   assert.equal(msgs.filter((m) => m.category === "PILOT_READBACK").length, 1);
 });
+
+test("Handoff clearance commands plane to contact station with frequency, reads back, and auto-calls new controller without requiring manual acceptance", () => {
+  const s = createBaseSimulation("SANDBOX", "GROUND");
+  s.config.autoSpawnTraffic = false;
+  s.config.readbackErrorProbability = 0;
+  const ual = createDepartureAircraft(s, {
+    callsign: "UAL452",
+    spokenCallsign: "United 452",
+    gateId: "B12",
+    targetRunway: "09L",
+    requiresPushback: false,
+  });
+
+  // UAL is holding short runway 09L ready for handoff to TOWER
+  ual.state = "HOLDING_SHORT";
+  ual.holdingShortReason = "DEPARTURE_RUNWAY";
+
+  const res = submitClearanceDecision(
+    s,
+    {
+      aircraftId: ual.id,
+      controller: "GROUND",
+      type: "HANDOFF",
+      parameters: { targetController: "TOWER" },
+    },
+    "PLAYER"
+  );
+  assert.equal(res.ok, true);
+  assert.ok(res.clearance);
+
+  // Clearance phraseology specifies contacting Tower on frequency
+  assert.ok(res.clearance.phraseology.includes("contact Asteria Tower on 118.7"));
+  assert.ok(res.clearance.expectedReadbackText.includes("Contact Asteria Tower on 118.7"));
+
+  // Step simulation so pilot reads back
+  for (let i = 0; i < 15; i++) stepSimulation(s, 0.2);
+
+  // Plane is immediately under TOWER control without requiring manual acceptance
+  assert.equal(ual.controller, "TOWER");
+
+  // Plane automatically called Tower with ready for departure
+  const towerMsgs = s.radioLog.filter((m) => m.controller === "TOWER" && m.aircraftId === ual.id);
+  assert.ok(towerMsgs.length >= 1);
+  const checkIn = towerMsgs.find((m) => m.category === "PILOT_REQUEST");
+  assert.ok(checkIn);
+  assert.ok(checkIn.text.includes("Asteria Tower, United 452, holding short runway") && checkIn.text.includes("ready for departure."));
+});
+
+test("Full handoff coordination: Ground req -> Tower accepts/rejects -> transfer req to plane with signal -> freq change -> Tower gets plane", () => {
+  const s = createBaseSimulation("SANDBOX", "TOWER");
+  s.config.autoSpawnTraffic = false;
+  s.config.readbackErrorProbability = 0;
+  const ual = createDepartureAircraft(s, {
+    callsign: "UAL452",
+    spokenCallsign: "United 452",
+    gateId: "B12",
+    targetRunway: "09L",
+    requiresPushback: false,
+  });
+  ual.state = "HOLDING_SHORT";
+  ual.holdingShortReason = "DEPARTURE_RUNWAY";
+
+  // 1. Ground Control initiates Handoff req to Tower
+  const req = submitClearanceDecision(
+    s,
+    {
+      aircraftId: ual.id,
+      controller: "GROUND",
+      type: "HANDOFF",
+      parameters: { targetController: "TOWER" },
+    },
+    "AUTONOMOUS"
+  );
+  assert.equal(req.ok, true);
+  assert.equal(s.handoffs.length, 1);
+  assert.equal(s.handoffs[0].status, "PENDING");
+  // Plane still with Ground
+  assert.equal(ual.controller, "GROUND");
+
+  // 2. Tower controller accepts handoff
+  const ho = s.handoffs[0];
+  ho.status = "ACCEPTED";
+  ho.respondedAt = s.time;
+
+  // 3. Transfer req to plane with radio signal
+  const clrRes = submitClearanceDecision(
+    s,
+    {
+      aircraftId: ho.aircraftId,
+      controller: ho.fromController,
+      type: "HANDOFF",
+      parameters: { targetController: ho.toController, bypassPending: true },
+    },
+    "AUTONOMOUS"
+  );
+  assert.equal(clrRes.ok, true);
+  assert.ok(clrRes.clearance);
+  assert.ok(clrRes.clearance.phraseology.includes("contact Asteria Tower on 118.7"));
+
+  // 4. Frequency change from plane via readback
+  assert.ok(clrRes.clearance.expectedReadbackText.includes("Contact Asteria Tower on 118.7"));
+  for (let i = 0; i < 15; i++) stepSimulation(s, 0.2);
+
+  // 5. Tower gets the plane & plane auto-calls Tower
+  assert.equal(ual.controller, "TOWER");
+  const towerCheckIn = s.radioLog.find(
+    (m) => m.controller === "TOWER" && m.sender === ual.callsign && m.category === "PILOT_REQUEST"
+  );
+  assert.ok(towerCheckIn);
+  assert.ok(towerCheckIn.text.includes("Asteria Tower, United 452, holding short runway"));
+});

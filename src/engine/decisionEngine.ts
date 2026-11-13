@@ -11,6 +11,7 @@ import type {
   ATCClearance,
   Aircraft,
   ClearanceCommandInput,
+  ControllerHandoff,
   ControllerRole,
   DecisionResponse,
   LightGunSignal,
@@ -49,6 +50,38 @@ export function controllerCallsign(role: ControllerRole, airport?: SimulationSta
       return `${prefix} Tower`;
     case "DEPARTURE":
       return `${prefix} Departure`;
+  }
+}
+
+export function controllerFrequency(role: ControllerRole, airport?: SimulationState["airport"]): string {
+  if (airport?.frequencies && airport.frequencies.length > 0) {
+    const match = airport.frequencies.find((f) => {
+      const t = (f.type ?? "").toUpperCase();
+      const d = (f.description ?? "").toLowerCase();
+      if (role === "GROUND") {
+        return t === "GND" || d.includes("ground");
+      }
+      if (role === "TOWER") {
+        return t === "TWR" || d.includes("tower");
+      }
+      if (role === "DEPARTURE") {
+        return t === "DEP" || t === "APP" || d.includes("dep") || d.includes("approach");
+      }
+      return false;
+    });
+    if (match && match.frequencyMhz) {
+      const str = match.frequencyMhz.toFixed(3);
+      return str.replace(/0+$/, "").replace(/\.$/, ".0");
+    }
+  }
+
+  switch (role) {
+    case "GROUND":
+      return "121.9";
+    case "TOWER":
+      return "118.7";
+    case "DEPARTURE":
+      return "124.5";
   }
 }
 
@@ -703,8 +736,56 @@ export function submitClearanceDecision(
         return { ok: false, reason: `Invalid handoff target controller.` };
       }
       params.targetController = targetController;
-      phraseology = `${aircraft.spokenCallsign}, contact ${controllerCallsign(targetController, state.airport)}.`;
-      expectedReadback = `Over to ${controllerCallsign(targetController, state.airport)}, ${aircraft.spokenCallsign}.`;
+
+      // Flow: ground control > Handoff req > tower controller accepts / rejects > transfer req to the plane with the signal
+      const bypassPending = Boolean(params.bypassPending);
+      const isHumanTarget =
+        !bypassPending &&
+        state.config.activePlayerStation !== "ALL" &&
+        state.config.activePlayerStation === targetController;
+
+      if (isHumanTarget) {
+        if (!state.handoffs) state.handoffs = [];
+        const existingPending = state.handoffs.find(
+          (h) => h.aircraftId === aircraft.id && h.status === "PENDING"
+        );
+        if (existingPending) {
+          return {
+            ok: false,
+            reason: `Pending handoff request already exists for ${aircraft.callsign} → ${targetController}.`,
+          };
+        }
+        const handoff: ControllerHandoff = {
+          id: `ho_${Date.now()}_${Math.floor(Math.random() * 10000)}`,
+          aircraftId: aircraft.id,
+          callsign: aircraft.callsign,
+          fromController: command.controller,
+          toController: targetController,
+          issuedAt: state.time,
+          status: "PENDING",
+        };
+        state.handoffs.push(handoff);
+        if (state.handoffs.length > 50) state.handoffs.splice(0, state.handoffs.length - 50);
+
+        addRadioMessage(state, {
+          sender: `${controllerCallsign(command.controller, state.airport)}`,
+          recipient: `${controllerCallsign(targetController, state.airport)}`,
+          controller: targetController,
+          aircraftId: aircraft.id,
+          category: "PILOT_REQUEST",
+          text: `[HANDOFF REQUEST] ${aircraft.callsign} (${command.controller} → ${targetController}). Awaiting your acceptance.`,
+        });
+
+        return {
+          ok: true,
+          reason: `Handoff requested to ${targetController}. Awaiting acceptance.`,
+        };
+      }
+
+      const targetName = controllerCallsign(targetController, state.airport);
+      const targetFreq = controllerFrequency(targetController, state.airport);
+      phraseology = `${aircraft.spokenCallsign}, contact ${targetName} on ${targetFreq}.`;
+      expectedReadback = `Contact ${targetName} on ${targetFreq}, ${aircraft.spokenCallsign}.`;
       break;
     }
   }
@@ -1058,6 +1139,7 @@ function applyAcknowledgedClearance(
       aircraft.controller = target;
       aircraft.lastTransmissionAt = state.time;
       const targetName = controllerCallsign(target, state.airport);
+      const targetFreq = controllerFrequency(target, state.airport);
 
       if (target === "TOWER" && aircraft.flightKind === "DEPARTURE") {
         const msgText = `${targetName}, ${aircraft.spokenCallsign}, holding short runway ${runwaySpokenName(aircraft.targetRunway)}, ready for departure.`;
@@ -1118,6 +1200,26 @@ function applyAcknowledgedClearance(
           category: "PILOT_REQUEST",
           text: msgText,
         });
+      } else if (target === "GROUND" && aircraft.flightKind === "DEPARTURE") {
+        const spokenGate = aircraft.gateId ? formatGateIcao(aircraft.gateId) : "";
+        const msgText = `${targetName}, ${aircraft.spokenCallsign}, at gate ${spokenGate}, ready for pushback.`;
+        aircraft.pendingRequest = {
+          id: nextId(state, "req"),
+          type: "PUSHBACK",
+          controller: "GROUND",
+          message: msgText,
+          requestedAt: state.time,
+          gate: aircraft.gateId,
+          resolved: false,
+        };
+        addRadioMessage(state, {
+          sender: aircraft.callsign,
+          recipient: targetName,
+          controller: target,
+          aircraftId: aircraft.id,
+          category: "PILOT_REQUEST",
+          text: msgText,
+        });
       } else if (target === "DEPARTURE" && aircraft.flightKind === "DEPARTURE") {
         const altRounded = Math.max(500, Math.round(aircraft.altitude / 100) * 100);
         const msgText = `${targetName}, ${aircraft.spokenCallsign}, passing ${altRounded} feet, climbing ${aircraft.assignedAltitude ?? 3000}.`;
@@ -1142,13 +1244,22 @@ function applyAcknowledgedClearance(
         if (aircraft.pendingRequest && aircraft.pendingRequest.controller !== target) {
           aircraft.pendingRequest.resolved = true;
         }
+        const msgText = `${targetName}, ${aircraft.spokenCallsign}, checking in on ${targetFreq}.`;
+        aircraft.pendingRequest = {
+          id: nextId(state, "req"),
+          type: "APPROACH_VECTORS",
+          controller: target,
+          message: msgText,
+          requestedAt: state.time,
+          resolved: false,
+        };
         addRadioMessage(state, {
           sender: aircraft.callsign,
           recipient: targetName,
           controller: target,
           aircraftId: aircraft.id,
           category: "PILOT_REQUEST",
-          text: `${targetName}, ${aircraft.spokenCallsign} checking in.`,
+          text: msgText,
         });
       }
       break;

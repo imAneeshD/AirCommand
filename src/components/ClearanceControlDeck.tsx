@@ -34,6 +34,7 @@ import {
   type GroundResolutionKind,
 } from "../utils/groundConflict.ts";
 import { formatAltitudeReadout } from "../utils/telemetry.ts";
+import { controllerFrequency } from "../engine/decisionEngine.ts";
 import { Accordion } from "./Accordion.tsx";
 
 export const ClearanceControlDeck: React.FC = () => {
@@ -466,35 +467,43 @@ export const ClearanceControlDeck: React.FC = () => {
           </div>
         )}
 
-        {roomState?.status === "ACTIVE" &&
-          assignedRole &&
-          roomState.handoffs
-            .filter((h) => h.status === "PENDING" && h.toController === assignedRole)
-            .slice(0, 2)
-            .map((h) => (
-              <div
-                key={h.id}
-                className="rounded-lg border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] p-2.5 text-[11px] font-mono space-y-1.5"
-              >
-                <div className="font-bold text-[var(--atc-cyan)]">
-                  INCOMING HANDOFF: {h.callsign} ({h.fromController} → {h.toController})
-                </div>
-                <div className="flex gap-1.5">
-                  <button
-                    onClick={() => respondToHandoff(h.id, true)}
-                    className="flex-1 py-1 rounded bg-[var(--atc-emerald-bg)] border border-[var(--atc-emerald-border)] text-[var(--atc-emerald)] font-bold"
-                  >
-                    ACCEPT
-                  </button>
-                  <button
-                    onClick={() => respondToHandoff(h.id, false)}
-                    className="flex-1 py-1 rounded bg-[var(--atc-red-bg)] border border-[var(--atc-red-border)] text-[var(--atc-red)] font-bold"
-                  >
-                    REJECT
-                  </button>
-                </div>
+
+        {/* Incoming Handoff Requests awaiting user acceptance / rejection */}
+        {(roomState?.status === "ACTIVE" ? roomState.handoffs : sim.handoffs)
+          ?.filter((h) => h.status === "PENDING" && h.toController === lockedRole)
+          .slice(0, 3)
+          .map((h) => (
+            <div
+              key={h.id}
+              className="rounded-lg border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] p-2.5 text-[11px] font-mono space-y-1.5 shadow-md"
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-[var(--atc-cyan)]">
+                  HANDOFF REQ: {h.callsign} ({h.fromController} → {h.toController})
+                </span>
+                <span className="text-[10px] text-[var(--atc-muted)]">
+                  {controllerFrequency(h.toController, sim.airport)} MHz
+                </span>
               </div>
-            ))}
+              <p className="text-[10px] text-[var(--atc-text-secondary)]">
+                {h.fromController} requested transfer of {h.callsign} to your frequency.
+              </p>
+              <div className="flex gap-1.5">
+                <button
+                  onClick={() => respondToHandoff(h.id, true)}
+                  className="flex-1 py-1 rounded bg-[var(--atc-emerald-bg)] hover:opacity-90 border border-[var(--atc-emerald-border)] text-[var(--atc-emerald)] font-bold text-xs transition-opacity"
+                >
+                  ACCEPT
+                </button>
+                <button
+                  onClick={() => respondToHandoff(h.id, false)}
+                  className="flex-1 py-1 rounded bg-[var(--atc-red-bg)] hover:opacity-90 border border-[var(--atc-red-border)] text-[var(--atc-red)] font-bold text-xs transition-opacity"
+                >
+                  REJECT
+                </button>
+              </div>
+            </div>
+          ))}
 
         {roomState?.status === "ACTIVE" && assignedRole && deckTab !== assignedRole ? (
           <div className="rounded-lg border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] p-2.5 text-[11px] font-mono text-[var(--atc-amber)]">
@@ -812,7 +821,7 @@ export const ClearanceControlDeck: React.FC = () => {
                   }
                   className="py-1.5 px-2 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-xs font-semibold disabled:opacity-35"
                 >
-                  HANDOFF → TWR
+                  HANDOFF → TWR ({controllerFrequency("TOWER", sim.airport)})
                 </button>
               </div>
             </div>
@@ -1041,7 +1050,7 @@ export const ClearanceControlDeck: React.FC = () => {
                   }
                   className="py-1.5 px-2 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-[11px] font-semibold disabled:opacity-35"
                 >
-                  HANDOFF → DEP
+                  HANDOFF → DEP ({controllerFrequency("DEPARTURE", sim.airport)})
                 </button>
                 <button
                   disabled={nordoLocked || ac.controller === "GROUND"}
@@ -1055,7 +1064,7 @@ export const ClearanceControlDeck: React.FC = () => {
                   }
                   className="py-1.5 px-2 rounded-md border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] hover:opacity-90 text-[var(--atc-amber)] font-mono text-[11px] font-semibold disabled:opacity-35"
                 >
-                  HANDOFF → GND
+                  HANDOFF → GND ({controllerFrequency("GROUND", sim.airport)})
                 </button>
               </div>
 
@@ -1512,7 +1521,7 @@ export const ClearanceControlDeck: React.FC = () => {
                   }
                   className="w-full py-1.5 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-xs font-semibold disabled:opacity-35"
                 >
-                  HANDOFF → TOWER
+                  HANDOFF → TOWER ({controllerFrequency("TOWER", sim.airport)})
                 </button>
               </div>
             );
