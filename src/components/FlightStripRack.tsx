@@ -91,6 +91,8 @@ export const FlightStripRack: React.FC = () => {
   const sim = useAtcStore((s) => s.sim);
   useAtcStore((s) => s.tickVersion);
   const focusAircraft = useAtcStore((s) => s.focusAircraft);
+  const respondToHandoff = useAtcStore((s) => s.respondToHandoff);
+  const roomState = useAtcStore((s) => s.roomState);
   const minimized = useAtcStore((s) => s.minimizedPanels.left);
   const togglePanelMinimized = useAtcStore((s) => s.togglePanelMinimized);
   const stripRefs = useRef<Record<string, HTMLButtonElement | null>>({});
@@ -121,11 +123,24 @@ export const FlightStripRack: React.FC = () => {
         ac.state !== "COMPLETED_DEPARTURE"
     );
 
+  const allHandoffs = [
+    ...(sim.handoffs ?? []),
+    ...(roomState?.handoffs ?? []),
+  ].filter((h, idx, arr) => arr.findIndex((x) => x.id === h.id) === idx);
+
+  const pendingHandoffsByAcId = new Map(
+    allHandoffs
+      .filter((h) => h.status === "PENDING" && h.toController === sim.config.activePlayerStation)
+      .map((h) => [h.aircraftId, h])
+  );
+
   const strips = activeFlights.filter((ac) => {
     if (filter === "STATION") {
-      return sim.config.activePlayerStation === "ALL"
-        ? true
-        : ac.controller === sim.config.activePlayerStation;
+      if (sim.config.activePlayerStation === "ALL") return true;
+      return (
+        ac.controller === sim.config.activePlayerStation ||
+        pendingHandoffsByAcId.has(ac.id)
+      );
     }
     if (filter === "DEP") return ac.flightKind === "DEPARTURE";
     if (filter === "ARR") return ac.flightKind === "ARRIVAL";
@@ -226,6 +241,8 @@ export const FlightStripRack: React.FC = () => {
                 label:
                   sim.config.activePlayerStation === "ALL"
                     ? "AUTO"
+                    : pendingHandoffsByAcId.size > 0
+                    ? `MY (${sim.config.activePlayerStation[0]}) · ${pendingHandoffsByAcId.size} REQ`
                     : `MY (${sim.config.activePlayerStation[0]})`,
               },
               { id: "DEP", label: "DEP" },
@@ -413,6 +430,29 @@ export const FlightStripRack: React.FC = () => {
                     {movable ? "CLEARED" : "HOLD"}
                   </span>
                 </div>
+
+                {(() => {
+                  const ho = pendingHandoffsByAcId.get(ac.id);
+                  if (!ho) return null;
+                  return (
+                    <div className="mt-1.5 px-2 py-1 rounded bg-[var(--atc-cyan-bg)] border border-[var(--atc-cyan-border)] flex items-center justify-between gap-1 text-[10px] font-mono shadow-sm">
+                      <span className="font-bold text-[var(--atc-cyan)] flex items-center gap-1 truncate">
+                        <Radio className="w-3 h-3 animate-spin-slow shrink-0" />
+                        INCOMING HANDOFF
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          respondToHandoff(ho.id, true);
+                        }}
+                        className="px-2 py-0.5 rounded bg-[var(--atc-emerald)] hover:opacity-90 text-slate-950 font-bold text-[9px] shadow-sm transition-all shrink-0"
+                      >
+                        ACCEPT
+                      </button>
+                    </div>
+                  );
+                })()}
 
                 {ac.hasReadbackError && (
                   <div className="mt-1.5 px-1.5 py-0.5 rounded bg-[var(--atc-red-bg)] border border-[var(--atc-red-border)] text-[10px] font-mono text-[var(--atc-red)] flex items-center gap-1">

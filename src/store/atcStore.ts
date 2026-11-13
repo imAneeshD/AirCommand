@@ -998,8 +998,11 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
   respondToHandoff: (handoffId, accept) => {
     const { roomState, sim } = get();
     if (roomState && roomState.status === "ACTIVE") {
-      ensureWsClient(set, get).respondHandoff(handoffId, accept);
-      return;
+      const isServerHandoff = roomState.handoffs?.some((item) => item.id === handoffId);
+      if (isServerHandoff) {
+        ensureWsClient(set, get).respondHandoff(handoffId, accept);
+        return;
+      }
     }
 
     const h = sim.handoffs?.find((item) => item.id === handoffId && item.status === "PENDING");
