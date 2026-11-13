@@ -67,7 +67,15 @@ export class HandoffService {
     responderRole: ControllerRole;
     accept: boolean;
   }): { ok: boolean; handoff?: ControllerHandoff; error?: string } {
-    const h = opts.room.handoffs.find((item) => item.id === opts.handoffId);
+    if (!opts.room.handoffs) opts.room.handoffs = [];
+    if (!opts.sim.handoffs) opts.sim.handoffs = [];
+
+    const h =
+      opts.room.handoffs.find((item) => item.id === opts.handoffId) ??
+      opts.sim.handoffs.find((item) => item.id === opts.handoffId) ??
+      opts.room.handoffs.find((item) => item.aircraftId === opts.handoffId && item.status === "PENDING") ??
+      opts.sim.handoffs.find((item) => item.aircraftId === opts.handoffId && item.status === "PENDING");
+
     if (!h) return { ok: false, error: "Handoff record not found." };
     if (h.status !== "PENDING") {
       return { ok: false, error: `Handoff already ${h.status}.` };
@@ -89,6 +97,22 @@ export class HandoffService {
     } else {
       h.status = "REJECTED";
     }
+
+    // Mirror to both room.handoffs and sim.handoffs
+    if (!opts.room.handoffs.some((item) => item.id === h.id)) {
+      opts.room.handoffs.push(h);
+    } else {
+      const idx = opts.room.handoffs.findIndex((item) => item.id === h.id);
+      if (idx >= 0) opts.room.handoffs[idx] = h;
+    }
+
+    if (!opts.sim.handoffs.some((item) => item.id === h.id)) {
+      opts.sim.handoffs.push(h);
+    } else {
+      const idx = opts.sim.handoffs.findIndex((item) => item.id === h.id);
+      if (idx >= 0) opts.sim.handoffs[idx] = h;
+    }
+
     return { ok: true, handoff: h };
   }
 }
