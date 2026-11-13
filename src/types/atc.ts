@@ -141,6 +141,7 @@ export type PilotRequestType =
   | "CLIMB_HIGHER"
   | "APPROACH_CLEARANCE"
   | "APPROACH_VECTORS"
+  | "RUNWAY_CHANGE"
   | "GATE_TAXI"
   | "HANDOFF"
   | "EMERGENCY_PRIORITY";
@@ -244,6 +245,8 @@ export interface Aircraft {
   lastTransmissionAt: number;
   trail: Array<{ x: number; y: number }>;
   minimumsGoAroundTriggered?: boolean;
+  voiceGated?: boolean;
+  requestedRunwayChange?: boolean;
 }
 
 export type TaxiNodeKind =
@@ -675,6 +678,7 @@ export interface SimulationState {
     activeLiveCount?: number;
     liveSyncEnabled?: boolean;
     lastSyncStatus?: "SYNCED" | "FETCHING" | "RATE_LIMITED" | "OFFLINE";
+    cachedTracks?: LiveAdsbTrack[];
   };
 }
 

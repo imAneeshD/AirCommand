@@ -556,15 +556,23 @@ export const RadioCommsLog: React.FC = () => {
                     {h.status === "PENDING" && (
                       <div className="flex items-center gap-1 shrink-0">
                         <button
-                          onClick={() => respondToHandoff(h.id, true)}
-                          className="px-2 py-0.5 rounded bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] border border-[var(--atc-emerald-border)] text-[10px] font-bold"
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            respondToHandoff(h.id, true);
+                          }}
+                          className="px-2 py-0.5 rounded bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] border border-[var(--atc-emerald-border)] hover:bg-[var(--atc-surface)] hover:border-[var(--atc-emerald)] text-[10px] font-bold cursor-pointer"
                           title="Accept Handoff"
                         >
                           ACCEPT
                         </button>
                         <button
-                          onClick={() => respondToHandoff(h.id, false)}
-                          className="px-2 py-0.5 rounded bg-[var(--atc-red-bg)] text-[var(--atc-red)] border border-[var(--atc-red-border)] text-[10px] font-bold"
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            respondToHandoff(h.id, false);
+                          }}
+                          className="px-2 py-0.5 rounded bg-[var(--atc-red-bg)] text-[var(--atc-red)] border border-[var(--atc-red-border)] hover:bg-[var(--atc-surface)] text-[10px] font-bold cursor-pointer"
                           title="Reject Handoff"
                         >
                           REJECT

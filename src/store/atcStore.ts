@@ -1,7 +1,9 @@
 import { create } from "zustand";
 import {
+  addRadioMessage,
   clearCrashSite,
   clearStoppedRunwayEmergency,
+  controllerCallsign,
   dispatchCrashRescue,
   haltRunwayOperations,
   requestMedicalEvacuation,
@@ -9,6 +11,8 @@ import {
   triggerEmergency,
   triggerRadioFailure,
 } from "../engine/decisionEngine.ts";
+import { runwaySpokenName } from "../data/asteriaAirport.ts";
+import { nextId } from "../engine/clearanceEngine.ts";
 import {
   createScenarioSimulation,
   setStationAutoAssist,
@@ -282,7 +286,14 @@ function dispatchRadioMessagesAudio(
       radioAudio.speakRadio(msg.text, "PILOT", msg.aircraftId ?? msg.sender, true);
     } else if (msg.category === "PILOT_READBACK") {
       radioAudio.playRadioClick("PILOT");
-      radioAudio.speakRadio(msg.text, "PILOT", msg.aircraftId ?? msg.sender, true);
+      const ac = msg.aircraftId ? sim.aircraft[msg.aircraftId] : undefined;
+      radioAudio.speakRadio(msg.text, "PILOT", msg.aircraftId ?? msg.sender, true, () => {
+        if (ac) {
+          ac.voiceGated = false;
+        }
+        if (onUpdate) onUpdate();
+        else useAtcStore.setState((s) => ({ tickVersion: s.tickVersion + 1 }));
+      });
     } else if (msg.category === "PILOT_REQUEST") {
       radioAudio.playRadioClick("PILOT");
       radioAudio.speakRadio(msg.text, "PILOT", msg.aircraftId ?? msg.sender, false);
@@ -302,7 +313,14 @@ function dispatchRadioMessagesAudio(
           else useAtcStore.setState((s) => ({ tickVersion: s.tickVersion + 1 }));
         });
       } else {
-        radioAudio.speakRadio(msg.text, "CONTROLLER", msg.controller, true);
+        radioAudio.speakRadio(msg.text, "CONTROLLER", msg.controller, true, () => {
+          // If no pending pilot readback to follow, release aircraft voice gate upon ATC speech completion
+          if (ac && (!clr || clr.lifecycle !== "READBACK_PENDING")) {
+            ac.voiceGated = false;
+            if (onUpdate) onUpdate();
+            else useAtcStore.setState((s) => ({ tickVersion: s.tickVersion + 1 }));
+          }
+        });
       }
     }
   }
@@ -1065,15 +1083,20 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
 
   respondToHandoff: (handoffId, accept) => {
     const { roomState, sim } = get();
+
+    // If in multiplayer room, always notify the server via WebSocket
     if (roomState && roomState.status === "ACTIVE") {
-      const isServerHandoff = roomState.handoffs?.some((item) => item.id === handoffId);
-      if (isServerHandoff) {
-        ensureWsClient(set, get).respondHandoff(handoffId, accept);
-        return;
-      }
+      ensureWsClient(set, get).respondHandoff(handoffId, accept);
     }
 
-    const h = sim.handoffs?.find((item) => item.id === handoffId && item.status === "PENDING");
+    const allHandoffs = [
+      ...(sim.handoffs ?? []),
+      ...(roomState?.handoffs ?? []),
+    ];
+
+    const h =
+      allHandoffs.find((item) => item.id === handoffId && item.status === "PENDING") ??
+      allHandoffs.find((item) => item.aircraftId === handoffId && item.status === "PENDING");
     if (!h) return;
 
     h.respondedAt = sim.time;
@@ -1094,31 +1117,89 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
     h.status = "ACCEPTED";
     radioAudio.playRadioClick("ATC");
 
-    // Flow: tower controller accepts -> transfer req to the plane with the signal!
-    const prevLastMsg = sim.radioLog[sim.radioLog.length - 1]?.id ?? null;
-    const res = submitClearanceDecision(
-      sim,
-      {
-        aircraftId: h.aircraftId,
-        controller: h.fromController,
-        type: "HANDOFF",
-        parameters: { targetController: h.toController, bypassPending: true },
-      },
-      "PLAYER"
-    );
+    // Immediately transfer aircraft controller locally so UI unlocks without waiting
+    const ac = sim.aircraft[h.aircraftId];
+    if (ac) {
+      if (h.toController === "ACC") {
+        ac.state = "COMPLETED_DEPARTURE";
+        ac.stateEnteredAt = sim.time;
+        ac.lastTransmissionAt = sim.time;
+        sim.metrics.departuresCompleted += 1;
+        if (ac.pendingRequest) {
+          ac.pendingRequest.resolved = true;
+        }
+      } else {
+        ac.controller = h.toController;
+        ac.lastTransmissionAt = sim.time;
 
-    if (res.ok) {
-      const newMessages = collectNewMessagesSince(sim.radioLog, prevLastMsg);
-      dispatchRadioMessagesAudio(sim, newMessages, () => {
-        set((s) => ({ tickVersion: s.tickVersion + 1 }));
-      });
+        if (h.toController === "TOWER") {
+          if (ac.flightKind === "ARRIVAL") {
+            const rwy = ac.assignedApproach ?? ac.targetRunway;
+            const msgText = `${controllerCallsign("TOWER", sim.airport)}, ${ac.spokenCallsign}, inbound ILS runway ${runwaySpokenName(rwy)}, request landing clearance.`;
+            ac.pendingRequest = {
+              id: nextId(sim, "req"),
+              type: "LANDING",
+              controller: "TOWER",
+              message: msgText,
+              requestedAt: sim.time,
+              runway: rwy,
+              resolved: false,
+            };
+            addRadioMessage(sim, {
+              sender: ac.callsign,
+              recipient: controllerCallsign("TOWER", sim.airport),
+              controller: "TOWER",
+              aircraftId: ac.id,
+              category: "PILOT_REQUEST",
+              text: msgText,
+            });
+          } else if (ac.flightKind === "DEPARTURE") {
+            const msgText = `${controllerCallsign("TOWER", sim.airport)}, ${ac.spokenCallsign}, holding short runway ${runwaySpokenName(ac.targetRunway)}, ready for departure.`;
+            ac.pendingRequest = {
+              id: nextId(sim, "req"),
+              type: "TAKEOFF",
+              controller: "TOWER",
+              message: msgText,
+              requestedAt: sim.time,
+              runway: ac.targetRunway,
+              resolved: false,
+            };
+            addRadioMessage(sim, {
+              sender: ac.callsign,
+              recipient: controllerCallsign("TOWER", sim.airport),
+              controller: "TOWER",
+              aircraftId: ac.id,
+              category: "PILOT_REQUEST",
+              text: msgText,
+            });
+          }
+        } else if (h.toController === "GROUND") {
+          const msgText = `${controllerCallsign("GROUND", sim.airport)}, ${ac.spokenCallsign}, clear of runway, request taxi to gate.`;
+          ac.pendingRequest = {
+            id: nextId(sim, "req"),
+            type: "TAXI",
+            controller: "GROUND",
+            message: msgText,
+            requestedAt: sim.time,
+            resolved: false,
+          };
+          addRadioMessage(sim, {
+            sender: ac.callsign,
+            recipient: controllerCallsign("GROUND", sim.airport),
+            controller: "GROUND",
+            aircraftId: ac.id,
+            category: "PILOT_REQUEST",
+            text: msgText,
+          });
+        }
+      }
     }
 
     set((s) => ({
       tickVersion: s.tickVersion + 1,
       lastFeedback: {
         ok: true,
-        text: `Handoff accepted. Frequency transfer sent to ${h.callsign}.`,
+        text: `Handoff accepted. ${h.callsign} transferred to ${h.toController}.`,
         at: sim.time,
       },
     }));
@@ -1150,6 +1231,7 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
     // In active multiplayer, the server steps physics at 5 Hz and pushes ROOM_SYNC
     if (roomState && roomState.status === "ACTIVE") return;
     if (sim.paused) return;
+
     const prevLastMsg = sim.radioLog[sim.radioLog.length - 1]?.id ?? null;
     const clamped = Math.min(0.1, Math.max(0, realDtSeconds));
     stepSimulation(sim, clamped * sim.timeScale);
@@ -1239,6 +1321,34 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
         : !LEGACY_IDS.has(sim.airport.id)
         ? sim.airport
         : undefined;
+
+    if (
+      sim.liveSnapshotMeta?.cachedTracks &&
+      sim.liveSnapshotMeta.cachedTracks.length > 0 &&
+      selectedAirportRecord
+    ) {
+      const conv = convertLiveTracksToSimulation({
+        airportRecord: selectedAirportRecord,
+        customLayout,
+        tracks: sim.liveSnapshotMeta.cachedTracks,
+        activeStation: sim.config.activePlayerStation,
+        scenarioId,
+        fetchedAtMs: sim.liveSnapshotMeta.fetchedAtMs,
+      });
+      set({
+        sim: conv.sim,
+        tickVersion: 0,
+        lastSpokenRadioId: null,
+        camera: getPresetCameraForStation(conv.sim.config.activePlayerStation, conv.sim.airport),
+        hoverPreviewRoute: null,
+        lastFeedback: {
+          ok: true,
+          text: `Filtered traffic to ${scenarioId} (${conv.convertedCount} flights) at ${conv.sim.airport.icao}.`,
+          at: 0,
+        },
+      });
+      return;
+    }
 
     const fresh = createScenarioSimulation(
       scenarioId,
@@ -1377,6 +1487,18 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
         lastFeedback: { ok: false, text: msg, at: sim.time },
       }));
       return;
+    }
+
+    const movementTypes = new Set(["PUSHBACK", "TAXI", "CROSS_RUNWAY", "LINE_UP", "TAKEOFF"]);
+    if (radioAudio.voiceEnabled && movementTypes.has(cmd.type) && ac) {
+      ac.voiceGated = true;
+      // Safety release fallback in case browser speech synthesis hangs or fails
+      setTimeout(() => {
+        if (ac.voiceGated) {
+          ac.voiceGated = false;
+          useAtcStore.setState((s) => ({ tickVersion: s.tickVersion + 1 }));
+        }
+      }, 5500);
     }
 
     const prevLastMsg = sim.radioLog[sim.radioLog.length - 1]?.id ?? null;
@@ -1587,15 +1709,25 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
       const next = !s.voiceEnabled;
       radioAudio.voiceEnabled = next;
       saveVoiceEnabled(next);
-      if (!next) radioAudio.stopAllSpeech();
-      return { voiceEnabled: next };
+      if (!next) {
+        radioAudio.stopAllSpeech();
+        Object.values(s.sim.aircraft).forEach((ac) => {
+          ac.voiceGated = false;
+        });
+      }
+      return { voiceEnabled: next, tickVersion: s.tickVersion + 1 };
     }),
 
   setVoiceEnabled: (enabled: boolean) =>
-    set(() => {
+    set((s) => {
       radioAudio.voiceEnabled = enabled;
       saveVoiceEnabled(enabled);
-      if (!enabled) radioAudio.stopAllSpeech();
-      return { voiceEnabled: enabled };
+      if (!enabled) {
+        radioAudio.stopAllSpeech();
+        Object.values(s.sim.aircraft).forEach((ac) => {
+          ac.voiceGated = false;
+        });
+      }
+      return { voiceEnabled: enabled, tickVersion: s.tickVersion + 1 };
     }),
 }));

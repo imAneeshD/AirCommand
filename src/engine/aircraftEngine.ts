@@ -5,6 +5,7 @@ import {
   headingDiffDeg,
   runwaySpokenName,
 } from "../data/asteriaAirport.ts";
+import { hashCallsign } from "../data/aircraftCatalog.ts";
 import type { Aircraft, RunwayId, RunwaySpec, SimulationState } from "../types/atc.ts";
 import { formatGateIcao } from "../utils/natoPhonetics.ts";
 import { completeClearancesOfType, nextId } from "./clearanceEngine.ts";
@@ -396,6 +397,31 @@ export function updateAircraftStates(state: SimulationState): void {
           along >= -9.0 &&
           headingDiffDeg(ac.heading, rwy.heading) < 30;
 
+        if (!ac.requestedRunwayChange && state.airport.runwayIds.length >= 2 && along < -7.0 && along > -14.0) {
+          if (hashCallsign(ac.callsign) % 5 === 0) {
+            const curRwy = ac.assignedApproach ?? ac.targetRunway;
+            const curSpec = state.airport.runways[curRwy];
+            const altRwy =
+              state.airport.runwayIds.find((r) => {
+                if (r === curRwy) return false;
+                const s = state.airport.runways[r];
+                return s && Math.abs(headingDiffDeg(s.heading, curSpec?.heading ?? 0)) < 45;
+              }) ?? state.airport.runwayIds.find((r) => r !== curRwy);
+
+            if (altRwy) {
+              ac.requestedRunwayChange = true;
+              issuePilotRequestIfNeeded(
+                state,
+                ac,
+                "RUNWAY_CHANGE",
+                ac.controller,
+                `${controllerCallsign(ac.controller, state.airport, ac.flightKind)}, ${ac.spokenCallsign}, request runway change to runway ${runwaySpokenName(altRwy)} due to wind/approach conditions.`,
+                altRwy
+              );
+            }
+          }
+        }
+
         if (!ac.assignedApproach && along > -9.5 && ac.commStatus === "NORMAL") {
           issuePilotRequestIfNeeded(
             state,
@@ -640,14 +666,38 @@ export function updateAircraftStates(state: SimulationState): void {
             ac.controller === "DEPARTURE"
               ? appName
               : controllerCallsign(ac.controller, state.airport, ac.flightKind);
-          issuePilotRequestIfNeeded(
-            state,
-            ac,
-            "APPROACH_VECTORS",
-            ac.controller,
-            `${recipientName}, ${ac.spokenCallsign}, climbing on missed approach, request vectors back to ILS runway ${runwaySpokenName(ac.targetRunway)}.`,
-            ac.targetRunway
-          );
+
+          if (!ac.requestedRunwayChange && state.airport.runwayIds.length >= 2 && hashCallsign(ac.callsign) % 3 === 0) {
+            const curRwy = ac.assignedApproach ?? ac.targetRunway;
+            const curSpec = state.airport.runways[curRwy];
+            const altRwy =
+              state.airport.runwayIds.find((r) => {
+                if (r === curRwy) return false;
+                const s = state.airport.runways[r];
+                return s && Math.abs(headingDiffDeg(s.heading, curSpec?.heading ?? 0)) < 45;
+              }) ?? state.airport.runwayIds.find((r) => r !== curRwy);
+
+            if (altRwy) {
+              ac.requestedRunwayChange = true;
+              issuePilotRequestIfNeeded(
+                state,
+                ac,
+                "RUNWAY_CHANGE",
+                ac.controller,
+                `${recipientName}, ${ac.spokenCallsign}, missed approach runway ${runwaySpokenName(curRwy)}, request runway change to runway ${runwaySpokenName(altRwy)} for next attempt.`,
+                altRwy
+              );
+            }
+          } else {
+            issuePilotRequestIfNeeded(
+              state,
+              ac,
+              "APPROACH_VECTORS",
+              ac.controller,
+              `${recipientName}, ${ac.spokenCallsign}, climbing on missed approach, request vectors back to ILS runway ${runwaySpokenName(ac.targetRunway)}.`,
+              ac.targetRunway
+            );
+          }
         }
         if (ac.altitude >= elev + 2600) {
           ac.state = "APPROACH";
