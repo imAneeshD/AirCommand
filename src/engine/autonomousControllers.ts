@@ -6,6 +6,7 @@ import {
   headingDiffDeg,
 } from "../data/asteriaAirport.ts";
 import type { Aircraft, ControllerRole, RunwayId, SimulationState } from "../types/atc.ts";
+import { buildResolutionCommands, inspectGroundConflict } from "../utils/groundConflict.ts";
 import { getPendingReadbackClearances } from "./clearanceEngine.ts";
 import { submitClearanceDecision } from "./decisionEngine.ts";
 import { isRunwayOccupied } from "./validationEngine.ts";
@@ -268,6 +269,29 @@ function runAutonomousGround(state: SimulationState): void {
             },
             "AUTONOMOUS"
           );
+        }
+      }
+      continue;
+    }
+
+    // Automatically break mutual taxiway deadlocks under Autonomous Ground control
+    if (
+      (ac.state === "TAXIING" || ac.state === "HOLD_POSITION") &&
+      ac.speed <= 1 &&
+      state.time - ac.stateEnteredAt >= 3.5 &&
+      !ac.yieldToAircraftId &&
+      !ac.stepBackTargetNodeId
+    ) {
+      const conflict = inspectGroundConflict(state, ac);
+      if (conflict?.mutualDeadlock && conflict.blocker) {
+        const iShouldYield =
+          (ac.flightKind === "DEPARTURE" && conflict.blocker.flightKind === "ARRIVAL") ||
+          (ac.flightKind === conflict.blocker.flightKind && ac.id < conflict.blocker.id);
+        if (iShouldYield) {
+          const cmds = buildResolutionCommands(state, ac, "AUTO_RESOLVE");
+          for (const cmd of cmds) {
+            submitClearanceDecision(state, cmd, "AUTONOMOUS");
+          }
         }
       }
     }

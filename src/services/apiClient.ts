@@ -29,6 +29,27 @@ export interface AirportDetailResponse {
   error: string | null;
 }
 
+export interface AircraftPhotoResponse {
+  found: boolean;
+  url?: string;
+  fullUrl?: string;
+  source?: string;
+  photographer?: string;
+  caption?: string;
+  matchedBy?: "icao24_hex" | "registration" | "airline_model" | "model_only";
+}
+
+export interface OpenSkyMetadataResponse {
+  found: boolean;
+  icao24: string;
+  registration: string | null;
+  manufacturer: string | null;
+  model: string | null;
+  typecode: string | null;
+  operator: string | null;
+  operatorIcao: string | null;
+}
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
@@ -91,6 +112,28 @@ export const apiClient = {
       radiusDeg: String(radiusDeg),
     });
     return fetchJson(`/api/adsb/live?${sp.toString()}`);
+  },
+
+  async getAircraftMetadata(icao24: string): Promise<OpenSkyMetadataResponse> {
+    return fetchJson(`/api/aircraft/metadata?icao24=${encodeURIComponent(icao24)}`);
+  },
+
+  async getAircraftPhoto(params: {
+    icao24?: string;
+    preferRegistration?: boolean;
+    airline?: string;
+    model?: string;
+    typeCode?: string;
+    registration?: string;
+  }): Promise<AircraftPhotoResponse> {
+    const sp = new URLSearchParams();
+    if (params.icao24) sp.set("icao24", params.icao24);
+    if (params.preferRegistration) sp.set("preferReg", "1");
+    if (params.airline) sp.set("airline", params.airline);
+    if (params.model) sp.set("model", params.model);
+    if (params.typeCode) sp.set("type", params.typeCode);
+    if (params.registration) sp.set("reg", params.registration);
+    return fetchJson(`/api/aircraft/photo?${sp.toString()}`);
   },
 
   async createRoom(payload: {

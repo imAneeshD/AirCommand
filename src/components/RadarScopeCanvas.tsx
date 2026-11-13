@@ -1,10 +1,14 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Compass, Minus, Plus, PlaneLanding, PlaneTakeoff, Radio, RotateCcw } from "lucide-react";
+import { Compass, ExternalLink, Minus, Plus, PlaneLanding, PlaneTakeoff, Radio, RotateCcw, Wifi, X } from "lucide-react";
+import { getAircraftTypeSpec, getAirlineLivery } from "../data/aircraftCatalog.ts";
 import { runwayPoint } from "../data/asteriaAirport.ts";
 import { isRunwayOccupied } from "../engine/validationEngine.ts";
+import { apiClient, type OpenSkyMetadataResponse } from "../services/apiClient.ts";
 import { useAtcStore, type CameraState } from "../store/atcStore.ts";
-import type { Aircraft, AirportLayout, RunwaySpec, SimulationState, TaxiwayName } from "../types/atc.ts";
+import type { Aircraft, AirportLayout, LiveAdsbTrack, RunwaySpec, SimulationState, TaxiwayName } from "../types/atc.ts";
 import { drawGeoreferencedTilesToCanvas } from "../utils/canvasTileLayer.ts";
+import { computeDepAppGuidance } from "../utils/depAppGuidance.ts";
+import { latLonToLocalNm } from "../utils/geo.ts";
 import {
   hitTestAircraftOrLabel,
   placeAircraftLabels,
@@ -15,6 +19,7 @@ import {
 import { radioAudio } from "../utils/radioAudio.ts";
 import { getActiveCallingSignals, type ActiveCallerSignal } from "../utils/radioSignals.ts";
 import { getAglAltitudeFt, isSurfaceAircraft } from "../utils/telemetry.ts";
+import { AircraftPhotoFrame } from "./AircraftPhotoFrame.tsx";
 
 type ScopeBasemapLayer = "hybrid" | "satellite" | "chart";
 
@@ -336,6 +341,12 @@ export const RadarScopeCanvas: React.FC = () => {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [scopeLayer, setScopeLayer] = useState<ScopeBasemapLayer>("hybrid");
   const [ttsVersion, setTtsVersion] = useState(0);
+  const [showLiveAdsbOverlay, setShowLiveAdsbOverlay] = useState(false);
+  const [liveTracks, setLiveTracks] = useState<LiveAdsbTrack[]>([]);
+  const [liveRateLimited, setLiveRateLimited] = useState(false);
+  const [selectedLiveIcao24, setSelectedLiveIcao24] = useState<string | null>(null);
+  const [selectedLiveMeta, setSelectedLiveMeta] = useState<OpenSkyMetadataResponse | null>(null);
+  const liveTrackHitsRef = useRef<Array<{ icao24: string; x: number; y: number }>>([]);
 
   useEffect(() => {
     return radioAudio.subscribe(() => setTtsVersion((v) => v + 1));
@@ -355,6 +366,57 @@ export const RadarScopeCanvas: React.FC = () => {
 
   const activeCallers = getActiveCallingSignals(sim, radioAudio.getActiveTransmission());
   const primaryCaller = activeCallers[0] ?? null;
+
+  useEffect(() => {
+    const lat = sim.airport.lat;
+    const lon = sim.airport.lon;
+    if (!showLiveAdsbOverlay || !sim.airport.isRealWorld || lat === undefined || lon === undefined) {
+      return;
+    }
+    let cancelled = false;
+    const loadLive = () => {
+      apiClient
+        .getLiveAdsb(lat, lon, 1.5)
+        .then((snap) => {
+          if (cancelled) return;
+          setLiveTracks(snap.tracks);
+          setLiveRateLimited(Boolean(snap.rateLimited));
+        })
+        .catch(() => {});
+    };
+    loadLive();
+    const id = setInterval(loadLive, 15_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [showLiveAdsbOverlay, sim.airport.icao, sim.airport.isRealWorld, sim.airport.lat, sim.airport.lon]);
+
+  const selectedLiveTrack = selectedLiveIcao24
+    ? liveTracks.find((t) => t.icao24 === selectedLiveIcao24) ?? null
+    : null;
+
+  useEffect(() => {
+    if (!selectedLiveTrack) {
+      setSelectedLiveMeta(null);
+      return;
+    }
+    if (selectedLiveTrack.registration && (selectedLiveTrack.aircraftType || selectedLiveTrack.model)) {
+      setSelectedLiveMeta(null);
+      return;
+    }
+    let cancelled = false;
+    setSelectedLiveMeta(null);
+    apiClient
+      .getAircraftMetadata(selectedLiveTrack.icao24)
+      .then((m) => {
+        if (!cancelled && m.found) setSelectedLiveMeta(m);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedLiveTrack?.icao24, selectedLiveTrack?.registration, selectedLiveTrack?.aircraftType, selectedLiveTrack?.model]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -388,8 +450,24 @@ export const RadarScopeCanvas: React.FC = () => {
       scopeLayer,
       activeCallers
     );
+    if (showLiveAdsbOverlay && sim.airport.isRealWorld && sim.airport.lat !== undefined && sim.airport.lon !== undefined) {
+      liveTrackHitsRef.current = drawLiveAdsbOverlay(
+        ctx,
+        width,
+        height,
+        sim.airport.lat,
+        sim.airport.lon,
+        camera,
+        getRotRad(sim.airport),
+        liveTracks,
+        selectedLiveIcao24,
+        theme
+      );
+    } else {
+      liveTrackHitsRef.current = [];
+    }
     ctx.restore();
-  }, [sim, tickVersion, ttsVersion, camera, hoverPreviewRoute, hoveredId, theme, scopeLayer]);
+  }, [sim, tickVersion, ttsVersion, camera, hoverPreviewRoute, hoveredId, theme, scopeLayer, showLiveAdsbOverlay, liveTracks, selectedLiveIcao24]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -482,6 +560,18 @@ export const RadarScopeCanvas: React.FC = () => {
       const hitId = findAircraftAtScreen(sx, sy);
       if (hitId) {
         selectAircraft(hitId);
+        setSelectedLiveIcao24(null);
+      } else if (showLiveAdsbOverlay && liveTrackHitsRef.current.length > 0) {
+        let bestHex: string | null = null;
+        let bestDist = 18;
+        for (const h of liveTrackHitsRef.current) {
+          const d = Math.hypot(h.x - sx, h.y - sy);
+          if (d < bestDist) {
+            bestDist = d;
+            bestHex = h.icao24;
+          }
+        }
+        setSelectedLiveIcao24(bestHex);
       }
     }
     dragRef.current.active = false;
@@ -609,30 +699,159 @@ export const RadarScopeCanvas: React.FC = () => {
         </div>
 
         {sim.airport.isRealWorld && sim.airport.lat !== undefined && sim.airport.lon !== undefined && (
-          <div className="flex items-center bg-[var(--atc-surface)]/95 border border-[var(--atc-border)] shadow-[var(--atc-shadow)] rounded-md p-0.5 backdrop-blur-sm">
-            {(
-              [
-                { id: "hybrid", label: "HYBRID" },
-                { id: "satellite", label: "SAT" },
-                { id: "chart", label: "CHART" },
-              ] as const
-            ).map((m) => (
-              <button
-                key={m.id}
-                onClick={() => setScopeLayer(m.id)}
-                title="Switch real-world airport underlay (Satellite + OSM Hybrid / Full Satellite / Vector Chart)"
-                className={`px-2 py-1 rounded text-[10px] font-mono font-bold transition-colors ${
-                  scopeLayer === m.id
-                    ? "bg-[var(--atc-accent-soft)] text-[var(--atc-accent-text)] border border-[var(--atc-accent-border)]"
-                    : "text-[var(--atc-muted)] hover:text-[var(--atc-text)]"
-                }`}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
+          <>
+            <div className="flex items-center bg-[var(--atc-surface)]/95 border border-[var(--atc-border)] shadow-[var(--atc-shadow)] rounded-md p-0.5 backdrop-blur-sm">
+              {(
+                [
+                  { id: "hybrid", label: "HYBRID" },
+                  { id: "satellite", label: "SAT" },
+                  { id: "chart", label: "CHART" },
+                ] as const
+              ).map((m) => (
+                <button
+                  key={m.id}
+                  onClick={() => setScopeLayer(m.id)}
+                  title="Switch real-world airport underlay (Satellite + OSM Hybrid / Full Satellite / Vector Chart)"
+                  className={`px-2 py-1 rounded text-[10px] font-mono font-bold transition-colors ${
+                    scopeLayer === m.id
+                      ? "bg-[var(--atc-accent-soft)] text-[var(--atc-accent-text)] border border-[var(--atc-accent-border)]"
+                      : "text-[var(--atc-muted)] hover:text-[var(--atc-text)]"
+                  }`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setShowLiveAdsbOverlay((v) => {
+                  if (v) setSelectedLiveIcao24(null);
+                  return !v;
+                });
+              }}
+              title={
+                liveRateLimited
+                  ? "OpenSky live feed rate-limited; showing cached positions"
+                  : "Overlay real-world OpenSky ADS-B aircraft live on this radar scope (click any target for photo & metadata)"
+              }
+              className={`px-2.5 py-1 rounded-md border text-[10px] font-mono font-bold flex items-center gap-1.5 shadow-[var(--atc-shadow)] backdrop-blur-sm transition-colors ${
+                showLiveAdsbOverlay
+                  ? "bg-sky-500/20 border-sky-400 text-sky-400"
+                  : "bg-[var(--atc-surface)]/95 border-[var(--atc-border)] text-[var(--atc-muted)] hover:text-[var(--atc-text)]"
+              }`}
+            >
+              <Wifi className={`w-3 h-3 ${showLiveAdsbOverlay ? "animate-pulse" : ""}`} />
+              <span>LIVE ADS-B{showLiveAdsbOverlay && liveTracks.length > 0 ? ` (${liveTracks.length})` : ""}</span>
+            </button>
+          </>
         )}
       </div>
+
+      {/* Selected OpenSky Live ADS-B Target Popup Card (with real aircraft photo + metadata) */}
+      {showLiveAdsbOverlay && selectedLiveTrack && (
+        (() => {
+          const effReg = selectedLiveTrack.registration ?? selectedLiveMeta?.registration ?? "";
+          const effType = selectedLiveTrack.aircraftType ?? selectedLiveMeta?.typecode ?? "";
+          const effModel = selectedLiveTrack.model ?? selectedLiveMeta?.model ?? "";
+          const effOperator =
+            selectedLiveTrack.operator ??
+            selectedLiveMeta?.operator ??
+            selectedLiveTrack.originCountry ??
+            "OpenSky Traffic";
+          const baseSpec = getAircraftTypeSpec(effType || "A320");
+          const spec = effModel
+            ? {
+                ...baseSpec,
+                code: effType || baseSpec.code,
+                model: effModel,
+                manufacturer:
+                  selectedLiveTrack.manufacturer ?? selectedLiveMeta?.manufacturer ?? baseSpec.manufacturer,
+              }
+            : baseSpec;
+          const livery = getAirlineLivery({
+            callsign: selectedLiveTrack.callsign ?? selectedLiveTrack.icao24.toUpperCase(),
+            airline: effOperator,
+          });
+          return (
+            <div className="absolute bottom-14 left-3 z-20 w-72 rounded-xl border border-sky-500/40 bg-[var(--atc-panel)]/95 backdrop-blur-md shadow-xl p-2.5 space-y-2 text-xs font-mono">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="px-1.5 py-0.5 rounded bg-sky-500/15 border border-sky-400/40 text-sky-400 text-[9px] font-bold">
+                      OPENSKY LIVE
+                    </span>
+                    <span className="font-extrabold text-sm text-[var(--atc-text)] truncate">
+                      {selectedLiveTrack.callsign ?? selectedLiveTrack.icao24.toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-[var(--atc-muted)] truncate mt-0.5">
+                    {effOperator} • Hex {selectedLiveTrack.icao24.toUpperCase()}
+                    {effReg ? ` • Reg ${effReg}` : ""}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedLiveIcao24(null)}
+                  className="p-1 rounded hover:bg-[var(--atc-surface-alt)] text-[var(--atc-muted)]"
+                  title="Close live target details"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <AircraftPhotoFrame
+                icao24={selectedLiveTrack.icao24}
+                spec={spec}
+                livery={livery}
+                registration={effReg}
+                elevationFt={sim.airport.elevationFt}
+                theme={theme}
+              />
+
+              <div className="grid grid-cols-3 gap-1.5 text-[10px]">
+                <div className="px-1.5 py-1 rounded bg-[var(--atc-surface-alt)] border border-[var(--atc-border)]">
+                  <span className="text-[8px] text-[var(--atc-muted)] block">MODEL</span>
+                  <span className="font-bold text-[var(--atc-text)] truncate block">
+                    {effModel || effType || "Unknown"}
+                  </span>
+                </div>
+                <div className="px-1.5 py-1 rounded bg-[var(--atc-surface-alt)] border border-[var(--atc-border)]">
+                  <span className="text-[8px] text-[var(--atc-muted)] block">ALT / GS</span>
+                  <span className="font-bold text-[var(--atc-text)] truncate block">
+                    {selectedLiveTrack.onGround
+                      ? "GND"
+                      : selectedLiveTrack.baroAltFt !== null
+                      ? `${selectedLiveTrack.baroAltFt.toLocaleString()}ft`
+                      : "--"}{" "}
+                    · {selectedLiveTrack.groundSpeedKts ?? "--"}kt
+                  </span>
+                </div>
+                <div className="px-1.5 py-1 rounded bg-[var(--atc-surface-alt)] border border-[var(--atc-border)]">
+                  <span className="text-[8px] text-[var(--atc-muted)] block">HDG / VS</span>
+                  <span className="font-bold text-[var(--atc-text)] truncate block">
+                    {selectedLiveTrack.trackDeg ?? "--"}° ·{" "}
+                    {selectedLiveTrack.verticalRateFpm !== null
+                      ? `${selectedLiveTrack.verticalRateFpm > 0 ? "+" : ""}${selectedLiveTrack.verticalRateFpm}`
+                      : "--"}
+                  </span>
+                </div>
+              </div>
+
+              <a
+                href={`https://map.opensky-network.org/?icao=${encodeURIComponent(selectedLiveTrack.icao24)}`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center justify-center gap-1.5 py-1 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)] hover:bg-[var(--atc-surface-alt)] text-[10px] text-[var(--atc-accent-text)] font-bold"
+              >
+                <span>Open on OpenSky Network</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+          );
+        })()
+      )}
 
       {/* Top-Right Micro Legend (placed left of Compass Rose) */}
       <div className="pointer-events-none absolute top-2.5 right-14 px-2.5 py-1 rounded-md bg-[var(--atc-surface)]/92 border border-[var(--atc-border)] shadow-[var(--atc-shadow)] text-[10px] font-mono text-[var(--atc-muted)] hidden xl:flex items-center gap-3 backdrop-blur-sm">
@@ -1572,7 +1791,7 @@ function drawScope(
     );
   }
 
-  // Airborne Vector Line for Selected Aircraft
+  // Airborne Vector Line + Suggested Go-Around Return Path for Selected Aircraft
   if (selectedAc && selectedAc.altitude > sim.airport.elevationFt + 50) {
     const [ax, ay] = toScreen(selectedAc.x, selectedAc.y);
     if (selectedAc.assignedDirectFix && sim.airport.fixes[selectedAc.assignedDirectFix]) {
@@ -1586,6 +1805,29 @@ function drawScope(
       ctx.lineTo(fx, fy);
       ctx.stroke();
       ctx.setLineDash([]);
+    }
+
+    if (
+      selectedAc.state === "GO_AROUND" ||
+      selectedAc.state === "MISSED_APPROACH"
+    ) {
+      const guidance = computeDepAppGuidance(sim.airport, selectedAc);
+      if (guidance.recoveryPreviewPoints.length >= 2) {
+        const recPts: ScreenPt[] = guidance.recoveryPreviewPoints.map((pt) => {
+          const [sx, sy] = toScreen(pt.x, pt.y);
+          return { x: sx, y: sy };
+        });
+        ctx.save();
+        traceRoundedPolylinePath(ctx, recPts, 28, false);
+        ctx.strokeStyle = isLight
+          ? "rgba(217, 119, 6, 0.65)"
+          : "rgba(245, 158, 11, 0.72)";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 5]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
     }
   }
 
@@ -1924,4 +2166,72 @@ function drawScope(
   // 5. True North Compass Indicator (Top-Right)
   drawCompassNorthArrow(ctx, w, rotRad, isLight);
   return drawnLabelHits;
+}
+
+function drawLiveAdsbOverlay(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  airportLat: number,
+  airportLon: number,
+  cam: CameraState,
+  rotRad: number,
+  tracks: LiveAdsbTrack[],
+  selectedIcao24: string | null,
+  theme: "light" | "dark"
+): Array<{ icao24: string; x: number; y: number }> {
+  const isLight = theme === "light";
+  const hits: Array<{ icao24: string; x: number; y: number }> = [];
+
+  for (const t of tracks) {
+    const local = latLonToLocalNm(t.lat, t.lon, airportLat, airportLon);
+    const [sx, sy] = worldToScreen(local.x, local.y, w, h, cam, rotRad);
+    if (sx < -40 || sy < -40 || sx > w + 40 || sy > h + 40) continue;
+
+    hits.push({ icao24: t.icao24, x: sx, y: sy });
+    const isSel = selectedIcao24 === t.icao24;
+    const color = isSel ? "#f59e0b" : isLight ? "#0284c7" : "#38bdf8";
+
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.fillStyle = isSel ? "rgba(245, 158, 11, 0.25)" : "rgba(56, 189, 248, 0.15)";
+    ctx.lineWidth = isSel ? 2 : 1.3;
+
+    // Dashed open-sky halo + track vector
+    ctx.beginPath();
+    ctx.arc(sx, sy, isSel ? 8 : 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    if (t.trackDeg !== null && !t.onGround) {
+      const ang = (t.trackDeg * Math.PI) / 180 + rotRad;
+      ctx.beginPath();
+      ctx.moveTo(sx + Math.sin(ang) * 6, sy - Math.cos(ang) * 6);
+      ctx.lineTo(sx + Math.sin(ang) * 18, sy - Math.cos(ang) * 18);
+      ctx.stroke();
+    }
+
+    const label = `LIVE ${t.callsign ?? t.icao24.toUpperCase()}`;
+    const sub = `${t.onGround ? "GND" : t.baroAltFt !== null ? `${Math.round(t.baroAltFt / 100)}FL` : "--"} ${t.groundSpeedKts ?? "--"}kt`;
+    ctx.font = "700 9px 'JetBrains Mono', monospace";
+    const boxW = Math.max(label.length, sub.length) * 5.6 + 10;
+    const boxX = sx + 10;
+    const boxY = sy - 11;
+
+    ctx.fillStyle = isLight ? "rgba(255, 255, 255, 0.9)" : "rgba(8, 22, 38, 0.88)";
+    ctx.strokeStyle = isSel ? "#f59e0b" : "rgba(56, 189, 248, 0.6)";
+    ctx.lineWidth = 1;
+    drawRoundedRect(ctx, boxX, boxY, boxW, 21, 3);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = color;
+    ctx.fillText(label, boxX + 5, boxY + 9);
+    ctx.fillStyle = isLight ? "#475569" : "#cbd5e1";
+    ctx.font = "500 8px 'JetBrains Mono', monospace";
+    ctx.fillText(sub, boxX + 5, boxY + 18);
+    ctx.restore();
+  }
+
+  return hits;
 }

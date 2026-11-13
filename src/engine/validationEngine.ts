@@ -560,14 +560,17 @@ export function isRunwayOccupied(
   };
 }
 
-export function isTrafficAheadOnPath(
+export function findBlockingTrafficAhead(
   aircraft: Aircraft,
   simulation: SimulationState,
   minDistanceNm = 0.055
-): boolean {
+): Aircraft | null {
   const rad = (aircraft.heading * Math.PI) / 180;
   const fwdX = Math.sin(rad);
   const fwdY = Math.cos(rad);
+
+  let closest: Aircraft | null = null;
+  let closestDist = Infinity;
 
   for (const otherId of simulation.aircraftOrder) {
     if (otherId === aircraft.id) continue;
@@ -583,13 +586,31 @@ export function isTrafficAheadOnPath(
     const dx = other.x - aircraft.x;
     const dy = other.y - aircraft.y;
     const dist = Math.hypot(dx, dy);
-    if (dist > minDistanceNm || dist < 0.0001) continue;
 
-    // Only stop if the other aircraft is in front of our nose (dot > 0.5)
+    // If the other aircraft explicitly yielded / stepped aside to let us pass,
+    // allow closer lateral clearance unless it sits dead-center on our nose.
+    const otherYieldingToUs =
+      other.yieldToAircraftId === aircraft.id &&
+      other.state === "HOLD_POSITION" &&
+      other.speed < 1;
+    const effDist = otherYieldingToUs ? Math.min(minDistanceNm, 0.025) : minDistanceNm;
+    const effDot = otherYieldingToUs ? 0.86 : 0.5;
+
+    if (dist > effDist || dist < 0.0001) continue;
+
     const dot = (dx * fwdX + dy * fwdY) / dist;
-    if (dot > 0.5) {
-      return true;
+    if (dot > effDot && dist < closestDist) {
+      closest = other;
+      closestDist = dist;
     }
   }
-  return false;
+  return closest;
+}
+
+export function isTrafficAheadOnPath(
+  aircraft: Aircraft,
+  simulation: SimulationState,
+  minDistanceNm = 0.055
+): boolean {
+  return findBlockingTrafficAhead(aircraft, simulation, minDistanceNm) !== null;
 }

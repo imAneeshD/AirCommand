@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createBaseSimulation, createDepartureAircraft, stepSimulation } from "../src/engine/simulation.ts";
-import { submitClearanceDecision } from "../src/engine/decisionEngine.ts";
+import { submitClearanceDecision, acknowledgeSyncClearance } from "../src/engine/decisionEngine.ts";
 import { collectNewMessagesSince } from "../src/store/atcStore.ts";
 import {
   ICAO_PHONETIC_TABLE,
@@ -146,4 +146,41 @@ test("Both ATC commands and pilot replies are captured cleanly for immediate and
   for (let i = 0; i < 10; i++) stepSimulation(s, 0.2);
   const pbReplyMsgs = collectNewMessagesSince(s.radioLog, beforeTick);
   assert.equal(pbReplyMsgs.some((m) => m.category === "PILOT_READBACK"), true);
+});
+
+test("Single-role synchronous clearance waits for acknowledgeSyncClearance before plane begins movement", () => {
+  const s = createBaseSimulation("SANDBOX", "GROUND");
+  s.config.autoSpawnTraffic = false;
+  s.config.readbackErrorProbability = 0;
+  const ual = createDepartureAircraft(s, {
+    callsign: "UAL452",
+    spokenCallsign: "United 452",
+    gateId: "B12",
+    targetRunway: "09L",
+    requiresPushback: true,
+  });
+
+  const res = submitClearanceDecision(s, { aircraftId: ual.id, controller: "GROUND", type: "PUSHBACK" }, "PLAYER");
+  assert.equal(res.ok, true);
+  assert.ok(res.clearance);
+
+  // In sync-gated mode, mark syncGated = true
+  res.clearance.syncGated = true;
+
+  // Step simulation for 3 seconds — plane must stay at gate waiting!
+  for (let i = 0; i < 15; i++) stepSimulation(s, 0.2);
+  assert.equal(ual.state, "AT_GATE");
+  assert.equal(res.clearance.lifecycle, "READBACK_PENDING");
+
+  // On controller voice completion, sync gate releases and pilot reads back once:
+  res.clearance.syncGated = false;
+  res.clearance.readbackDueAt = s.time;
+  stepSimulation(s, 0.2);
+  assert.equal(res.clearance.lifecycle, "ACTIVE");
+  assert.ok(ual.state === "PUSHBACK_APPROVED" || ual.state === "PUSHING_BACK");
+
+  // Verify clean single to-and-fro exchange: exactly 1 ATC command and 1 pilot reply
+  const msgs = s.radioLog.filter((m) => m.aircraftId === ual.id);
+  assert.equal(msgs.filter((m) => m.category === "ATC_CLEARANCE").length, 1);
+  assert.equal(msgs.filter((m) => m.category === "PILOT_READBACK").length, 1);
 });

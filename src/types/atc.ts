@@ -88,6 +88,7 @@ export interface ATCClearance {
   phraseology: string;
   expectedReadbackText: string;
   actualReadbackText?: string;
+  syncGated?: boolean;
 }
 
 export type OperationalAction =
@@ -136,6 +137,7 @@ export type PilotRequestType =
   | "LANDING"
   | "CLIMB_HIGHER"
   | "APPROACH_CLEARANCE"
+  | "APPROACH_VECTORS"
   | "GATE_TAXI"
   | "EMERGENCY_PRIORITY";
 
@@ -166,6 +168,7 @@ export interface Aircraft {
   destinationIcao?: string;
   destinationName?: string;
   registration?: string;
+  icao24?: string;
   cruiseFlightLevel?: string;
   soulsOnBoard?: string;
   fuelRemainingPct?: number;
@@ -196,6 +199,8 @@ export interface Aircraft {
   routeStepIndex: number;
   holdingAtRunway?: RunwayId;
   holdingShortReason?: "DEPARTURE_RUNWAY" | "CROSSING_REQUIRED" | "ATC_INSTRUCTION" | "ROUTE_END" | "TRAFFIC";
+  yieldToAircraftId?: string;
+  stepBackTargetNodeId?: string;
   crossRunwayCleared: Record<string, boolean>;
   lightGunAuthorized?: LightGunSignal;
   vacatingExitNodeId?: string;
@@ -505,6 +510,9 @@ export interface LiveAdsbTrack {
   callsign: string | null;
   registration: string | null;
   aircraftType: string | null;
+  manufacturer?: string | null;
+  model?: string | null;
+  operator?: string | null;
   originCountry: string | null;
   lat: number;
   lon: number;

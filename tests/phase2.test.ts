@@ -24,14 +24,22 @@ import { convertLiveTracksToSimulation } from "../src/utils/liveToSim.ts";
 import { hitTestAircraftOrLabel, placeAircraftLabels } from "../src/utils/labelLayout.ts";
 import { getActiveCallingSignals } from "../src/utils/radioSignals.ts";
 import { computePilotSpeechProfile } from "../src/utils/radioAudio.ts";
+import { computeDepAppGuidance } from "../src/utils/depAppGuidance.ts";
+import {
+  buildResolutionCommands,
+  getDeadlockedAircraftIds,
+  inspectGroundConflict,
+} from "../src/utils/groundConflict.ts";
 import { normalizeSpokenNumbers, parseAtcVoiceCommand } from "../src/utils/voiceCommandParser.ts";
 import { convertAirportBundleToLayout } from "../src/utils/osmToAirport.ts";
 import { loadSavedVoiceEnabled, saveVoiceEnabled } from "../src/utils/storage.ts";
 import { computeAircraftPitchDeg, formatAltitudeReadout } from "../src/utils/telemetry.ts";
 import { DatabaseService } from "../server/db/DatabaseService.ts";
 import { ADSBProviderService, type ADSBProvider } from "../server/services/ADSBProviderService.ts";
+import { AircraftPhotoService } from "../server/services/AircraftPhotoService.ts";
 import { AirportGeometryService } from "../server/services/AirportGeometryService.ts";
 import { AirportImportService } from "../server/services/AirportImportService.ts";
+import { OpenSkyMetadataService } from "../server/services/OpenSkyMetadataService.ts";
 import { AirportService } from "../server/services/AirportService.ts";
 import { MultiplayerRoomService } from "../server/services/MultiplayerRoomService.ts";
 
@@ -1218,4 +1226,433 @@ test("LOW_TRAFFIC scenario spawns only 2 aircraft initially and caps active traf
   spawnRandomTraffic(sim, "ARRIVAL");
   spawnRandomTraffic(sim, "DEPARTURE");
   assert.equal(sim.aircraftOrder.length, 3, "LOW_TRAFFIC must cap active traffic at 3 planes");
+});
+
+test("DEP/APP guidance computes Go-Around return vectors & form suggestions and navigates Go-Around aircraft back to runway", () => {
+  const sim = createScenarioSimulation("SANDBOX", "ALL", "KAST");
+  sim.config.autoSpawnTraffic = false;
+  sim.config.autoManageOtherStations = false;
+  sim.config.readbackErrorProbability = 0;
+
+  const rwyId = sim.airport.primaryArrivalRunway;
+  const rwy = sim.airport.runways[rwyId];
+
+  // 1. Go-around aircraft past threshold climbing out
+  const arr = createArrivalAircraft(sim, {
+    callsign: "DAL814",
+    spokenCallsign: "Delta 814",
+    x: rwy.endX + 1.2,
+    y: rwy.endY + 0.6,
+    heading: rwy.heading,
+    altitude: sim.airport.elevationFt + 1700,
+    speed: 190,
+    targetRunway: rwyId,
+    gateId: sim.airport.gateIds[0],
+    state: "FINAL",
+    controller: "DEPARTURE",
+  });
+  arr.state = "GO_AROUND";
+
+  const gaGuidance = computeDepAppGuidance(sim.airport, arr, rwyId);
+  assert.equal(gaGuidance.mode, "GO_AROUND_RECOVERY");
+  assert.equal(gaGuidance.needsPatternTurn, true);
+  assert.equal(gaGuidance.recommendedRunway, rwyId);
+  assert.equal(gaGuidance.recommendedSpeed, 180);
+  assert.ok(gaGuidance.recommendedDirectFix);
+  assert.ok(gaGuidance.recoveryPreviewPoints.length >= 3);
+
+  // Applying suggested HEADING vector transitions GO_AROUND cleanly into APPROACH navigation
+  const hdgRes = submitClearanceDecision(
+    sim,
+    {
+      aircraftId: arr.id,
+      controller: "DEPARTURE",
+      type: "HEADING",
+      parameters: {
+        heading: gaGuidance.recommendedHeading,
+        turnDirection: gaGuidance.recommendedTurnDirection,
+      },
+    },
+    "PLAYER"
+  );
+  assert.equal(hdgRes.ok, true);
+  for (let i = 0; i < 6; i++) stepSimulation(sim, 0.5);
+  assert.equal(arr.state, "APPROACH");
+
+  // Once vectored onto approach side, guidance switches to Direct IAF + ILS intercept
+  const iafFix = sim.airport.fixes[gaGuidance.recommendedDirectFix!];
+  assert.ok(iafFix);
+  arr.x = iafFix.x - 1.5;
+  arr.y = iafFix.y;
+  const interceptGuidance = computeDepAppGuidance(sim.airport, arr, rwyId);
+  assert.equal(interceptGuidance.needsPatternTurn, false);
+  assert.equal(
+    submitClearanceDecision(
+      sim,
+      { aircraftId: arr.id, controller: "DEPARTURE", type: "APPROACH", parameters: { runway: rwyId } },
+      "PLAYER"
+    ).ok,
+    true
+  );
+  for (let i = 0; i < 6; i++) stepSimulation(sim, 0.5);
+  assert.equal(arr.assignedApproach, rwyId);
+
+  // 2. Departure climb form guidance suggests altitude, speed & departure fix
+  const dep = createDepartureAircraft(sim, {
+    callsign: "UAL452",
+    spokenCallsign: "United 452",
+    gateId: sim.airport.gateIds[1],
+    targetRunway: sim.airport.primaryDepartureRunway,
+    requiresPushback: false,
+    departureFix: sim.airport.departureFixIds[0],
+  });
+  dep.state = "CLIMB";
+  dep.altitude = sim.airport.elevationFt + 2200;
+  dep.speed = 210;
+  const depGuidance = computeDepAppGuidance(sim.airport, dep);
+  assert.equal(depGuidance.mode, "DEPARTURE_CLIMB");
+  assert.equal(depGuidance.recommendedSpeed, 210);
+  assert.equal(depGuidance.recommendedDirectFix, sim.airport.departureFixIds[0]);
+});
+
+test("AircraftPhotoService resolves raster aircraft photos, filters SVGs, caches results, and falls back gracefully", async () => {
+  const seenUrls: string[] = [];
+  const mockFetch = (async (input: string | URL | Request) => {
+    const url = String(input);
+    seenUrls.push(url);
+    if (url.includes("United+Airlines") || url.includes("United%20Airlines")) {
+      return {
+        ok: true,
+        json: async () => ({
+          query: {
+            pages: {
+              "1": {
+                title: "File:United_Airlines_logo.svg",
+                imageinfo: [
+                  {
+                    thumburl: "https://upload.wikimedia.org/united_logo.svg",
+                    mime: "image/svg+xml",
+                    width: 800,
+                    height: 300,
+                  },
+                ],
+              },
+              "2": {
+                title: "File:United_Airlines_Boeing_737-824_N14240_SFO.jpg",
+                imageinfo: [
+                  {
+                    thumburl: "https://upload.wikimedia.org/ual_b738_thumb.jpg",
+                    url: "https://upload.wikimedia.org/ual_b738_full.jpg",
+                    mime: "image/jpeg",
+                    width: 760,
+                    height: 480,
+                    extmetadata: {
+                      Artist: { value: "<span>Aviation Spotter</span>" },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        }),
+      } as unknown as Response;
+    }
+    return {
+      ok: true,
+      json: async () => ({ query: { pages: {} } }),
+    } as unknown as Response;
+  }) as typeof fetch;
+
+  const svc = new AircraftPhotoService(mockFetch);
+
+  // 1. Filters out .svg logo and picks landscape JPEG photo with stripped photographer credit
+  const hit = await svc.resolvePhoto({
+    airline: "United Airlines",
+    model: "Boeing 737-800",
+    typeCode: "B738",
+  });
+  assert.equal(hit.found, true);
+  assert.equal(hit.url, "https://upload.wikimedia.org/ual_b738_thumb.jpg");
+  assert.equal(hit.photographer, "Aviation Spotter");
+  assert.equal(hit.matchedBy, "airline_model");
+  assert.equal(seenUrls.length, 1);
+
+  // 2. Cache hit avoids duplicate upstream calls
+  const cachedHit = await svc.resolvePhoto({
+    airline: "United Airlines",
+    model: "Boeing 737-800",
+    typeCode: "B738",
+  });
+  assert.equal(cachedHit.found, true);
+  assert.equal(seenUrls.length, 1);
+
+  // 3. Offline / failing upstream gracefully resolves { found: false } so UI shows SVG profile
+  const failingSvc = new AircraftPhotoService((async () => {
+    throw new Error("network down");
+  }) as unknown as typeof fetch);
+  const miss = await failingSvc.resolvePhoto({
+    airline: "Delta Air Lines",
+    model: "Boeing 737-900",
+    typeCode: "B739",
+  });
+  assert.equal(miss.found, false);
+});
+
+test("OpenSkyMetadataService enriches live ADS-B tracks, caches lookups, and Planespotters hex resolves exact tail photos", async () => {
+  let metaCalls = 0;
+  const metaSvc = new OpenSkyMetadataService((async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes("/metadata/aircraft/icao/86951c")) {
+      metaCalls += 1;
+      return {
+        ok: true,
+        json: async () => ({
+          icao24: "86951c",
+          registration: "JA873A",
+          manufacturerName: "Boeing",
+          model: "Boeing 787-8 Dreamliner",
+          typecode: "B788",
+          operator: "All Nippon Airways",
+          operatorIcao: "ANA",
+        }),
+      } as unknown as Response;
+    }
+    return { ok: false } as unknown as Response;
+  }) as typeof fetch);
+
+  const rawTracks: LiveAdsbTrack[] = [
+    {
+      readonly: true,
+      icao24: "86951c",
+      callsign: "ANA204",
+      registration: null,
+      aircraftType: null,
+      originCountry: "Japan",
+      lat: 28.62,
+      lon: 77.15,
+      baroAltFt: 5200,
+      geoAltFt: 5300,
+      groundSpeedKts: 215,
+      trackDeg: 270,
+      verticalRateFpm: -700,
+      onGround: false,
+      lastUpdatedMs: Date.now(),
+      stale: false,
+      trail: [],
+    },
+  ];
+
+  const enriched = await metaSvc.enrichTracks(rawTracks, 5);
+  assert.equal(enriched[0].registration, "JA873A");
+  assert.equal(enriched[0].aircraftType, "B788");
+  assert.equal(enriched[0].model, "Boeing 787-8 Dreamliner");
+  assert.equal(enriched[0].operator, "All Nippon Airways");
+  assert.equal(metaCalls, 1);
+
+  // Repeat lookup hits cache with zero extra calls
+  await metaSvc.enrichTracks(rawTracks, 5);
+  assert.equal(metaCalls, 1);
+
+  // AircraftPhotoService resolves exact physical tail via Planespotters hex API
+  const photoSvc = new AircraftPhotoService((async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes("planespotters.net/pub/photos/hex/86951c")) {
+      return {
+        ok: true,
+        json: async () => ({
+          photos: [
+            {
+              link: "https://www.planespotters.net/photo/12345",
+              photographer: "Tokyo Spotter",
+              thumbnail_large: { src: "https://cdn.planespotters.net/86951c_large.jpg" },
+            },
+          ],
+        }),
+      } as unknown as Response;
+    }
+    return { ok: false } as unknown as Response;
+  }) as typeof fetch);
+
+  const hexPhoto = await photoSvc.resolvePhoto({
+    icao24: "86951c",
+    airline: "All Nippon Airways",
+    model: "Boeing 787-8 Dreamliner",
+    registration: "JA873A",
+  });
+  assert.equal(hexPhoto.found, true);
+  assert.equal(hexPhoto.matchedBy, "icao24_hex");
+  assert.equal(hexPhoto.source, "Planespotters.net");
+  assert.equal(hexPhoto.url, "https://cdn.planespotters.net/86951c_large.jpg");
+
+  // Preserving icao24 & real registration into playable simulation
+  const { sim } = convertLiveTracksToSimulation({
+    airportRecord: {
+      icao: "VIDP",
+      iata: "DEL",
+      name: "Indira Gandhi International Airport",
+      city: "New Delhi",
+      country: "India",
+      isoCountry: "IN",
+      lat: 28.5562,
+      lon: 77.1,
+      elevationFt: 777,
+      timezone: "Asia/Kolkata",
+      category: "INTERNATIONAL",
+      dataQuality: "Verified",
+      source: "SeedCatalog",
+      runwayCount: 3,
+      runways: [],
+      frequencies: [],
+      navaids: [],
+    },
+    tracks: enriched,
+  });
+  const importedAc = sim.aircraft["ANA204"];
+  assert.ok(importedAc);
+  assert.equal(importedAc.icao24, "86951c");
+  assert.equal(importedAc.registration, "JA873A");
+  assert.equal(importedAc.airline, "All Nippon Airways");
+});
+
+test("Ground traffic deadlock detector and 1-click Wait & Pass, Push Back Step, and Change Route resolutions break taxiway jams", () => {
+  const sim = createScenarioSimulation("NORMAL_OPS", "GROUND", "KAST");
+  const dep = createDepartureAircraft(sim, {
+    callsign: "AIC973",
+    spokenCallsign: "Air India 973",
+    gateId: sim.airport.gateIds[0],
+    targetRunway: sim.airport.primaryDepartureRunway,
+    requiresPushback: false,
+    controller: "GROUND",
+  });
+  const arr = createArrivalAircraft(sim, {
+    callsign: "JBU618",
+    spokenCallsign: "JetBlue 618",
+    x: 0,
+    y: 0,
+    heading: 90,
+    altitude: sim.airport.elevationFt,
+    speed: 0,
+    targetRunway: sim.airport.primaryArrivalRunway,
+    gateId: sim.airport.gateIds[1],
+    state: "FINAL",
+    controller: "GROUND",
+  });
+
+  // Put both aircraft on a connected KAST taxiway route facing nose-to-nose
+  const r1 = getSuggestedTaxiRoutes(sim.airport, `GATE_${dep.gateId}`, sim.airport.primaryDepartureRunway, dep.gateId, false)[0];
+  assert.ok(r1 && r1.nodeIds.length >= 4);
+
+  const midPrev = sim.airport.nodes[r1.nodeIds[1]]!;
+  const midA = sim.airport.nodes[r1.nodeIds[2]]!;
+  const midB = sim.airport.nodes[r1.nodeIds[3]]!;
+  assert.ok(midPrev && midA && midB);
+
+  const dirDeg = ((Math.atan2(midB.x - midA.x, midB.y - midA.y) * 180) / Math.PI + 360) % 360;
+  const oppDeg = (dirDeg + 180) % 360;
+  const ux = Math.sin((dirDeg * Math.PI) / 180);
+  const uy = Math.cos((dirDeg * Math.PI) / 180);
+
+  dep.state = "TAXIING";
+  dep.currentNodeId = midA.id;
+  dep.x = midA.x;
+  dep.y = midA.y;
+  dep.heading = dirDeg;
+  dep.speed = 0;
+  dep.assignedRouteNodeIds = r1.nodeIds.slice(1);
+  dep.assignedRouteTaxiways = r1.taxiways;
+  dep.routeStepIndex = 1; // Currently at midA (index 1 of slice(1)), heading toward midB
+  assert.equal(
+    submitClearanceDecision(
+      sim,
+      {
+        aircraftId: dep.id,
+        controller: "GROUND",
+        type: "TAXI",
+        parameters: {
+          runway: dep.targetRunway,
+          routeTaxiways: r1.taxiways,
+          destinationNodeId: r1.destinationNodeId,
+          routeNodeIds: r1.nodeIds.slice(2),
+          immediate: true,
+        },
+      },
+      "PLAYER"
+    ).ok,
+    true
+  );
+
+  // Place blocker close ahead along the same vector facing opposite direction
+  arr.state = "TAXIING";
+  arr.currentNodeId = midB.id;
+  arr.x = midA.x + ux * 0.038;
+  arr.y = midA.y + uy * 0.038;
+  arr.heading = oppDeg;
+  arr.speed = 0;
+  const revSlice = [...r1.nodeIds].reverse();
+  arr.assignedRouteNodeIds = revSlice;
+  arr.assignedRouteTaxiways = r1.taxiways;
+  arr.routeStepIndex = 0;
+  assert.equal(
+    submitClearanceDecision(
+      sim,
+      {
+        aircraftId: arr.id,
+        controller: "GROUND",
+        type: "TAXI",
+        parameters: {
+          runway: arr.targetRunway,
+          routeTaxiways: r1.taxiways,
+          destinationNodeId: `GATE_${dep.gateId}`,
+          routeNodeIds: revSlice.slice(Math.max(0, revSlice.indexOf(midB.id))),
+          immediate: true,
+        },
+      },
+      "PLAYER"
+    ).ok,
+    true
+  );
+
+  // 1. Both flagged in mutual deadlock
+  const report = inspectGroundConflict(sim, dep);
+  assert.ok(report);
+  assert.equal(report.isBlocked, true);
+  assert.equal(report.mutualDeadlock, true);
+  assert.equal(report.blocker?.id, arr.id);
+  const deadlocked = getDeadlockedAircraftIds(sim);
+  assert.equal(deadlocked.has(dep.id), true);
+
+  // 2. Test WAIT_PASS holds yielding aircraft & preserves TAXI so it auto-resumes once clear
+  const waitCmds = buildResolutionCommands(sim, dep, "WAIT_PASS");
+  assert.equal(waitCmds.length, 1);
+  assert.equal(waitCmds[0].type, "HOLD_POSITION");
+  assert.equal(submitClearanceDecision(sim, waitCmds[0], "PLAYER").ok, true);
+  assert.equal(dep.state, "HOLD_POSITION");
+  assert.equal(dep.yieldToAircraftId, arr.id);
+
+  // Move blocker past dep cleanly -> dep auto-resumes TAXIING
+  arr.x = midA.x - ux * 0.12;
+  arr.y = midA.y - uy * 0.12;
+  stepSimulation(sim, 0.5);
+  assert.equal(dep.state, "TAXIING");
+  assert.equal(dep.yieldToAircraftId, undefined);
+
+  // 3. Test PUSHBACK_STEP backs stuck aircraft clear to previous/neighbor node
+  dep.assignedRouteNodeIds = [midPrev.id, midA.id, midB.id];
+  dep.routeStepIndex = 1;
+  dep.currentNodeId = midA.id;
+  dep.x = midA.x;
+  dep.y = midA.y;
+  dep.heading = dirDeg;
+  dep.speed = 0;
+  arr.x = midA.x + ux * 0.032;
+  arr.y = midA.y + uy * 0.032;
+  arr.heading = oppDeg;
+  arr.speed = 0;
+  const pushCmds = buildResolutionCommands(sim, dep, "PUSHBACK_STEP");
+  assert.ok(pushCmds.some((c) => c.type === "PUSHBACK"));
+  assert.equal(submitClearanceDecision(sim, pushCmds[0], "PLAYER").ok, true);
+  assert.equal(dep.state, "PUSHING_BACK");
+  assert.ok(dep.stepBackTargetNodeId);
+  for (let i = 0; i < 40; i++) stepSimulation(sim, 1.0);
+  assert.equal(dep.stepBackTargetNodeId, undefined);
 });

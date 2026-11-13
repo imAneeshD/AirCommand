@@ -57,6 +57,12 @@ export function createClearanceObject(
     immediate?: boolean;
   }
 ): ATCClearance {
+  const isSingleRoleBrowser =
+    typeof window !== "undefined" &&
+    state.config.activePlayerStation !== "ALL" &&
+    params.issuedBy === "PLAYER" &&
+    !params.immediate;
+
   const delay = params.immediate ? 0 : state.config.readbackDelaySeconds;
   const clearance: ATCClearance = {
     id: nextId(state, "clr"),
@@ -73,6 +79,7 @@ export function createClearanceObject(
     lifecycle: params.immediate ? "ACTIVE" : "READBACK_PENDING",
     phraseology: params.phraseology,
     expectedReadbackText: params.expectedReadbackText,
+    syncGated: isSingleRoleBrowser,
   };
   return clearance;
 }
@@ -121,7 +128,9 @@ export function supersedeClearancesForNewInstruction(
       supersedeTypes.add("TAKEOFF");
       break;
     case "HOLD_POSITION":
-      supersedeTypes.add("TAXI");
+      if (!parameters.yieldToAircraftId) {
+        supersedeTypes.add("TAXI");
+      }
       supersedeTypes.add("CROSS_RUNWAY");
       supersedeTypes.add("LINE_UP");
       supersedeTypes.add("TAKEOFF");

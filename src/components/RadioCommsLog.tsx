@@ -14,10 +14,11 @@ import {
   X,
 } from "lucide-react";
 import { getResolvedAircraftDetails } from "../data/aircraftCatalog.ts";
+import { getAircraftPhaseLabel } from "../engine/simulation.ts";
 import { useAtcStore } from "../store/atcStore.ts";
 import { formatWallClockAtSimOffset } from "../utils/dateTime.ts";
 import { computeAircraftPitchDeg, formatAltitudeReadout } from "../utils/telemetry.ts";
-import { AircraftSideProfile } from "./AircraftSideProfile.tsx";
+import { AircraftPhotoFrame } from "./AircraftPhotoFrame.tsx";
 
 type BottomTab = "LOGS" | "AIRCRAFT" | "COORD";
 type LogFilter = "ALL" | "STATION" | "ALERTS";
@@ -96,7 +97,7 @@ export const RadioCommsLog: React.FC = () => {
   return (
     <section
       className={`bg-[var(--atc-panel)] border-t border-[var(--atc-border)] flex flex-col shrink-0 transition-all duration-150 ${
-        collapsed ? "h-9" : activeTab === "AIRCRAFT" ? "h-[212px]" : "h-36"
+        collapsed ? "h-9" : activeTab === "AIRCRAFT" ? "h-[228px]" : "h-36"
       }`}
     >
       {/* Header / Tab Bar */}
@@ -282,9 +283,9 @@ export const RadioCommsLog: React.FC = () => {
             </div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 h-full items-stretch">
-              {/* Column 1: Side-Profile Aircraft Image + Identity Banner */}
+              {/* Column 1: Real Aircraft Photo (with seamless fallback to SVG Profile) + Identity Strip */}
               <div className="lg:col-span-4 flex flex-col justify-between gap-1.5">
-                <AircraftSideProfile
+                <AircraftPhotoFrame
                   aircraft={selectedAc}
                   spec={resolved.spec}
                   livery={resolved.livery}
@@ -292,32 +293,58 @@ export const RadioCommsLog: React.FC = () => {
                   elevationFt={sim.airport.elevationFt}
                   theme={theme}
                 />
-                <div className="flex items-center justify-between text-[10px] font-mono px-1">
+                <div className="flex items-center justify-between gap-2 text-[10px] font-mono px-1.5 py-1 rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface)]">
                   <span className="font-bold text-[var(--atc-text)] truncate">
                     {resolved.spec.model}
                   </span>
-                  <span className="text-[var(--atc-muted)] shrink-0">
-                    {resolved.spec.bodyClass}
-                  </span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="px-1.5 py-0.2 rounded bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] text-[9px] text-[var(--atc-text-secondary)] font-semibold">
+                      {resolved.spec.code}
+                    </span>
+                    <span className="text-[9px] text-[var(--atc-muted)]">
+                      {resolved.spec.bodyClass}
+                    </span>
+                  </div>
                 </div>
               </div>
 
-              {/* Column 2: Flight Route (From -> To) & Live ATC Assignment */}
+              {/* Column 2: Livery Identity, Route (From -> To) & Live ATC Assignment */}
               <div className="lg:col-span-4 rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface)] p-2.5 shadow-[var(--atc-shadow)] flex flex-col justify-between gap-2">
-                {/* Airline + Flight + Wake Row */}
+                {/* Airline Livery Swatch + Callsign + Wake/Phase Row */}
                 <div className="flex items-center justify-between gap-2 border-b border-[var(--atc-border)] pb-1.5">
-                  <div className="min-w-0">
-                    <div className="text-xs font-extrabold font-mono text-[var(--atc-text)] flex items-center gap-1.5">
-                      <span>{selectedAc.callsign}</span>
-                      <span className="text-[10px] font-normal text-[var(--atc-muted)]">
-                        ({resolved.flightNumber})
-                      </span>
-                    </div>
-                    <div className="text-[10px] text-[var(--atc-muted)] truncate">
-                      {resolved.livery.airlineName} • Reg {resolved.registration}
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span
+                      className="w-2.5 h-7 rounded-sm shrink-0 border border-[var(--atc-border)] overflow-hidden flex flex-col"
+                      title={`${resolved.livery.airlineName} Livery`}
+                    >
+                      <span
+                        className="flex-1 w-full"
+                        style={{ backgroundColor: resolved.livery.tailBg }}
+                      />
+                      <span
+                        className="h-2 w-full"
+                        style={{ backgroundColor: resolved.livery.cheatline }}
+                      />
+                    </span>
+                    <div className="min-w-0">
+                      <div className="text-xs font-extrabold font-mono text-[var(--atc-text)] flex items-center gap-1.5">
+                        <span>{selectedAc.callsign}</span>
+                        <span className="text-[10px] font-normal text-[var(--atc-muted)]">
+                          ({resolved.flightNumber})
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-[var(--atc-muted)] truncate">
+                        {resolved.livery.airlineName} • Reg{" "}
+                        <span className="font-semibold text-[var(--atc-text-secondary)]">
+                          {resolved.registration}
+                        </span>
+                      </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-1 shrink-0 text-[9px] font-mono">
+                    <span className="px-1.5 py-0.5 rounded bg-[var(--atc-accent-bg)] border border-[var(--atc-accent-border)] text-[var(--atc-accent-text)] font-bold">
+                      {getAircraftPhaseLabel(selectedAc)}
+                    </span>
                     <span className="px-1.5 py-0.5 rounded bg-[var(--atc-cyan-bg)] border border-[var(--atc-cyan-border)] text-[var(--atc-cyan)] font-bold">
                       {selectedAc.wakeCategory}
                     </span>
@@ -328,10 +355,10 @@ export const RadioCommsLog: React.FC = () => {
                 </div>
 
                 {/* FROM -> TO Airport Banner */}
-                <div className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md bg-[var(--atc-surface-alt)] border border-[var(--atc-border)]">
+                <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-md bg-[var(--atc-surface-alt)] border border-[var(--atc-border)]">
                   <div className="min-w-0 flex-1">
-                    <div className="text-[9px] font-mono uppercase text-[var(--atc-muted)]">
-                      FROM
+                    <div className="text-[8px] font-mono uppercase tracking-wider text-[var(--atc-muted)]">
+                      ORIGIN
                     </div>
                     <div className="text-sm font-extrabold font-mono text-[var(--atc-text)] leading-tight">
                       {resolved.originIcao}
@@ -341,16 +368,20 @@ export const RadioCommsLog: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="flex flex-col items-center shrink-0 px-1 text-[var(--atc-accent-text)]">
-                    <ArrowRight className="w-4 h-4" />
-                    <span className="text-[8px] font-mono font-bold uppercase">
+                  <div className="flex flex-col items-center shrink-0 px-2 text-[var(--atc-accent-text)]">
+                    <div className="flex items-center gap-1">
+                      <span className="w-3 h-px bg-[var(--atc-border)]" />
+                      <Plane className="w-3.5 h-3.5" />
+                      <ArrowRight className="w-3 h-3" />
+                    </div>
+                    <span className="text-[8px] font-mono font-bold uppercase mt-0.5">
                       {selectedAc.flightKind}
                     </span>
                   </div>
 
                   <div className="min-w-0 flex-1 text-right">
-                    <div className="text-[9px] font-mono uppercase text-[var(--atc-muted)]">
-                      TO
+                    <div className="text-[8px] font-mono uppercase tracking-wider text-[var(--atc-muted)]">
+                      DESTINATION
                     </div>
                     <div className="text-sm font-extrabold font-mono text-[var(--atc-text)] leading-tight">
                       {resolved.destinationIcao}
@@ -361,15 +392,15 @@ export const RadioCommsLog: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Gate / Runway / SID-STAR / Phase Footer */}
+                {/* Gate / Runway / SID-STAR / Cruise Footer */}
                 <div className="grid grid-cols-3 gap-1.5 text-[10px] font-mono">
-                  <div className="px-1.5 py-1 rounded bg-[var(--atc-surface-alt)]">
+                  <div className="px-2 py-1 rounded border border-[var(--atc-border)] bg-[var(--atc-surface-alt)]">
                     <span className="text-[var(--atc-muted)] block text-[8px]">STAND / RWY</span>
                     <span className="font-bold text-[var(--atc-text)] truncate block">
                       {selectedAc.gateId ?? "—"} / {selectedAc.assignedApproach ?? selectedAc.targetRunway}
                     </span>
                   </div>
-                  <div className="px-1.5 py-1 rounded bg-[var(--atc-surface-alt)]">
+                  <div className="px-2 py-1 rounded border border-[var(--atc-border)] bg-[var(--atc-surface-alt)]">
                     <span className="text-[var(--atc-muted)] block text-[8px]">SID / ROUTE</span>
                     <span className="font-bold text-[var(--atc-text)] truncate block">
                       {selectedAc.assignedDirectFix ??
@@ -378,7 +409,7 @@ export const RadioCommsLog: React.FC = () => {
                         "VECTORS"}
                     </span>
                   </div>
-                  <div className="px-1.5 py-1 rounded bg-[var(--atc-surface-alt)]">
+                  <div className="px-2 py-1 rounded border border-[var(--atc-border)] bg-[var(--atc-surface-alt)]">
                     <span className="text-[var(--atc-muted)] block text-[8px]">CRUISE FL</span>
                     <span className="font-bold text-[var(--atc-text)] truncate block">
                       {resolved.cruiseFlightLevel}
@@ -389,6 +420,15 @@ export const RadioCommsLog: React.FC = () => {
 
               {/* Column 3: Technical Airframe Specs, Payload, Fuel & Telemetry */}
               <div className="lg:col-span-4 rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface)] p-2.5 shadow-[var(--atc-shadow)] flex flex-col justify-between gap-1.5 text-[10px] font-mono">
+                <div className="flex items-center justify-between gap-2 border-b border-[var(--atc-border)] pb-1">
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-[var(--atc-muted)]">
+                    {resolved.spec.manufacturer} Airframe Specs
+                  </span>
+                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] text-[var(--atc-text-secondary)]">
+                    CTL: {selectedAc.controller}
+                  </span>
+                </div>
+
                 <div className="grid grid-cols-2 gap-x-3 gap-y-1">
                   <div className="flex justify-between gap-1">
                     <span className="text-[var(--atc-muted)]">Engines</span>
@@ -447,7 +487,13 @@ export const RadioCommsLog: React.FC = () => {
                   </span>
                   <span className="inline-flex items-center gap-1 text-[var(--atc-text-secondary)]">
                     <Fuel className="w-3 h-3 text-[var(--atc-amber)]" />
-                    <span className="font-semibold">Fuel {resolved.fuelRemainingPct}%</span>
+                    <span className="font-semibold">{resolved.fuelRemainingPct}%</span>
+                    <span className="w-8 h-1.5 rounded-full bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] overflow-hidden inline-block">
+                      <span
+                        className="block h-full bg-[var(--atc-amber)]"
+                        style={{ width: `${Math.max(5, Math.min(100, resolved.fuelRemainingPct))}%` }}
+                      />
+                    </span>
                   </span>
                   <span
                     className="inline-flex items-center gap-1 text-[var(--atc-text-secondary)]"
@@ -458,6 +504,10 @@ export const RadioCommsLog: React.FC = () => {
                       {formatAltitudeReadout(selectedAc, sim.airport.elevationFt).compact} •{" "}
                       {Math.round(selectedAc.speed)}kt •{" "}
                       {String(Math.round(selectedAc.heading)).padStart(3, "0")}° •{" "}
+                      {Math.round(selectedAc.verticalSpeed) === 0
+                        ? "LVL"
+                        : `${selectedAc.verticalSpeed > 0 ? "+" : ""}${Math.round(selectedAc.verticalSpeed)}fpm`}{" "}
+                      •{" "}
                       {(() => {
                         const p = computeAircraftPitchDeg(selectedAc, sim.airport.elevationFt);
                         return `${p > 0 ? `+${p}` : p}°`;

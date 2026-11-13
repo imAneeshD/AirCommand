@@ -4,11 +4,13 @@ import path from "node:path";
 import { WebSocketServer } from "ws";
 import type { AirportDataQuality, AirportGeoJsonCollection, ClearanceCommandInput, ControllerRole, DifficultyLevel, ScenarioId } from "../src/types/atc.ts";
 import { DatabaseService } from "./db/DatabaseService.ts";
-import { ADSBProviderService } from "./services/ADSBProviderService.ts";
+import { ADSBProviderService, OpenSkyProvider } from "./services/ADSBProviderService.ts";
+import { AircraftPhotoService } from "./services/AircraftPhotoService.ts";
 import { AirportGeometryService } from "./services/AirportGeometryService.ts";
 import { AirportImportService } from "./services/AirportImportService.ts";
 import { AirportService } from "./services/AirportService.ts";
 import { MultiplayerRoomService, type ConnectedClient } from "./services/MultiplayerRoomService.ts";
+import { OpenSkyMetadataService } from "./services/OpenSkyMetadataService.ts";
 
 const PORT = Number(process.env.PORT ?? 3001);
 
@@ -19,7 +21,9 @@ console.log(`[AirCommand Server] Catalog initialized: ${seedInfo.count} airports
 
 const airportService = new AirportService(db);
 const geomService = new AirportGeometryService(db, importer);
-const adsbService = new ADSBProviderService();
+const openSkyMetadataService = new OpenSkyMetadataService();
+const adsbService = new ADSBProviderService(new OpenSkyProvider(), openSkyMetadataService);
+const photoService = new AircraftPhotoService();
 const roomService = new MultiplayerRoomService(db, geomService);
 roomService.startClockLoop();
 
@@ -225,6 +229,47 @@ const server = http.createServer(async (req, res) => {
       }
       const snap = await adsbService.getLiveTraffic(lat, lon, radiusDeg);
       sendJson(res, 200, snap);
+      return;
+    }
+
+    if (pathname === "/api/aircraft/metadata" && req.method === "GET") {
+      const icao24 = reqUrl.searchParams.get("icao24") ?? "";
+      if (!icao24.trim()) {
+        sendJson(res, 400, { error: "icao24 hex required" });
+        return;
+      }
+      const meta = await openSkyMetadataService.lookupByIcao24(icao24);
+      sendJson(res, 200, meta);
+      return;
+    }
+
+    if (pathname === "/api/aircraft/photo" && req.method === "GET") {
+      const icao24 = (reqUrl.searchParams.get("icao24") ?? "").trim().toLowerCase();
+      let airline = reqUrl.searchParams.get("airline") ?? "";
+      let model = reqUrl.searchParams.get("model") ?? "";
+      let typeCode = reqUrl.searchParams.get("type") ?? "";
+      let registration = reqUrl.searchParams.get("reg") ?? "";
+      const preferRegistration = reqUrl.searchParams.get("preferReg") === "1" || /^[a-f0-9]{6}$/.test(icao24);
+
+      if (/^[a-f0-9]{6}$/.test(icao24) && (!registration || !model || !airline)) {
+        const meta = await openSkyMetadataService.lookupByIcao24(icao24);
+        if (meta.found) {
+          registration = registration || meta.registration || "";
+          model = model || meta.model || "";
+          typeCode = typeCode || meta.typecode || "";
+          airline = airline || meta.operator || "";
+        }
+      }
+
+      const photo = await photoService.resolvePhoto({
+        icao24,
+        preferRegistration,
+        airline,
+        model,
+        typeCode,
+        registration,
+      });
+      sendJson(res, 200, photo);
       return;
     }
 

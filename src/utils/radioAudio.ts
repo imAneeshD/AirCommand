@@ -174,6 +174,8 @@ interface QueuedSpeechItem {
   speakerKey: string;
   priority: boolean;
   forceLocal?: boolean;
+  isSecondary?: boolean;
+  onFinish?: () => void;
 }
 
 function makeSoftClipCurve(drive = 2.4): Float32Array<ArrayBuffer> {
@@ -209,6 +211,7 @@ export function computePilotSpeechProfile(
 class RadioAudioEngine {
   private ctx: AudioContext | null = null;
   private vhfBusInput: AudioNode | null = null;
+  private duckingGain: GainNode | null = null;      // master gain for ducking in ALL-AUTO mode
   private noiseBuffer: AudioBuffer | null = null;
   private carrierNodes: { src: AudioBufferSourceNode; gain: GainNode } | null = null;
 
@@ -218,6 +221,18 @@ class RadioAudioEngine {
   public rogerBeepEnabled = true;
   public pilotRateBase = 1.15;
   public tunedStationOnly = true;
+
+  /**
+   * syncMode = true  → single-role: voices play one-at-a-time (serial queue already does
+   *                     this) AND readback application is blocked until the voice finishes.
+   * syncMode = false → ALL-AUTO: voices still queue serially but we expose ducking so
+   *                     a secondary concurrent voice (e.g. parallel station) can play at
+   *                     reduced volume while the primary is speaking.
+   */
+  public syncMode = false;
+
+  /** Resolves when the current utterance (if any) finishes. Used by sync gating. */
+  private speechDoneResolvers: Array<() => void> = [];
 
   public preferredControllerVoiceURI = "AUTO";
   public preferredPilotVoiceURI = "AUTO";
@@ -230,6 +245,8 @@ class RadioAudioEngine {
   private speechToken = 0;
   private safetyTimer: number | null = null;
   private listeners = new Set<() => void>();
+  private lastSpeechStartMs = 0;
+  private lastSpeechEndMs = 0;
 
   constructor() {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
@@ -249,6 +266,29 @@ class RadioAudioEngine {
 
   private notify(): void {
     for (const fn of this.listeners) fn();
+  }
+
+  /**
+   * Returns a Promise that resolves when the engine is idle (no speech playing/queued).
+   * In syncMode the simulation tick waits on this before applying a clearance.
+   * Resolves immediately if already idle.
+   */
+  public awaitIdle(): Promise<void> {
+    if (!this.speaking && this.queue.length === 0) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      this.speechDoneResolvers.push(resolve);
+    });
+  }
+
+  /** True while any speech is in progress or queued. Used by sync gating. */
+  public get isBusy(): boolean {
+    return this.speaking || this.queue.length > 0;
+  }
+
+  private resolveSpeechDone(): void {
+    if (this.speaking || this.queue.length > 0) return; // still more pending
+    const resolvers = this.speechDoneResolvers.splice(0);
+    for (const r of resolvers) r();
   }
 
   public refreshVoices(): RankedVoice[] {
@@ -489,20 +529,22 @@ class RadioAudioEngine {
     this.carrierNodes = null;
   }
 
-  public playRadioClick(kind: "ATC" | "PILOT" | "ALERT" | "ERROR"): void {
+  public playRadioClick(kind: "ATC" | "PILOT" | "ALERT" | "ERROR", isSecondary = false): void {
     if (!this.sfxEnabled) return;
     const ctx = this.ensureContext();
     if (!ctx) return;
 
+    const volMult = !this.syncMode && isSecondary ? 0.45 : 1.0;
+
     if (kind === "ATC") {
       // Crisp tower PTT mic key-up click + short VHF burst
-      this.playVhfBurst(0.045, 0.06 * Math.max(0.35, this.radioStaticLevel), 1650, 1.8);
+      this.playVhfBurst(0.045, 0.06 * Math.max(0.35, this.radioStaticLevel) * volMult, 1650, 1.8);
       return;
     }
 
     if (kind === "PILOT") {
       // Slightly thinner cockpit handheld mic key-up
-      this.playVhfBurst(0.04, 0.05 * Math.max(0.35, this.radioStaticLevel), 1950, 2.1);
+      this.playVhfBurst(0.04, 0.05 * Math.max(0.35, this.radioStaticLevel) * volMult, 1950, 2.1);
       return;
     }
 
@@ -514,7 +556,7 @@ class RadioAudioEngine {
       osc.type = "triangle";
       osc.frequency.setValueAtTime(kind === "ERROR" ? 740 : 880, now);
       osc.frequency.setValueAtTime(kind === "ERROR" ? 554 : 660, now + 0.09);
-      gain.gain.setValueAtTime(0.06, now);
+      gain.gain.setValueAtTime(0.06 * volMult, now);
       gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
       osc.connect(gain);
       gain.connect(ctx.destination);
@@ -529,13 +571,22 @@ class RadioAudioEngine {
     text: string,
     roleOrIsPilot: boolean | "CONTROLLER" | "PILOT",
     speakerKey = "DEFAULT",
-    priority = false
+    priority = false,
+    onFinish?: () => void
   ): void {
     if (
       !this.voiceEnabled ||
       typeof window === "undefined" ||
       !("speechSynthesis" in window)
     ) {
+      if (onFinish) {
+        const fallbackDelay = this.syncMode ? 1400 : 0;
+        if (fallbackDelay > 0 && typeof window !== "undefined") {
+          window.setTimeout(onFinish, fallbackDelay);
+        } else {
+          onFinish();
+        }
+      }
       return;
     }
 
@@ -547,7 +598,16 @@ class RadioAudioEngine {
         : roleOrIsPilot;
 
     const formatted = formatAtcSpeech(text);
-    if (!formatted) return;
+    if (!formatted) {
+      if (onFinish) onFinish();
+      return;
+    }
+
+    // In auto mode, if another voice is actively speaking or channel was recently transmitting:
+    // mark this transmission as secondary so it plays with "lil low volume" (ducked background chatter)
+    const isChannelBusy =
+      this.speaking || (Date.now() - this.lastSpeechStartMs < 4200 && this.queue.length > 0);
+    const isSecondary = !this.syncMode && isChannelBusy;
 
     // Keep queue responsive without ever dropping priority readbacks/clearances unless huge backlog
     if (this.queue.length >= 6) {
@@ -558,7 +618,15 @@ class RadioAudioEngine {
         this.queue.shift();
       }
     }
-    this.queue.push({ text: formatted, rawText: text, role, speakerKey, priority });
+    this.queue.push({
+      text: formatted,
+      rawText: text,
+      role,
+      speakerKey,
+      priority,
+      isSecondary,
+      onFinish,
+    });
     this.drainQueue();
   }
 
@@ -576,6 +644,7 @@ class RadioAudioEngine {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
+    this.resolveSpeechDone();
     this.notify();
   }
 
@@ -585,6 +654,7 @@ class RadioAudioEngine {
 
     const item = this.queue.shift()!;
     this.speaking = true;
+    this.lastSpeechStartMs = Date.now();
     const myToken = ++this.speechToken;
     this.activeTransmission = {
       speakerKey: item.speakerKey,
@@ -623,7 +693,13 @@ class RadioAudioEngine {
         utter.rate = prof.rate;
         utter.pitch = prof.pitch;
       }
-      utter.volume = 0.88;
+
+      // In auto mode, secondary transmissions play at a little lower volume (0.38 vs 0.88)
+      if (!this.syncMode && item.isSecondary) {
+        utter.volume = 0.38;
+      } else {
+        utter.volume = 0.88;
+      }
 
       const finish = (playSquelch: boolean) => {
         if (this.speechToken !== myToken) return;
@@ -631,6 +707,7 @@ class RadioAudioEngine {
           window.clearTimeout(this.safetyTimer);
           this.safetyTimer = null;
         }
+        this.lastSpeechEndMs = Date.now();
         this.activeUtterance = null;
         this.activeTransmission = null;
         this.stopCarrierStatic();
@@ -638,17 +715,34 @@ class RadioAudioEngine {
           this.playRogerBeep();
           if (this.radioStaticLevel > 0.05) {
             // Authentic VHF squelch tail at end of transmission
-            this.playVhfBurst(0.075, 0.055 * this.radioStaticLevel, 1750, 1.4);
+            const burstLevel =
+              !this.syncMode && item.isSecondary
+                ? 0.022
+                : 0.055 * this.radioStaticLevel;
+            this.playVhfBurst(0.075, burstLevel, 1750, 1.4);
           }
         }
         this.speaking = false;
+        if (item.onFinish) {
+          try {
+            item.onFinish();
+          } catch (e) {
+            console.error("speech onFinish callback error:", e);
+          }
+        }
+        this.resolveSpeechDone();
         this.notify();
-        window.setTimeout(() => this.drainQueue(), 90);
+        const interGap = !this.syncMode ? 25 : 120;
+        window.setTimeout(() => this.drainQueue(), interGap);
       };
 
       utter.onstart = () => {
         if (this.speechToken !== myToken) return;
-        this.playVhfBurst(0.038, 0.05 * Math.max(0.3, this.radioStaticLevel), 1600, 1.8);
+        const burstLevel =
+          !this.syncMode && item.isSecondary
+            ? 0.02
+            : 0.05 * Math.max(0.3, this.radioStaticLevel);
+        this.playVhfBurst(0.038, burstLevel, 1600, 1.8);
         this.startCarrierStatic();
       };
       utter.onend = () => finish(true);
@@ -671,6 +765,14 @@ class RadioAudioEngine {
       this.activeTransmission = null;
       this.stopCarrierStatic();
       this.speaking = false;
+      if (item.onFinish) {
+        try {
+          item.onFinish();
+        } catch {
+          // Ignore
+        }
+      }
+      this.resolveSpeechDone();
       this.notify();
     }
   }

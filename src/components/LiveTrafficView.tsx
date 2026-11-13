@@ -18,10 +18,12 @@ import {
   RefreshCw,
   ShieldAlert,
 } from "lucide-react";
-import { apiClient } from "../services/apiClient.ts";
+import { apiClient, type OpenSkyMetadataResponse } from "../services/apiClient.ts";
+import { getAircraftTypeSpec, getAirlineLivery } from "../data/aircraftCatalog.ts";
 import { useAtcStore } from "../store/atcStore.ts";
 import type { AirportRecord, LiveAdsbTrack, LiveTrafficSnapshot } from "../types/atc.ts";
 import { offlineDb } from "../utils/offlineDb.ts";
+import { AircraftPhotoFrame } from "./AircraftPhotoFrame.tsx";
 import { LocalClockBadge } from "./LocalClockBadge.tsx";
 
 const QUICK_AIRSPACE_HUBS = [
@@ -111,6 +113,32 @@ export const LiveTrafficView: React.FC = () => {
       null,
     [filteredAircraft, snapshot, selectedIcao24]
   );
+
+  const [selectedMeta, setSelectedMeta] = useState<OpenSkyMetadataResponse | null>(null);
+
+  useEffect(() => {
+    if (!selectedTrack) {
+      setSelectedMeta(null);
+      return;
+    }
+    if (selectedTrack.registration && (selectedTrack.aircraftType || selectedTrack.model)) {
+      setSelectedMeta(null);
+      return;
+    }
+    let cancelled = false;
+    setSelectedMeta(null);
+    apiClient
+      .getAircraftMetadata(selectedTrack.icao24)
+      .then((meta) => {
+        if (!cancelled && meta.found) {
+          setSelectedMeta(meta);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedTrack?.icao24, selectedTrack?.registration, selectedTrack?.aircraftType, selectedTrack?.model]);
 
   const pointsGeoJson = useMemo(() => ({
     type: "FeatureCollection" as const,
@@ -490,75 +518,117 @@ export const LiveTrafficView: React.FC = () => {
           </div>
 
           {selectedTrack ? (
-            <div className="space-y-3">
-              <div>
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-lg font-bold">{selectedTrack.callsign}</span>
-                  <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-[var(--atc-surface)] border border-[var(--atc-border)]">
-                    {selectedTrack.icao24}
-                  </span>
-                </div>
-                <p className="text-xs text-[var(--atc-muted)]">{selectedTrack.originCountry ?? "Unknown registry"}</p>
-              </div>
+            (() => {
+              const effReg = selectedTrack.registration ?? selectedMeta?.registration ?? "Not reported";
+              const effType = selectedTrack.aircraftType ?? selectedMeta?.typecode ?? "";
+              const effModel = selectedTrack.model ?? selectedMeta?.model ?? "";
+              const effOperator =
+                selectedTrack.operator ?? selectedMeta?.operator ?? selectedTrack.originCountry ?? "Unknown Operator";
+              const baseSpec = getAircraftTypeSpec(effType || "A320");
+              const displaySpec = effModel
+                ? {
+                    ...baseSpec,
+                    code: effType || baseSpec.code,
+                    model: effModel,
+                    manufacturer: selectedTrack.manufacturer ?? selectedMeta?.manufacturer ?? baseSpec.manufacturer,
+                  }
+                : baseSpec;
+              const livery = getAirlineLivery({
+                callsign: selectedTrack.callsign ?? selectedTrack.icao24.toUpperCase(),
+                airline: effOperator,
+              });
 
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="p-2 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)]">
-                  <div className="text-[10px] text-[var(--atc-muted)]">Aircraft Type</div>
-                  <div className="font-mono font-semibold">{selectedTrack.aircraftType ?? "Not reported"}</div>
-                </div>
-                <div className="p-2 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)]">
-                  <div className="text-[10px] text-[var(--atc-muted)]">Registration</div>
-                  <div className="font-mono font-semibold">{selectedTrack.registration ?? "Not reported"}</div>
-                </div>
-                <div className="p-2 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)]">
-                  <div className="text-[10px] text-[var(--atc-muted)]">Baro Altitude</div>
-                  <div className="font-mono font-semibold">
-                    {selectedTrack.baroAltFt !== null ? `${selectedTrack.baroAltFt.toLocaleString()} ft` : "Unavailable"}
+              return (
+                <div className="space-y-3">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono text-lg font-bold">
+                        {selectedTrack.callsign ?? selectedTrack.icao24.toUpperCase()}
+                      </span>
+                      <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-[var(--atc-surface)] border border-[var(--atc-border)]">
+                        {selectedTrack.icao24.toUpperCase()}
+                      </span>
+                    </div>
+                    <p className="text-xs text-[var(--atc-muted)] truncate">
+                      {effOperator &&
+                      selectedTrack.originCountry &&
+                      effOperator !== selectedTrack.originCountry
+                        ? `${effOperator} • ${selectedTrack.originCountry}`
+                        : effOperator || selectedTrack.originCountry || "Unknown registry"}
+                    </p>
                   </div>
-                </div>
-                <div className="p-2 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)]">
-                  <div className="text-[10px] text-[var(--atc-muted)]">Geo Altitude</div>
-                  <div className="font-mono font-semibold">
-                    {selectedTrack.geoAltFt !== null ? `${selectedTrack.geoAltFt.toLocaleString()} ft` : "Unavailable"}
-                  </div>
-                </div>
-                <div className="p-2 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)]">
-                  <div className="text-[10px] text-[var(--atc-muted)]">Ground Speed</div>
-                  <div className="font-mono font-semibold">
-                    {selectedTrack.groundSpeedKts !== null ? `${selectedTrack.groundSpeedKts} kt` : "N/A"}
-                  </div>
-                </div>
-                <div className="p-2 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)]">
-                  <div className="text-[10px] text-[var(--atc-muted)] flex items-center gap-1">
-                    <Compass className="w-3 h-3" /> Track
-                  </div>
-                  <div className="font-mono font-semibold">
-                    {selectedTrack.trackDeg !== null ? `${selectedTrack.trackDeg}°` : "N/A"}
-                  </div>
-                </div>
-                <div className="p-2 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)]">
-                  <div className="text-[10px] text-[var(--atc-muted)]">Vertical Rate</div>
-                  <div className="font-mono font-semibold">
-                    {selectedTrack.verticalRateFpm !== null ? `${selectedTrack.verticalRateFpm} fpm` : "N/A"}
-                  </div>
-                </div>
-                <div className="p-2 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)]">
-                  <div className="text-[10px] text-[var(--atc-muted)]">Status</div>
-                  <div className="font-mono font-semibold">{selectedTrack.onGround ? "ON GROUND" : "AIRBORNE"}</div>
-                </div>
-              </div>
 
-              <div className="p-2.5 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)] text-xs space-y-1 font-mono">
-                <div className="text-[10px] font-sans text-[var(--atc-muted)]">Current Position</div>
-                <div>
-                  {selectedTrack.lat.toFixed(4)}°, {selectedTrack.lon.toFixed(4)}°
+                  <AircraftPhotoFrame
+                    icao24={selectedTrack.icao24}
+                    spec={displaySpec}
+                    livery={livery}
+                    registration={effReg === "Not reported" ? "" : effReg}
+                    elevationFt={0}
+                    theme={theme}
+                  />
+
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="p-2 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)]">
+                      <div className="text-[10px] text-[var(--atc-muted)]">Aircraft Type / Model</div>
+                      <div className="font-mono font-semibold truncate" title={effModel || effType}>
+                        {effModel || effType || "Not reported"}
+                      </div>
+                    </div>
+                    <div className="p-2 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)]">
+                      <div className="text-[10px] text-[var(--atc-muted)]">Registration</div>
+                      <div className="font-mono font-semibold">{effReg}</div>
+                    </div>
+                    <div className="p-2 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)]">
+                      <div className="text-[10px] text-[var(--atc-muted)]">Baro Altitude</div>
+                      <div className="font-mono font-semibold">
+                        {selectedTrack.baroAltFt !== null ? `${selectedTrack.baroAltFt.toLocaleString()} ft` : "Unavailable"}
+                      </div>
+                    </div>
+                    <div className="p-2 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)]">
+                      <div className="text-[10px] text-[var(--atc-muted)]">Geo Altitude</div>
+                      <div className="font-mono font-semibold">
+                        {selectedTrack.geoAltFt !== null ? `${selectedTrack.geoAltFt.toLocaleString()} ft` : "Unavailable"}
+                      </div>
+                    </div>
+                    <div className="p-2 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)]">
+                      <div className="text-[10px] text-[var(--atc-muted)]">Ground Speed</div>
+                      <div className="font-mono font-semibold">
+                        {selectedTrack.groundSpeedKts !== null ? `${selectedTrack.groundSpeedKts} kt` : "N/A"}
+                      </div>
+                    </div>
+                    <div className="p-2 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)]">
+                      <div className="text-[10px] text-[var(--atc-muted)] flex items-center gap-1">
+                        <Compass className="w-3 h-3" /> Track
+                      </div>
+                      <div className="font-mono font-semibold">
+                        {selectedTrack.trackDeg !== null ? `${selectedTrack.trackDeg}°` : "N/A"}
+                      </div>
+                    </div>
+                    <div className="p-2 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)]">
+                      <div className="text-[10px] text-[var(--atc-muted)]">Vertical Rate</div>
+                      <div className="font-mono font-semibold">
+                        {selectedTrack.verticalRateFpm !== null ? `${selectedTrack.verticalRateFpm} fpm` : "N/A"}
+                      </div>
+                    </div>
+                    <div className="p-2 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)]">
+                      <div className="text-[10px] text-[var(--atc-muted)]">Status</div>
+                      <div className="font-mono font-semibold">{selectedTrack.onGround ? "ON GROUND" : "AIRBORNE"}</div>
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)] text-xs space-y-1 font-mono">
+                    <div className="text-[10px] font-sans text-[var(--atc-muted)]">Current Position</div>
+                    <div>
+                      {selectedTrack.lat.toFixed(4)}°, {selectedTrack.lon.toFixed(4)}°
+                    </div>
+                    <div className="text-[10px] text-[var(--atc-muted)] pt-1">
+                      Last Report: {new Date(selectedTrack.lastUpdatedMs).toLocaleTimeString()}
+                      {selectedTrack.stale ? " (STALE)" : ""}
+                    </div>
+                  </div>
                 </div>
-                <div className="text-[10px] text-[var(--atc-muted)] pt-1">
-                  Last Report: {new Date(selectedTrack.lastUpdatedMs).toLocaleTimeString()}
-                  {selectedTrack.stale ? " (STALE)" : ""}
-                </div>
-              </div>
-            </div>
+              );
+            })()
           ) : (
             <div className="text-xs text-[var(--atc-muted)] flex flex-col items-center justify-center py-12 text-center gap-2">
               <Eye className="w-6 h-6 opacity-50" />
