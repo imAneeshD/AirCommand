@@ -714,59 +714,6 @@ export const ClearanceControlDeck: React.FC = () => {
         )}
 
 
-        {/* Incoming Handoff Requests awaiting user acceptance / rejection */}
-        {pendingHandoffsForUser.length > 0 && (
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between text-[10px] font-mono font-bold text-[var(--atc-cyan)] uppercase px-0.5">
-              <span className="flex items-center gap-1">
-                <Radio className="w-3 h-3 animate-spin-slow" />
-                INCOMING HANDOFF REQUESTS ({pendingHandoffsForUser.length})
-              </span>
-            </div>
-            {pendingHandoffsForUser.slice(0, 4).map((h) => (
-              <div
-                key={h.id}
-                className="rounded-lg border border-[var(--atc-cyan-border)] bg-[var(--atc-surface-alt)] p-2.5 text-[11px] font-mono space-y-1.5 shadow-sm"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-[var(--atc-cyan)]">
-                    {h.callsign} ({controllerCallsign(h.fromController, sim.airport, sim.aircraft[h.aircraftId]?.flightKind)} → {controllerCallsign(h.toController, sim.airport, sim.aircraft[h.aircraftId]?.flightKind)})
-                  </span>
-                  <span className="text-[10px] text-[var(--atc-muted)]">
-                    {controllerFrequency(h.toController, sim.airport, sim.aircraft[h.aircraftId]?.flightKind)} MHz
-                  </span>
-                </div>
-                <p className="text-[10px] text-[var(--atc-text-secondary)]">
-                  {controllerCallsign(h.fromController, sim.airport, sim.aircraft[h.aircraftId]?.flightKind)} requested transfer of {h.callsign} to your frequency.
-                </p>
-                <div className="flex gap-1.5 pt-0.5">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      respondToHandoff(h.id, true);
-                    }}
-                    className="flex-1 py-1.5 px-3 rounded-md border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:bg-[var(--atc-surface)] hover:border-[var(--atc-emerald)] text-[var(--atc-emerald)] font-mono font-bold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <CheckCircle className="w-3.5 h-3.5" />
-                    ACCEPT
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      respondToHandoff(h.id, false);
-                    }}
-                    className="py-1.5 px-3 rounded-md border border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] hover:bg-[var(--atc-surface)] text-[var(--atc-red)] font-mono text-xs font-semibold transition-colors cursor-pointer"
-                  >
-                    REJECT
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
         {roomState?.status === "ACTIVE" && assignedRole && deckTab !== assignedRole ? (
           <div className="rounded-lg border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] p-2.5 text-[11px] font-mono text-[var(--atc-amber)]">
             Multiplayer Lock: You are controlling <strong>{assignedRole}</strong>. Switch deck tab back to{" "}
@@ -902,67 +849,49 @@ export const ClearanceControlDeck: React.FC = () => {
             </div>
           </div>
         ) : roleLocked && ac.controller !== lockedRole ? (
-          <div className="rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] p-3 text-[11px] font-mono text-[var(--atc-text)] space-y-2.5 shadow-sm">
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-[var(--atc-emerald)] shrink-0 animate-ping" />
-              <div>
-                <span className="font-bold text-[var(--atc-accent-text)]">{ac.callsign}</span> is on{" "}
-                <span className="font-bold">{controllerCallsign(ac.controller, sim.airport, ac.flightKind)}</span> (auto-managed while operating{" "}
-                <span className="font-bold">{lockedRole === "DEPARTURE" ? "DEP/APP" : lockedRole}</span>).
+          pendingForSelectedAc ? (
+            <div className="rounded-lg border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] p-3 space-y-2.5 shadow-sm font-mono">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-[var(--atc-emerald)] flex items-center gap-1.5">
+                  <Radio className="w-3.5 h-3.5 animate-spin-slow shrink-0" />
+                  Incoming Handoff ({controllerCallsign(pendingForSelectedAc.fromController, sim.airport, ac.flightKind)} → {lockedRole})
+                </span>
+                <span className="text-[10px] text-[var(--atc-muted)]">
+                  {controllerFrequency(lockedRole, sim.airport, ac.flightKind)} MHz
+                </span>
               </div>
-            </div>
-            <p className="text-[10px] text-[var(--atc-text-secondary)] leading-relaxed">
-              {pendingForSelectedAc
-                ? `${controllerCallsign(pendingForSelectedAc.fromController, sim.airport, ac.flightKind)} is actively requesting to transfer ${ac.callsign} to your frequency (${controllerFrequency(lockedRole, sim.airport)} MHz).`
-                : `Clearance controls belong to ${controllerCallsign(ac.controller, sim.airport, ac.flightKind)}. As ${lockedRole === "DEPARTURE" ? "DEP/APP" : lockedRole}, accept handoff to assume active control.`}
-            </p>
-
-            {pendingForSelectedAc ? (
-              <div className="flex gap-2 pt-1">
+              <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    respondToHandoff(pendingForSelectedAc.id, true);
-                  }}
-                  className="flex-1 py-1.5 px-3 rounded-md border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:bg-[var(--atc-surface)] hover:border-[var(--atc-emerald)] text-[var(--atc-emerald)] font-mono font-bold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                  onClick={() => respondToHandoff(pendingForSelectedAc.id, true)}
+                  className="flex-1 py-2 px-3 rounded-md border border-[var(--atc-emerald-border)] bg-[var(--atc-surface)] hover:bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-sm transition-colors"
                 >
-                  <CheckCircle className="w-4 h-4" />
-                  ACCEPT HANDOFF ({ac.callsign} → {lockedRole})
+                  <CheckCircle className="w-4 h-4 shrink-0" />
+                  ACCEPT HANDOFF
                 </button>
                 <button
                   type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    respondToHandoff(pendingForSelectedAc.id, false);
-                  }}
-                  className="py-1.5 px-3 rounded-md border border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] hover:bg-[var(--atc-surface)] text-[var(--atc-red)] font-mono text-xs font-semibold transition-colors cursor-pointer"
+                  onClick={() => respondToHandoff(pendingForSelectedAc.id, false)}
+                  className="py-2 px-3 rounded-md border border-[var(--atc-red-border)] bg-[var(--atc-surface)] hover:bg-[var(--atc-red-bg)] text-[var(--atc-red)] font-semibold text-xs cursor-pointer transition-colors"
                 >
                   REJECT
                 </button>
               </div>
-            ) : (
+            </div>
+          ) : (
+            <div className="rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] p-2.5 font-mono text-[11px] flex items-center justify-between gap-2 shadow-sm">
+              <span className="truncate text-[var(--atc-text-secondary)]">
+                On frequency: <strong className="text-[var(--atc-text)]">{controllerCallsign(ac.controller, sim.airport, ac.flightKind)}</strong>
+              </span>
               <button
                 type="button"
-                onClick={() => {
-                  claimAircraftStation(ac.id, lockedRole);
-                }}
-                className="w-full py-1.5 px-3 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:bg-[var(--atc-surface)] hover:border-[var(--atc-cyan)] text-[var(--atc-cyan)] font-mono text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                onClick={() => claimAircraftStation(ac.id, lockedRole)}
+                className="py-1 px-2.5 rounded border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:bg-[var(--atc-surface)] text-[var(--atc-cyan)] font-bold text-[10px] shrink-0 transition-colors"
               >
-                <Radio className="w-3.5 h-3.5" />
-                ASSUME FREQUENCY / TAKE OVER ({ac.callsign} → {lockedRole})
+                TAKE OVER
               </button>
-            )}
-
-            {activeRole !== "ALL" && !assignedRole && (
-              <button
-                onClick={() => switchStation(ac.controller)}
-                className="w-full py-1.5 rounded bg-[var(--atc-surface)] hover:bg-[var(--atc-surface-alt)] border border-[var(--atc-emerald-border)] text-[var(--atc-emerald)] font-bold text-[10px] transition-colors"
-              >
-                SWITCH ROLE TO {ac.controller}
-              </button>
-            )}
-          </div>
+            </div>
+          )
         ) : (
         /* ACCORDION 1: Clearances & Actions (Open by default) */
         <Accordion
