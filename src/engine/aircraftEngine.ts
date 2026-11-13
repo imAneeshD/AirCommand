@@ -422,13 +422,13 @@ export function updateAircraftStates(state: SimulationState): void {
         }
 
         const along = alongRunwayNm(rwy, ac.x, ac.y);
-        if (along >= -6.0 && along < -0.35) {
+        if (ac.controller === "TOWER" && along >= -6.0 && along < -0.35) {
           issuePilotRequestIfNeeded(
             state,
             ac,
             "LANDING",
-            ac.controller,
-            `${controllerCallsign(ac.controller, state.airport)}, ${ac.spokenCallsign}, final runway ${runwaySpokenName(rwy.id)}, request landing clearance.`,
+            "TOWER",
+            `${controllerCallsign("TOWER", state.airport, ac.flightKind)}, ${ac.spokenCallsign}, final runway ${runwaySpokenName(rwy.id)}, request landing clearance.`,
             rwy.id
           );
         }

@@ -189,3 +189,49 @@ test("Departure Traffic Flow: Ground -> Tower -> Departure ('Asteria Departure')
   assert.equal(dep.state, "COMPLETED_DEPARTURE");
   assert.ok(sim.metrics.departuresCompleted >= 1);
 });
+
+test("Tower controller receives and accepts incoming handoff from Approach for aircraft on final", () => {
+  const sim = createScenarioSimulation("LIGHT");
+  sim.config.activePlayerStation = "TOWER";
+
+  const arrival = Object.values(sim.aircraft).find((a) => a.flightKind === "ARRIVAL")!;
+  arrival.controller = "DEPARTURE";
+  arrival.state = "FINAL";
+
+  // AI Approach issues handoff to Tower
+  const hoReq = submitClearanceDecision(
+    sim,
+    {
+      aircraftId: arrival.id,
+      controller: "DEPARTURE",
+      type: "HANDOFF",
+      parameters: { targetController: "TOWER" },
+    },
+    "AUTONOMOUS"
+  );
+  assert.ok(hoReq.ok, `Handoff request failed: ${hoReq.reason}`);
+
+  // Pending handoff should be created in sim.handoffs
+  const pending = sim.handoffs.find(
+    (h) => h.aircraftId === arrival.id && h.status === "PENDING" && h.toController === "TOWER"
+  );
+  assert.ok(pending, "Must find pending handoff to TOWER in simulation state");
+
+  // Player accepts the handoff
+  const hoAccept = submitClearanceDecision(
+    sim,
+    {
+      aircraftId: pending.aircraftId,
+      controller: pending.fromController,
+      type: "HANDOFF",
+      parameters: { targetController: pending.toController, bypassPending: true },
+    },
+    "PLAYER"
+  );
+  assert.ok(hoAccept.ok, `Accept handoff failed: ${hoAccept.reason}`);
+
+  stepUntilCondition(sim, () => arrival.controller === "TOWER");
+  assert.equal(arrival.controller, "TOWER");
+  assert.equal(arrival.pendingRequest?.type, "LANDING");
+  assert.match(arrival.pendingRequest?.message ?? "", /Tower/);
+});
