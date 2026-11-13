@@ -1,4 +1,4 @@
-import { submitClearanceDecision } from "../../src/engine/decisionEngine.ts";
+import { submitClearanceDecision, controllerFrequency } from "../../src/engine/decisionEngine.ts";
 import { createScenarioSimulation, stepSimulation } from "../../src/engine/simulation.ts";
 import type {
   AirportLayout,
@@ -504,7 +504,8 @@ export class MultiplayerRoomService {
       };
     }
 
-    // If issuing HANDOFF to another human-staffed position, use explicit HandoffService coordination
+    // Flow: Ground Control initiates Handoff req -> Tower accepts/rejects ->
+    // transfer req to the plane with the signal -> freq change from plane -> Tower gets the plane
     if (opts.cmd.type === "HANDOFF") {
       const targetCtrl = opts.cmd.parameters?.targetController as ControllerRole | undefined;
       if (targetCtrl) {
@@ -519,27 +520,39 @@ export class MultiplayerRoomService {
           this.scoring.recordCommandResult(ir.tracker, playerRole, false);
           return { ok: false, reason: ho.error ?? "Handoff failed." };
         }
-        this.scoring.recordCommandResult(ir.tracker, playerRole, true, 1.0);
+
+        // If target position is automated AI, AI accepts automatically -> issue transfer command to plane
         if (ho.handoff?.status === "ACCEPTED") {
           this.scoring.recordHandoffCompleted(ir.tracker, playerRole);
+          const res = submitClearanceDecision(ir.sim, { ...opts.cmd, parameters: { ...opts.cmd.parameters, bypassPending: true } }, "PLAYER");
+          this.scoring.recordCommandResult(ir.tracker, playerRole, res.ok, 1.0);
+
+          const targetFreq = controllerFrequency(targetCtrl, ir.sim.airport);
+          this.comms.addMessage(ir.room, {
+            senderPlayerId: opts.playerId,
+            senderName: ir.room.slots[playerRole].playerName ?? playerRole,
+            senderRole: playerRole,
+            text: `Handoff accepted: ${ac.callsign} frequency transfer sent to plane (contact on ${targetFreq}).`,
+          });
+          this.broadcastRoomState(ir, false);
+          return {
+            ok: res.ok,
+            reason: res.reason ?? `Transferred ${ac.callsign} to ${targetCtrl}.`,
+          };
+        } else {
+          // Target position is staffed by a human controller -> handoff request pending, awaiting accept/reject
+          this.comms.addMessage(ir.room, {
+            senderPlayerId: opts.playerId,
+            senderName: ir.room.slots[playerRole].playerName ?? playerRole,
+            senderRole: playerRole,
+            text: `Handoff request: ${ac.callsign} (${playerRole} → ${targetCtrl}). Awaiting ${targetCtrl} acceptance.`,
+          });
+          this.broadcastRoomState(ir, false);
+          return {
+            ok: true,
+            reason: `Handoff request sent to ${targetCtrl}. Awaiting acceptance.`,
+          };
         }
-        this.comms.addMessage(ir.room, {
-          senderPlayerId: opts.playerId,
-          senderName: ir.room.slots[playerRole].playerName ?? playerRole,
-          senderRole: playerRole,
-          text:
-            ho.handoff?.status === "ACCEPTED"
-              ? `Handoff ${ac.callsign} → ${targetCtrl} accepted automatically.`
-              : `Handoff initiated: ${ac.callsign} (${playerRole} → ${targetCtrl}). Awaiting ${targetCtrl} accept.`,
-        });
-        this.broadcastRoomState(ir, false);
-        return {
-          ok: true,
-          reason:
-            ho.handoff?.status === "ACCEPTED"
-              ? `Transferred ${ac.callsign} to ${targetCtrl}.`
-              : `Handoff sent to ${targetCtrl}.`,
-        };
       }
     }
 
@@ -578,6 +591,18 @@ export class MultiplayerRoomService {
     if (existing) {
       if (opts.accept) {
         this.scoring.recordHandoffCompleted(ir.tracker, existing.fromController);
+
+        // Step 3: Tower accepts -> transfer request to the plane with the radio signal!
+        submitClearanceDecision(
+          ir.sim,
+          {
+            aircraftId: existing.aircraftId,
+            controller: existing.fromController,
+            type: "HANDOFF",
+            parameters: { targetController: existing.toController, bypassPending: true },
+          },
+          "PLAYER"
+        );
       }
       this.comms.addMessage(ir.room, {
         senderPlayerId: opts.playerId,

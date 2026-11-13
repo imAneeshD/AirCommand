@@ -988,7 +988,61 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
   },
 
   respondToHandoff: (handoffId, accept) => {
-    ensureWsClient(set, get).respondHandoff(handoffId, accept);
+    const { roomState, sim } = get();
+    if (roomState && roomState.status === "ACTIVE") {
+      ensureWsClient(set, get).respondHandoff(handoffId, accept);
+      return;
+    }
+
+    const h = sim.handoffs?.find((item) => item.id === handoffId && item.status === "PENDING");
+    if (!h) return;
+
+    h.respondedAt = sim.time;
+    if (!accept) {
+      h.status = "REJECTED";
+      radioAudio.playRadioClick("ERROR");
+      set((s) => ({
+        tickVersion: s.tickVersion + 1,
+        lastFeedback: {
+          ok: false,
+          text: `Handoff rejected. ${h.callsign} remains with ${h.fromController}.`,
+          at: sim.time,
+        },
+      }));
+      return;
+    }
+
+    h.status = "ACCEPTED";
+    radioAudio.playRadioClick("ATC");
+
+    // Flow: tower controller accepts -> transfer req to the plane with the signal!
+    const prevLastMsg = sim.radioLog[sim.radioLog.length - 1]?.id ?? null;
+    const res = submitClearanceDecision(
+      sim,
+      {
+        aircraftId: h.aircraftId,
+        controller: h.fromController,
+        type: "HANDOFF",
+        parameters: { targetController: h.toController, bypassPending: true },
+      },
+      "PLAYER"
+    );
+
+    if (res.ok) {
+      const newMessages = collectNewMessagesSince(sim.radioLog, prevLastMsg);
+      dispatchRadioMessagesAudio(sim, newMessages, () => {
+        set((s) => ({ tickVersion: s.tickVersion + 1 }));
+      });
+    }
+
+    set((s) => ({
+      tickVersion: s.tickVersion + 1,
+      lastFeedback: {
+        ok: true,
+        text: `Handoff accepted. Frequency transfer sent to ${h.callsign}.`,
+        at: sim.time,
+      },
+    }));
   },
 
   sendMultiplayerChat: (text) => {

@@ -36,6 +36,10 @@ export class HandoffService {
       };
     }
 
+    const targetSlot = opts.room.slots[opts.toController];
+    const targetIsAutomated =
+      targetSlot.aiTakeover || !targetSlot.playerId || !targetSlot.connected;
+
     const handoff: ControllerHandoff = {
       id: `ho_${Date.now()}_${Math.floor(Math.random() * 10000)}`,
       aircraftId: ac.id,
@@ -43,19 +47,10 @@ export class HandoffService {
       fromController: opts.fromController,
       toController: opts.toController,
       issuedAt: opts.sim.time,
-      status: "PENDING",
+      status: targetIsAutomated ? "ACCEPTED" : "PENDING",
+      respondedAt: targetIsAutomated ? opts.sim.time : undefined,
       note: opts.note,
     };
-
-    const targetSlot = opts.room.slots[opts.toController];
-    const targetIsAutomated =
-      targetSlot.aiTakeover || !targetSlot.playerId || !targetSlot.connected;
-
-    if (targetIsAutomated) {
-      handoff.status = "ACCEPTED";
-      handoff.respondedAt = opts.sim.time;
-      ac.controller = opts.toController;
-    }
 
     opts.room.handoffs.push(handoff);
     if (opts.room.handoffs.length > 100) {

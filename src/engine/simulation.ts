@@ -143,6 +143,7 @@ export function createBaseSimulation(
     aircraftOrder: [],
     selectedAircraftId: null,
     radioLog: [],
+    handoffs: [],
     incidents: [],
     config,
     metrics: {
