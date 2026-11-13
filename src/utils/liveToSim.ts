@@ -373,14 +373,13 @@ export function convertLiveTracksToSimulation(opts: {
     );
   });
 
-  // Top up with realistic local flights if live traffic count is below scenario mode minimum (for explicit mode filters like HEAVY, RUSH_HOUR)
+  // Top up with realistic local flights if live traffic count is below scenario mode minimum or if 0 live flights
   if (
-    opts.scenarioId &&
     opts.scenarioId !== "SANDBOX" &&
-    opts.scenarioId !== "MIXED" &&
-    sim.aircraftOrder.length < limits.min
+    (sim.aircraftOrder.length < limits.min || chosen.length === 0)
   ) {
-    const need = limits.min - sim.aircraftOrder.length;
+    const targetCount = Math.max(limits.min, 4);
+    const need = Math.max(0, targetCount - sim.aircraftOrder.length);
     for (let i = 0; i < need; i++) {
       spawnRandomTraffic(sim);
     }

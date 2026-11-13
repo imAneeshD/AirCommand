@@ -986,17 +986,13 @@ export const GlobalAirportMap: React.FC = () => {
                 <div className="text-xs text-[var(--atc-cyan)] px-3 py-2 rounded border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)]">
                   Checking OurAirports & OpenStreetMap infrastructure...
                 </div>
-              ) : airportDetailError ? (
-                <div className="text-[11px] text-[var(--atc-amber)] px-3 py-2 rounded border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)]">
-                  {airportDetailError} — Simulation builds verified runways + standard parallel taxiway graph, or use the Geometry Editor to add OSM features.
-                </div>
               ) : selectedAirportGeoJson && selectedAirportGeoJson.features.length > 0 ? (
                 <div className="text-[11px] text-[var(--atc-emerald)] px-3 py-2 rounded border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)]">
                   Infrastructure loaded: {selectedAirportGeoJson.features.length} GeoJSON features ({selectedAirportRecord.source}).
                 </div>
               ) : (
                 <div className="text-[11px] text-[var(--atc-muted)] px-3 py-2 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)]">
-                  OurAirports verified runway coordinates loaded. Click "Edit Airport Geometry" to customize taxiways & gates.
+                  OurAirports verified runway coordinates loaded. Simulation builds connected taxiway network, or use the Geometry Editor to customize.
                 </div>
               )}
 
@@ -1149,11 +1145,10 @@ export const GlobalAirportMap: React.FC = () => {
                     );
                     setConvertingLive(false);
                     if (!res.ok) {
-                      setStatusNote(
-                        `Live flight conversion failed for ${selectedAirportRecord.icao}: ${
-                          res.error ?? "Backend unavailable."
-                        }`
-                      );
+                      const cleanErr = res.error?.includes("JSON") || res.error?.includes("fetch")
+                        ? "Live traffic service temporarily unavailable. You can launch Normal Scenario Operations below."
+                        : res.error ?? "Live service unavailable.";
+                      setStatusNote(`Live flight conversion notice for ${selectedAirportRecord.icao}: ${cleanErr}`);
                     }
                   }}
                   disabled={!isOnline || airportDetailLoading || convertingLive}

@@ -348,13 +348,13 @@ export const RadarScopeCanvas: React.FC = () => {
       const saved = localStorage.getItem("aircommand_rwy_lights_mode");
       if (saved === "SHOW" || saved === "PLANE_ONLY" || saved === "OFF") return saved;
     } catch {}
-    return "SHOW";
+    return "OFF";
   });
 
   const toggleRunwayLightsMode = () => {
     setRunwayLightsMode((prev) => {
       const next: RunwayLightsMode =
-        prev === "SHOW" ? "PLANE_ONLY" : prev === "PLANE_ONLY" ? "OFF" : "SHOW";
+        prev === "OFF" ? "SHOW" : prev === "SHOW" ? "PLANE_ONLY" : "OFF";
       try {
         localStorage.setItem("aircommand_rwy_lights_mode", next);
       } catch {}
