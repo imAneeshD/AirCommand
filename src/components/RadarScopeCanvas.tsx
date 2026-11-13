@@ -619,32 +619,6 @@ export const RadarScopeCanvas: React.FC = () => {
           <span className="text-[var(--atc-muted)]">•</span>
           <span className="text-[var(--atc-muted)]">{sim.airport.windLabel}</span>
         </div>
-
-        {primaryCaller && (
-          <button
-            type="button"
-            onClick={() => selectAircraft(primaryCaller.aircraftId)}
-            title={`Click to select calling aircraft ${primaryCaller.callsign}`}
-            className={`pointer-events-auto px-2.5 py-1.5 rounded-md border shadow-[var(--atc-shadow)] backdrop-blur-sm text-[11px] font-mono flex items-center gap-2 max-w-full transition-colors ${
-              primaryCaller.category === "EMERGENCY" || primaryCaller.category === "READBACK_ERROR"
-                ? "bg-[var(--atc-red-bg)] border-[var(--atc-red-border)] text-[var(--atc-red)]"
-                : primaryCaller.category === "PILOT_REQUEST"
-                ? "bg-[var(--atc-amber-bg)] border-[var(--atc-amber-border)] text-[var(--atc-amber)]"
-                : "bg-[var(--atc-cyan-bg)] border-[var(--atc-cyan-border)] text-[var(--atc-cyan)]"
-            }`}
-          >
-            <Radio className="w-3.5 h-3.5 shrink-0 animate-pulse" />
-            <span className="font-extrabold shrink-0">
-              TX {primaryCaller.callsign}
-            </span>
-            <span className="px-1 py-0.2 rounded bg-black/10 text-[9px] font-bold shrink-0">
-              {primaryCaller.controller === "DEPARTURE" ? "DEP" : primaryCaller.controller}
-            </span>
-            <span className="truncate text-[var(--atc-text)] font-sans font-medium">
-              "{primaryCaller.text}"
-            </span>
-          </button>
-        )}
       </div>
 
       {/* Bottom-Left Scope Controls */}

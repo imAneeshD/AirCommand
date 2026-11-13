@@ -315,10 +315,11 @@ test("Single active role with other roles autonomous: auto controllers progress 
 
   // Step simulation - auto Tower should line up or clear takeoff
   stepSimulation(sim, 2.0);
+  const curDepState = dep.state as string;
   assert.ok(
-    dep.state === "LINE_UP_WAIT" ||
-      dep.state === "TAKEOFF_CLEARED" ||
-      dep.state === "TAKEOFF_ROLL" ||
+    curDepState === "LINE_UP_WAIT" ||
+      curDepState === "TAKEOFF_CLEARED" ||
+      curDepState === "TAKEOFF_ROLL" ||
       dep.clearances.some((c) => c.type === "TAKEOFF" || c.type === "LINE_UP"),
     `Auto Tower must issue LINE_UP or TAKEOFF, current state: ${dep.state}`
   );

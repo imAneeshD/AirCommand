@@ -730,14 +730,14 @@ export const ClearanceControlDeck: React.FC = () => {
               >
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-[var(--atc-cyan)]">
-                    {h.callsign} ({controllerCallsign(h.fromController, sim.airport)} → {controllerCallsign(h.toController, sim.airport)})
+                    {h.callsign} ({controllerCallsign(h.fromController, sim.airport, sim.aircraft[h.aircraftId]?.flightKind)} → {controllerCallsign(h.toController, sim.airport, sim.aircraft[h.aircraftId]?.flightKind)})
                   </span>
                   <span className="text-[10px] text-[var(--atc-muted)]">
-                    {controllerFrequency(h.toController, sim.airport)} MHz
+                    {controllerFrequency(h.toController, sim.airport, sim.aircraft[h.aircraftId]?.flightKind)} MHz
                   </span>
                 </div>
                 <p className="text-[10px] text-[var(--atc-text-secondary)]">
-                  {controllerCallsign(h.fromController, sim.airport)} requested transfer of {h.callsign} to your frequency.
+                  {controllerCallsign(h.fromController, sim.airport, sim.aircraft[h.aircraftId]?.flightKind)} requested transfer of {h.callsign} to your frequency.
                 </p>
                 <div className="flex gap-1.5 pt-0.5">
                   <button
