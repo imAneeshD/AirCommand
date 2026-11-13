@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Bot,
+  ChevronDown,
   Flag,
   Globe2,
   Lock,
@@ -20,7 +21,6 @@ import {
 } from "lucide-react";
 import { useAtcStore } from "../store/atcStore.ts";
 import type { ControllerRole, PlayerRoleMode, ScenarioId } from "../types/atc.ts";
-import { Accordion } from "./Accordion.tsx";
 import { LocalClockBadge } from "./LocalClockBadge.tsx";
 import { RadioVoiceMenu } from "./RadioVoiceMenu.tsx";
 import { VoicePttButton } from "./VoicePttButton.tsx";
@@ -31,10 +31,10 @@ const STATIONS: Array<{
   label: string;
   freq: string;
 }> = [
-  { role: "GROUND", code: "G", label: "GROUND", freq: "121.90" },
-  { role: "TOWER", code: "T", label: "TOWER", freq: "118.70" },
-  { role: "DEPARTURE", code: "D", label: "DEP/APP", freq: "124.35" },
-  { role: "ALL", code: "N", label: "ALL AUTO", freq: "ALL" },
+  { role: "GROUND", code: "G", label: "GND", freq: "121.90" },
+  { role: "TOWER", code: "T", label: "TWR", freq: "118.70" },
+  { role: "DEPARTURE", code: "D", label: "DEP", freq: "124.35" },
+  { role: "ALL", code: "ALL", label: "AUTO", freq: "ALL" },
 ];
 
 const SCENARIOS: Array<{ id: ScenarioId; label: string }> = [
@@ -81,8 +81,20 @@ export const TopBar: React.FC = () => {
   const togglePanelMinimized = useAtcStore((s) => s.togglePanelMinimized);
 
   const isMpActive = Boolean(roomState && roomState.status === "ACTIVE");
-
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsRef = useRef<HTMLDivElement | null>(null);
+
+  // Close tools popover when clicking outside
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) {
+        setSettingsOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", handleOutsideClick);
+    return () => window.removeEventListener("mousedown", handleOutsideClick);
+  }, [settingsOpen]);
 
   const pendingCounts: Record<ControllerRole, number> = {
     GROUND: 0,
@@ -100,62 +112,39 @@ export const TopBar: React.FC = () => {
   }
 
   return (
-    <header className="min-h-[52px] bg-[var(--atc-panel)] border-b border-[var(--atc-border)] px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 shrink-0 transition-colors">
-      {/* Left: Brand & Switch Airport */}
-      <div className="flex items-center gap-2 shrink-0">
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-[var(--atc-accent-bg)] border border-[var(--atc-accent-border)] flex items-center justify-center text-[var(--atc-accent-text)] shrink-0">
-            <Radio className="w-4 h-4" />
+    <header className="min-h-[50px] bg-[var(--atc-panel)] border-b border-[var(--atc-border)] px-3 py-1.5 flex items-center justify-between gap-3 shrink-0 select-none transition-colors">
+      {/* LEFT SECTION: Operational Identity & Station Switcher */}
+      <div className="flex items-center gap-2.5 shrink-0">
+        {/* Unified Airport Badge + Quick Switcher */}
+        <button
+          onClick={openAirportSelector}
+          title="Click to Switch Airport (Global Airport Map)"
+          className="flex items-center gap-2 px-2.5 py-1 rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface)] hover:bg-[var(--atc-surface-alt)] hover:border-[var(--atc-border-strong)] transition-all shadow-sm group cursor-pointer"
+        >
+          <div className="w-6 h-6 rounded bg-[var(--atc-accent-bg)] border border-[var(--atc-accent-border)] flex items-center justify-center text-[var(--atc-accent-text)] shrink-0">
+            <Radio className="w-3.5 h-3.5" />
           </div>
-          <div className="leading-tight whitespace-nowrap">
-            <div className="text-xs font-extrabold tracking-wider text-[var(--atc-text)] uppercase">
-              AirCommand
-            </div>
-            <div className="text-[10px] font-mono text-[var(--atc-muted)] flex items-center gap-1.5 max-w-[165px] 2xl:max-w-none truncate">
-              <span className="truncate">
-                {sim.airport.icao} • {sim.airport.controllerPrefix} • {sim.airport.runwayIds.join("/")}
+          <div className="text-left leading-tight">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-black tracking-wider text-[var(--atc-text)] uppercase">
+                AIRCOMMAND
+              </span>
+              <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-[var(--atc-surface-alt)] text-[var(--atc-cyan)] border border-[var(--atc-border)]">
+                {sim.airport.icao}
               </span>
               {sim.liveSnapshotMeta && (
                 <span
-                  title={`Live ADS-B Traffic: ${sim.liveSnapshotMeta.activeLiveCount ?? sim.liveSnapshotMeta.convertedCount} real flights (${sim.liveSnapshotMeta.source})`}
-                  className={`px-1.5 py-0.2 rounded text-[9px] font-bold flex items-center gap-1 ${
-                    sim.liveSnapshotMeta.liveSyncEnabled
-                      ? "bg-sky-500/20 border border-sky-400/80 text-sky-400"
-                      : "bg-[var(--atc-emerald-bg)] border border-[var(--atc-emerald-border)] text-[var(--atc-emerald)]"
-                  }`}
-                >
-                  {sim.liveSnapshotMeta.liveSyncEnabled && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
-                  )}
-                  LIVE ADS-B ({sim.liveSnapshotMeta.activeLiveCount ?? sim.liveSnapshotMeta.convertedCount})
-                </span>
+                  title={`Live ADS-B Traffic Active (${sim.liveSnapshotMeta.activeLiveCount ?? sim.liveSnapshotMeta.convertedCount} real aircraft)`}
+                  className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0"
+                />
               )}
+              <ChevronDown className="w-3 h-3 text-[var(--atc-muted)] group-hover:text-[var(--atc-text)] transition-colors" />
             </div>
           </div>
-          <button
-            onClick={openAirportSelector}
-            title="Open Global Airport Map & Discovery"
-            className="px-2 py-1 rounded-md border border-[var(--atc-border)] hover:border-[var(--atc-border-strong)] bg-[var(--atc-surface)] text-[10px] font-mono text-[var(--atc-text-secondary)] hover:text-[var(--atc-text)] flex items-center gap-1 whitespace-nowrap shadow-sm transition-colors"
-          >
-            <Globe2 className="w-3 h-3 text-[var(--atc-cyan)]" />
-            <span className="hidden 2xl:inline">GLOBAL MAP</span>
-          </button>
+        </button>
 
-          {roomState && (
-            <button
-              onClick={() => setAppMode("MULTIPLAYER_LOBBY")}
-              title="Open Multiplayer Lobby & Room Status"
-              className="px-2 py-1 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] text-[10px] font-mono font-bold text-[var(--atc-cyan)] flex items-center gap-1 whitespace-nowrap"
-            >
-              <Users className="w-3 h-3" />
-              <span>{roomState.roomCode}</span>
-              {assignedRole && <span>· {assignedRole}</span>}
-            </button>
-          )}
-        </div>
-
-        {/* Minimal Segmented Role Switcher: G | T | D | ALL AUTO */}
-        <div className="flex items-center bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] rounded-lg p-0.5 gap-0.5">
+        {/* Station Role Segmented Switcher */}
+        <div className="flex items-center bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] rounded-lg p-0.5 gap-0.5 shadow-sm">
           {STATIONS.map((st) => {
             const active = sim.config.activePlayerStation === st.role;
             const isAll = st.role === "ALL";
@@ -173,26 +162,17 @@ export const TopBar: React.FC = () => {
                     ? `Multiplayer role locked to ${assignedRole}`
                     : isAll
                     ? "ALL AUTO: All 3 stations automated & hear all frequencies [Key: N / A / 4]"
-                    : `Switch role to ${st.label} (${st.freq}) — hear only ${st.label}; other roles auto-managed [Key: ${st.code}]`
+                    : `Switch role to ${st.label} (${st.freq} MHz) — hear only ${st.label}; other roles auto-managed [Key: ${st.code}]`
                 }
-                className={`px-2.5 py-1 rounded-md text-xs font-mono transition-all flex items-center gap-1.5 whitespace-nowrap disabled:opacity-35 disabled:cursor-not-allowed ${
+                className={`px-2.5 py-1 rounded-md text-xs font-mono transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${
                   active
-                    ? "bg-[var(--atc-surface)] text-[var(--atc-text)] border border-[var(--atc-accent-border)] shadow-sm font-bold"
-                    : "text-[var(--atc-muted)] hover:text-[var(--atc-text)] border border-transparent"
+                    ? "bg-[var(--atc-surface)] text-[var(--atc-text)] border border-[var(--atc-accent-border)] shadow-sm font-extrabold"
+                    : "text-[var(--atc-muted)] hover:text-[var(--atc-text)] border border-transparent font-medium"
                 }`}
               >
-                <span
-                  className={`inline-flex items-center justify-center w-4 h-4 rounded text-[10px] font-bold ${
-                    active
-                      ? "bg-[var(--atc-accent)] text-slate-950"
-                      : "bg-[var(--atc-border)] text-[var(--atc-text-secondary)]"
-                  }`}
-                >
-                  {st.code}
-                </span>
-                <span className="hidden 2xl:inline">{st.label}</span>
+                <span>{st.label}</span>
                 {count > 0 && (
-                  <span className="px-1 min-w-[16px] text-center rounded-full bg-amber-500 text-slate-950 text-[10px] font-bold">
+                  <span className="px-1 min-w-[15px] text-center rounded-full bg-amber-500 text-slate-950 text-[9px] font-bold leading-tight">
                     {count}
                   </span>
                 )}
@@ -200,18 +180,53 @@ export const TopBar: React.FC = () => {
             );
           })}
         </div>
+
+        {/* Multiplayer Active Session Pill (if in room) */}
+        {roomState && (
+          <button
+            onClick={() => setAppMode("MULTIPLAYER_LOBBY")}
+            title="Open Multiplayer Lobby & Room Status"
+            className="px-2 py-1 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] text-[10px] font-mono font-bold text-[var(--atc-cyan)] flex items-center gap-1 whitespace-nowrap"
+          >
+            <Users className="w-3 h-3" />
+            <span>{roomState.roomCode}</span>
+            {assignedRole && <span>· {assignedRole}</span>}
+          </button>
+        )}
       </div>
 
-      {/* Center: Live User Local Date & Time + Sim Clock & Speed */}
+      {/* CENTER SECTION: Simulation State & Clock Cluster */}
       <div className="flex items-center gap-2 shrink-0">
-        <LocalClockBadge simTimeSec={sim.time} />
+        <LocalClockBadge simTimeSec={sim.time} compact={true} />
 
-        <div className="flex items-center bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] rounded-md p-0.5">
+        {/* Primary Play / Pause Control */}
+        <button
+          disabled={isMpActive}
+          onClick={togglePause}
+          title={isMpActive ? "Multiplayer clock synchronized by server" : "Play / Pause [Space]"}
+          className={`px-3 py-1 rounded-md border text-xs font-mono font-bold flex items-center gap-1.5 transition-all shadow-sm cursor-pointer disabled:opacity-60 ${
+            sim.paused
+              ? "bg-[var(--atc-surface-alt)] border-[var(--atc-border-strong)] text-[var(--atc-text)] hover:bg-[var(--atc-surface)]"
+              : "bg-[var(--atc-accent)] border-[var(--atc-accent-border)] text-slate-950 hover:opacity-90"
+          }`}
+        >
+          {isMpActive ? (
+            <Lock className="w-3.5 h-3.5" />
+          ) : sim.paused ? (
+            <Play className="w-3.5 h-3.5" />
+          ) : (
+            <Pause className="w-3.5 h-3.5" />
+          )}
+          <span>{isMpActive ? "SYNCED" : sim.paused ? "PAUSED" : "LIVE"}</span>
+        </button>
+
+        {/* Simulation Speed Pill: 1x | 2x | 4x */}
+        <div className="flex items-center bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] rounded-md p-0.5 shadow-sm">
           {([1, 2, 4] as const).map((spd) => (
             <button
               key={spd}
               onClick={() => setTimeScale(spd)}
-              className={`px-2 py-0.5 rounded text-[11px] font-mono transition-colors ${
+              className={`px-2 py-0.5 rounded text-[11px] font-mono transition-colors cursor-pointer ${
                 sim.timeScale === spd
                   ? "bg-[var(--atc-surface)] text-[var(--atc-text)] font-bold shadow-sm border border-[var(--atc-border)]"
                   : "text-[var(--atc-muted)] hover:text-[var(--atc-text)]"
@@ -223,38 +238,25 @@ export const TopBar: React.FC = () => {
         </div>
       </div>
 
-      {/* Right: Metrics, Theme Toggle, Voice, Operations Settings Popover, Pause/Live */}
+      {/* RIGHT SECTION: Communications, Layout & Consolidated Tools */}
       <div className="flex items-center gap-2 shrink-0">
-        <div className="hidden xl:flex items-center gap-2 px-2.5 py-1 rounded-md bg-[var(--atc-surface)] border border-[var(--atc-border)] text-[11px] font-mono shadow-sm">
-          <span className="text-[var(--atc-emerald)] font-semibold" title="Departures Completed">
-            DEP {sim.metrics.departuresCompleted}
-          </span>
-          <span className="text-[var(--atc-border-strong)]">|</span>
-          <span className="text-[var(--atc-cyan)] font-semibold" title="Arrivals Completed">
-            ARR {sim.metrics.arrivalsCompleted}
-          </span>
-          <span className="text-[var(--atc-border-strong)]">|</span>
-          <span
-            className={`font-bold ${
-              sim.metrics.safetyScore >= 90 ? "text-[var(--atc-emerald)]" : "text-[var(--atc-amber)]"
-            }`}
-            title="Safety Compliance Score"
-          >
-            SAFE {sim.metrics.safetyScore}%
-          </span>
+        {/* Voice Communications (PTT + Voice output settings) */}
+        <div className="flex items-center gap-1 bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] rounded-lg p-0.5 shadow-sm">
+          <VoicePttButton />
+          <RadioVoiceMenu />
         </div>
 
-        {/* Panel Layout Toggles (Left / Bottom / Right) */}
+        {/* Panel Layout Drawer Toggles (Left / Bottom / Right) */}
         <div
-          className="hidden sm:flex items-center bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] rounded-md p-0.5 gap-0.5 shadow-sm"
-          title="Show or minimize workbench panels"
+          className="flex items-center bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] rounded-md p-0.5 gap-0.5 shadow-sm"
+          title="Toggle workspace side and bottom panels"
         >
           <button
             type="button"
             onClick={() => togglePanelMinimized("left")}
             aria-label={minimizedPanels.left ? "Show Flight Strips panel" : "Minimize Flight Strips panel"}
             title={minimizedPanels.left ? "Show Flight Strips panel" : "Minimize Flight Strips panel"}
-            className={`p-1 rounded transition-colors ${
+            className={`p-1.5 rounded transition-colors cursor-pointer ${
               !minimizedPanels.left
                 ? "bg-[var(--atc-surface)] text-[var(--atc-text)] shadow-sm border border-[var(--atc-border)]"
                 : "text-[var(--atc-muted)] hover:text-[var(--atc-text)] border border-transparent"
@@ -267,7 +269,7 @@ export const TopBar: React.FC = () => {
             onClick={() => togglePanelMinimized("bottom")}
             aria-label={minimizedPanels.bottom ? "Show Radio Log panel" : "Minimize Radio Log panel"}
             title={minimizedPanels.bottom ? "Show Radio Log panel" : "Minimize Radio Log panel"}
-            className={`p-1 rounded transition-colors ${
+            className={`p-1.5 rounded transition-colors cursor-pointer ${
               !minimizedPanels.bottom
                 ? "bg-[var(--atc-surface)] text-[var(--atc-text)] shadow-sm border border-[var(--atc-border)]"
                 : "text-[var(--atc-muted)] hover:text-[var(--atc-text)] border border-transparent"
@@ -280,7 +282,7 @@ export const TopBar: React.FC = () => {
             onClick={() => togglePanelMinimized("right")}
             aria-label={minimizedPanels.right ? "Show Flight Deck panel" : "Minimize Flight Deck panel"}
             title={minimizedPanels.right ? "Show Flight Deck panel" : "Minimize Flight Deck panel"}
-            className={`p-1 rounded transition-colors ${
+            className={`p-1.5 rounded transition-colors cursor-pointer ${
               !minimizedPanels.right
                 ? "bg-[var(--atc-surface)] text-[var(--atc-text)] shadow-sm border border-[var(--atc-border)]"
                 : "text-[var(--atc-muted)] hover:text-[var(--atc-text)] border border-transparent"
@@ -290,55 +292,76 @@ export const TopBar: React.FC = () => {
           </button>
         </div>
 
-        {/* Light / Dark Theme Toggle */}
+        {/* Theme Toggle (Sun / Moon) */}
         <button
           onClick={toggleTheme}
           title={theme === "light" ? "Switch to Dark Radar Theme" : "Switch to Light Chart Theme"}
           aria-label="Toggle Light/Dark Theme"
-          className="px-2 py-1.5 rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface)] hover:border-[var(--atc-border-strong)] text-[var(--atc-text)] flex items-center gap-1.5 text-[11px] font-mono shadow-sm transition-colors"
+          className="p-1.5 rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface)] hover:border-[var(--atc-border-strong)] text-[var(--atc-text)] shadow-sm transition-colors cursor-pointer"
         >
           {theme === "light" ? (
             <Moon className="w-3.5 h-3.5 text-indigo-600" />
           ) : (
             <Sun className="w-3.5 h-3.5 text-amber-400" />
           )}
-          <span className="hidden lg:inline">{theme === "light" ? "LIGHT" : "DARK"}</span>
         </button>
 
-        <RadioVoiceMenu />
-        <VoicePttButton />
-
-        {/* Workstation Settings Popover (Scenario, AI Auto-Assist, SFX, Verify) */}
-        <div className="relative">
+        {/* Consolidated Tools & Settings Popover */}
+        <div ref={settingsRef} className="relative">
           <button
             onClick={() => setSettingsOpen((v) => !v)}
-            title="Scenario, Automation & Verification Options"
-            className={`p-1.5 rounded-md border shadow-sm transition-colors ${
+            title="Workstation Tools, Scenarios & Simulation Settings"
+            className={`px-2.5 py-1.5 rounded-md border text-xs font-mono font-bold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer ${
               settingsOpen
                 ? "bg-[var(--atc-accent-bg)] border-[var(--atc-accent-border)] text-[var(--atc-accent-text)]"
-                : "bg-[var(--atc-surface)] border-[var(--atc-border)] text-[var(--atc-text-secondary)] hover:text-[var(--atc-text)]"
+                : "bg-[var(--atc-surface)] border-[var(--atc-border)] text-[var(--atc-text-secondary)] hover:text-[var(--atc-text)] hover:border-[var(--atc-border-strong)]"
             }`}
           >
-            <Settings2 className="w-4 h-4" />
+            <Settings2 className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">TOOLS</span>
+            <ChevronDown className="w-3 h-3 opacity-60" />
           </button>
 
           {settingsOpen && (
-            <div className="absolute right-0 top-full mt-2 w-72 z-50 rounded-xl border border-[var(--atc-border)] bg-[var(--atc-surface)] shadow-2xl p-3 space-y-2.5 text-xs font-mono">
-              <div className="flex items-center justify-between border-b border-[var(--atc-border)] pb-2">
-                <span className="font-bold text-[var(--atc-text)]">WORKSTATION SETTINGS</span>
-                <button
-                  onClick={() => setSettingsOpen(false)}
-                  className="text-[10px] text-[var(--atc-muted)] hover:text-[var(--atc-text)]"
-                >
-                  CLOSE
-                </button>
+            <div className="absolute right-0 top-full mt-2 w-80 z-50 rounded-xl border border-[var(--atc-border)] bg-[var(--atc-surface)] shadow-2xl p-3.5 space-y-3 text-xs font-mono animate-in fade-in zoom-in-95 duration-100">
+              {/* Popover Header with Shift Metrics */}
+              <div className="flex items-center justify-between border-b border-[var(--atc-border)] pb-2.5">
+                <div>
+                  <div className="font-extrabold text-[var(--atc-text)] tracking-wider">WORKSTATION TOOLS</div>
+                  <div className="text-[10px] text-[var(--atc-muted)]">Operations, Modes &amp; Setup</div>
+                </div>
+                <div className="flex items-center gap-1.5 text-[10px] bg-[var(--atc-surface-alt)] px-2 py-0.5 rounded border border-[var(--atc-border)]">
+                  <span className="text-[var(--atc-emerald)] font-bold" title="Departures Completed">
+                    DEP {sim.metrics.departuresCompleted}
+                  </span>
+                  <span className="text-[var(--atc-border-strong)]">•</span>
+                  <span className="text-[var(--atc-cyan)] font-bold" title="Arrivals Completed">
+                    ARR {sim.metrics.arrivalsCompleted}
+                  </span>
+                  <span className="text-[var(--atc-border-strong)]">•</span>
+                  <span
+                    className={`font-extrabold ${
+                      sim.metrics.safetyScore >= 90 ? "text-[var(--atc-emerald)]" : "text-[var(--atc-amber)]"
+                    }`}
+                    title="Safety Compliance Score"
+                  >
+                    {sim.metrics.safetyScore}%
+                  </span>
+                </div>
               </div>
 
-              <Accordion title="Traffic Scenario" defaultOpen={true}>
+              {/* Traffic Scenario Picker */}
+              <div>
+                <label className="text-[10px] font-bold text-[var(--atc-text-secondary)] uppercase block mb-1">
+                  Traffic Scenario
+                </label>
                 <select
                   value={sim.scenarioId}
-                  onChange={(e) => loadScenario(e.target.value as ScenarioId)}
-                  className="w-full bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] rounded px-2 py-1.5 text-xs text-[var(--atc-text)] focus:outline-none"
+                  onChange={(e) => {
+                    loadScenario(e.target.value as ScenarioId);
+                    setSettingsOpen(false);
+                  }}
+                  className="w-full bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] rounded-md px-2.5 py-1.5 text-xs text-[var(--atc-text)] focus:outline-none focus:border-[var(--atc-accent)]"
                 >
                   {SCENARIOS.map((sc) => (
                     <option key={sc.id} value={sc.id}>
@@ -346,13 +369,87 @@ export const TopBar: React.FC = () => {
                     </option>
                   ))}
                 </select>
-              </Accordion>
+              </div>
 
-              <Accordion title="Automation & Audio" defaultOpen={true} bodyClassName="space-y-1.5">
+              {/* Specialized Modes & Facilities */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-[var(--atc-text-secondary)] uppercase block mb-1">
+                  Specialized Modes &amp; Tools
+                </label>
+
+                {/* Global Map & Discovery */}
+                <button
+                  onClick={() => {
+                    setSettingsOpen(false);
+                    openAirportSelector();
+                  }}
+                  className="w-full px-2.5 py-2 rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] hover:bg-[var(--atc-surface)] text-[var(--atc-text)] text-xs flex items-center justify-between font-semibold transition-colors cursor-pointer"
+                >
+                  <span className="flex items-center gap-2">
+                    <Globe2 className="w-3.5 h-3.5 text-[var(--atc-cyan)]" />
+                    Global Airport Discovery Map
+                  </span>
+                  <span className="text-[10px] text-[var(--atc-muted)]">Browse</span>
+                </button>
+
+                {/* Live ADS-B Radar View */}
+                <button
+                  onClick={() => {
+                    setSettingsOpen(false);
+                    setAppMode("LIVE_OBSERVATION");
+                  }}
+                  disabled={!isOnline}
+                  className="w-full px-2.5 py-2 rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] hover:bg-[var(--atc-surface)] text-[var(--atc-cyan)] text-xs flex items-center justify-between font-semibold transition-colors cursor-pointer disabled:opacity-40"
+                >
+                  <span className="flex items-center gap-2">
+                    <Radio className="w-3.5 h-3.5" />
+                    Live ADS-B Radar View
+                  </span>
+                  <span className="text-[10px] text-[var(--atc-muted)]">
+                    {sim.liveSnapshotMeta ? `${sim.liveSnapshotMeta.activeLiveCount ?? sim.liveSnapshotMeta.convertedCount} acft` : "Open"}
+                  </span>
+                </button>
+
+                {/* Multiplayer Hub */}
+                <button
+                  onClick={() => {
+                    setSettingsOpen(false);
+                    setAppMode("MULTIPLAYER_LOBBY");
+                  }}
+                  disabled={!isOnline}
+                  className="w-full px-2.5 py-2 rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] hover:bg-[var(--atc-surface)] text-[var(--atc-accent-text)] text-xs flex items-center justify-between font-semibold transition-colors cursor-pointer disabled:opacity-40"
+                >
+                  <span className="flex items-center gap-2">
+                    <Users className="w-3.5 h-3.5" />
+                    Multiplayer Hub (3-Player)
+                  </span>
+                  <span className="text-[10px] text-[var(--atc-muted)]">
+                    {isMpActive ? roomState?.roomCode : "Lobby"}
+                  </span>
+                </button>
+
+                {/* ATC Rule Verification Suite */}
+                <button
+                  onClick={() => {
+                    setSettingsOpen(false);
+                    setShowVerificationModal(true);
+                  }}
+                  className="w-full px-2.5 py-2 rounded-md border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:opacity-90 text-[var(--atc-emerald)] text-xs font-bold flex items-center justify-between transition-opacity cursor-pointer"
+                >
+                  <span className="flex items-center gap-2">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    Mandatory Rule Verifier
+                  </span>
+                  <span className="text-[10px] font-mono">Run Tests</span>
+                </button>
+              </div>
+
+              {/* Automation & Sound Options */}
+              <div className="pt-2 border-t border-[var(--atc-border)] space-y-1.5">
                 <button
                   onClick={toggleAutoAssist}
                   disabled={sim.config.activePlayerStation === "ALL"}
-                  className={`w-full px-2.5 py-1.5 rounded border text-[11px] flex items-center justify-between disabled:opacity-50 ${
+                  className={`w-full px-2.5 py-1.5 rounded border text-[11px] flex items-center justify-between transition-colors disabled:opacity-50 cursor-pointer ${
                     sim.config.activePlayerStation === "ALL" || sim.config.autoManageOtherStations
                       ? "bg-[var(--atc-emerald-bg)] border-[var(--atc-emerald-border)] text-[var(--atc-emerald)]"
                       : "bg-[var(--atc-surface-alt)] border-[var(--atc-border)] text-[var(--atc-muted)]"
@@ -360,7 +457,7 @@ export const TopBar: React.FC = () => {
                 >
                   <span className="flex items-center gap-1.5 font-semibold">
                     <Bot className="w-3.5 h-3.5" />
-                    AI Other Roles
+                    AI Auto-Manage Other Roles
                   </span>
                   <span className="font-bold">
                     {sim.config.activePlayerStation === "ALL"
@@ -373,7 +470,7 @@ export const TopBar: React.FC = () => {
 
                 <button
                   onClick={toggleVoice}
-                  className={`w-full px-2.5 py-1.5 rounded border text-[11px] flex items-center justify-between ${
+                  className={`w-full px-2.5 py-1.5 rounded border text-[11px] flex items-center justify-between transition-colors cursor-pointer ${
                     voiceEnabled
                       ? "border-[var(--atc-border)] bg-[var(--atc-surface-alt)] text-[var(--atc-text)]"
                       : "border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] text-[var(--atc-red)]"
@@ -388,7 +485,7 @@ export const TopBar: React.FC = () => {
 
                 <button
                   onClick={toggleSfx}
-                  className="w-full px-2.5 py-1.5 rounded border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] text-[var(--atc-text)] text-[11px] flex items-center justify-between"
+                  className="w-full px-2.5 py-1.5 rounded border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] text-[var(--atc-text)] text-[11px] flex items-center justify-between transition-colors cursor-pointer"
                 >
                   <span className="flex items-center gap-1.5 font-semibold">
                     {sfxEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
@@ -396,86 +493,39 @@ export const TopBar: React.FC = () => {
                   </span>
                   <span className="font-bold">{sfxEnabled ? "ON" : "OFF"}</span>
                 </button>
-              </Accordion>
+              </div>
 
-              <button
-                onClick={() => {
-                  setSettingsOpen(false);
-                  setShowVerificationModal(true);
-                }}
-                className="w-full py-2 px-3 rounded-md bg-[var(--atc-emerald-bg)] hover:opacity-90 border border-[var(--atc-emerald-border)] text-[var(--atc-emerald)] text-xs font-bold flex items-center justify-center gap-1.5"
-              >
-                <ShieldCheck className="w-3.5 h-3.5" />
-                OPEN RULE VERIFIER
-              </button>
+              {/* Multiplayer In-Session Action (Host End / Peer Leave) */}
+              {isMpActive && (
+                <div className="pt-2 border-t border-[var(--atc-border)]">
+                  {roomState?.hostPlayerId === playerId ? (
+                    <button
+                      onClick={() => {
+                        setSettingsOpen(false);
+                        endMultiplayerSession();
+                      }}
+                      className="w-full py-2 px-3 rounded-md bg-[var(--atc-red-bg)] border border-[var(--atc-red-border)] text-[var(--atc-red)] text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Flag className="w-3.5 h-3.5" />
+                      END MULTIPLAYER SHIFT
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setSettingsOpen(false);
+                        leaveMultiplayerRoom();
+                      }}
+                      className="w-full py-2 px-3 rounded-md bg-[var(--atc-surface-alt)] border border-[var(--atc-border-strong)] text-[var(--atc-text)] text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Users className="w-3.5 h-3.5" />
+                      LEAVE MULTIPLAYER ROOM
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
-
-        {/* Verify Quick Button (compact) */}
-        {!isMpActive ? (
-          <>
-            <button
-              onClick={() => setAppMode("LIVE_OBSERVATION")}
-              disabled={!isOnline}
-              title="Open Read-Only Live ADS-B Radar"
-              className="hidden md:flex px-2 py-1.5 rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface)] text-[var(--atc-cyan)] text-xs font-mono font-semibold items-center gap-1 whitespace-nowrap disabled:opacity-40"
-            >
-              <Radio className="w-3.5 h-3.5 shrink-0" />
-              <span className="hidden 2xl:inline">LIVE ADS-B</span>
-            </button>
-            <button
-              onClick={() => setAppMode("MULTIPLAYER_LOBBY")}
-              disabled={!isOnline}
-              title="Open 3-Player Multiplayer Lobby (Host or Join by Code)"
-              className="hidden md:flex px-2 py-1.5 rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface)] text-[var(--atc-accent-text)] text-xs font-mono font-semibold items-center gap-1 whitespace-nowrap disabled:opacity-40"
-            >
-              <Users className="w-3.5 h-3.5 shrink-0" />
-              <span className="hidden 2xl:inline">MULTIPLAYER</span>
-            </button>
-            <button
-              onClick={() => setShowVerificationModal(true)}
-              title="Run Mandatory ATC Rules Verification Suite"
-              className="px-2 py-1.5 rounded-md bg-[var(--atc-emerald-bg)] hover:opacity-90 border border-[var(--atc-emerald-border)] text-[var(--atc-emerald)] text-xs font-mono font-semibold flex items-center gap-1 whitespace-nowrap"
-            >
-              <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
-              <span className="hidden 2xl:inline">VERIFY</span>
-            </button>
-          </>
-        ) : roomState?.hostPlayerId === playerId ? (
-          <button
-            onClick={endMultiplayerSession}
-            title="Finish Multiplayer Session & Generate Performance Report"
-            className="px-2.5 py-1.5 rounded-md bg-[var(--atc-red-bg)] border border-[var(--atc-red-border)] text-[var(--atc-red)] text-xs font-mono font-bold flex items-center gap-1 whitespace-nowrap"
-          >
-            <Flag className="w-3.5 h-3.5 shrink-0" />
-            <span>END SHIFT</span>
-          </button>
-        ) : (
-          <button
-            onClick={leaveMultiplayerRoom}
-            title="Leave Multiplayer Room"
-            className="px-2.5 py-1.5 rounded-md bg-[var(--atc-surface)] border border-[var(--atc-border-strong)] text-[var(--atc-text)] text-xs font-mono font-bold flex items-center gap-1 whitespace-nowrap"
-          >
-            <Users className="w-3.5 h-3.5 shrink-0" />
-            <span>LEAVE</span>
-          </button>
-        )}
-
-        {/* Primary Play / Pause Control */}
-        <button
-          disabled={isMpActive}
-          onClick={togglePause}
-          title={isMpActive ? "Multiplayer clock synchronized by server" : "Play / Pause [Space]"}
-          className={`px-3 py-1.5 rounded-md border text-xs font-mono font-bold flex items-center gap-1.5 transition-colors disabled:opacity-60 ${
-            sim.paused
-              ? "bg-[var(--atc-surface-alt)] border-[var(--atc-border-strong)] text-[var(--atc-text)]"
-              : "bg-[var(--atc-accent)] border-[var(--atc-accent-border)] text-slate-950 shadow-sm"
-          }`}
-        >
-          {isMpActive ? <Lock className="w-3.5 h-3.5" /> : sim.paused ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
-          <span className="hidden sm:inline">{isMpActive ? "SYNCED" : sim.paused ? "PAUSED" : "LIVE"}</span>
-        </button>
       </div>
     </header>
   );
