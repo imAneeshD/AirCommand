@@ -890,11 +890,36 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
 
     if (!shouldEnable) {
       set({ liveTrafficLoading: true });
-      const record = selectedAirportRecord || offlineDb.getBundledFallbackAirport(sim.airport.icao);
-      if (record) {
-        await get().launchRealAirportSimulation(record, "NORMAL_OPS", sim.config.activePlayerStation);
-      }
-      set({ liveTrafficLoading: false });
+      radioAudio.stopAllSpeech();
+      const customLayout = sim.airport;
+      const scen = sim.scenarioId ?? "NORMAL_OPS";
+      const station = sim.config.activePlayerStation;
+
+      // Pure simulated scenario traffic with automatic traffic generation
+      const freshSim = createScenarioSimulation(scen, station, sim.airport.icao, customLayout);
+      freshSim.liveSnapshotMeta = {
+        airportIcao: sim.airport.icao,
+        fetchedAtMs: Date.now(),
+        convertedCount: 0,
+        source: "Simulated Traffic (Live ADS-B Off)",
+        lastLivePollAtMs: 0,
+        activeLiveCount: 0,
+        liveSyncEnabled: false,
+        lastSyncStatus: "OFFLINE",
+        cachedTracks: [],
+      };
+      freshSim.config.autoSpawnTraffic = true;
+
+      set({
+        sim: freshSim,
+        tickVersion: 0,
+        liveTrafficLoading: false,
+        lastFeedback: {
+          ok: true,
+          text: `Live traffic turned OFF at ${sim.airport.icao}. Switched to simulated traffic operations.`,
+          at: 0,
+        },
+      });
       return;
     }
 

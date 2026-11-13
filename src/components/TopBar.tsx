@@ -12,6 +12,7 @@ import {
   Pause,
   Play,
   Radio,
+  RefreshCw,
   Settings2,
   ShieldCheck,
   Sun,
@@ -242,37 +243,59 @@ export const TopBar: React.FC = () => {
           ))}
         </div>
 
-        {/* Live Traffic Option */}
-        <button
-          onClick={() => void toggleLiveTraffic()}
-          disabled={liveTrafficLoading}
-          title={
-            isLiveActive
-              ? `Live ADS-B Traffic is Active (${liveAircraftCount} real flights on ground & in air). Click to refresh or switch to simulated traffic.`
-              : "Enable Live Traffic: Populate real flights directly from live APIs onto gates, taxiways & airspace"
-          }
-          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-mono font-bold border transition-all cursor-pointer shadow-sm disabled:opacity-60 ${
-            isLiveActive
-              ? "bg-emerald-500/15 border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/25 shadow-emerald-500/10"
-              : "bg-[var(--atc-surface-alt)] border-[var(--atc-border)] text-[var(--atc-muted)] hover:text-[var(--atc-text)] hover:border-[var(--atc-border-strong)]"
-          }`}
-        >
-          <span
-            className={`w-2 h-2 rounded-full transition-all ${
-              isLiveActive ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)] animate-pulse" : "bg-slate-500"
+        {/* Live Traffic Option & Sync Control */}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => void toggleLiveTraffic()}
+            disabled={liveTrafficLoading}
+            title={
+              isLiveActive
+                ? `Live ADS-B Traffic is ON (${liveAircraftCount} active flights). Click to turn OFF and switch back to simulated planes.`
+                : "Live Traffic is OFF. Click to turn ON and populate real flights directly from live APIs."
+            }
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-mono font-bold border transition-all cursor-pointer shadow-sm disabled:opacity-60 ${
+              isLiveActive
+                ? "bg-emerald-500/15 border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/25 shadow-emerald-500/10"
+                : "bg-[var(--atc-surface-alt)] border-[var(--atc-border)] text-[var(--atc-muted)] hover:text-[var(--atc-text)] hover:border-[var(--atc-border-strong)]"
             }`}
-          />
-          {liveTrafficLoading ? (
-            <span className="flex items-center gap-1 text-amber-400">
-              <span className="w-2.5 h-2.5 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
-              <span>SYNCING...</span>
-            </span>
-          ) : (
-            <span className="tracking-wide">
-              {isLiveActive ? `LIVE TRAFFIC (${liveAircraftCount})` : "LIVE TRAFFIC"}
-            </span>
-          )}
-        </button>
+          >
+            <span
+              className={`w-2 h-2 rounded-full transition-all ${
+                isLiveActive ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)] animate-pulse" : "bg-slate-500"
+              }`}
+            />
+            {liveTrafficLoading ? (
+              <span className="flex items-center gap-1 text-amber-400">
+                <span className="w-2.5 h-2.5 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+                <span>SYNCING...</span>
+              </span>
+            ) : (
+              <span className="tracking-wide">
+                {isLiveActive ? `LIVE TRAFFIC (${liveAircraftCount})` : "LIVE TRAFFIC: OFF"}
+              </span>
+            )}
+          </button>
+
+          {/* Sync icon next to live traffic button */}
+          <button
+            onClick={() => void toggleLiveTraffic(true)}
+            disabled={liveTrafficLoading}
+            title={
+              isLiveActive
+                ? "Re-sync live ADS-B traffic feed from live APIs"
+                : "Sync and enable live traffic directly from live APIs"
+            }
+            className={`p-1.5 rounded-md border text-xs transition-all cursor-pointer shadow-sm disabled:opacity-50 ${
+              liveTrafficLoading
+                ? "border-amber-400/60 text-amber-400 bg-amber-500/10"
+                : isLiveActive
+                ? "border-emerald-500/40 text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 hover:border-emerald-500/60"
+                : "border-[var(--atc-border)] bg-[var(--atc-surface-alt)] text-[var(--atc-muted)] hover:text-[var(--atc-text)] hover:border-[var(--atc-border-strong)]"
+            }`}
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${liveTrafficLoading ? "animate-spin text-amber-400" : ""}`} />
+          </button>
+        </div>
       </div>
 
       {/* RIGHT SECTION: Communications, Layout & Consolidated Tools */}
