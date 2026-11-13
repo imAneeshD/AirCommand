@@ -51,6 +51,12 @@ export function canAircraftExecuteAction(
   requestedAction: OperationalAction,
   simulationState: SimulationState
 ): ValidationResult {
+  if (aircraft.state === "CRASHED") {
+    return {
+      allowed: false,
+      reason: "Aircraft crashed; emergency rescue operations active.",
+    };
+  }
   // Check NORDO light-gun override when explicitly configured
   const hasLightGun = (signal: "STEADY_GREEN" | "FLASHING_GREEN") =>
     aircraft.commStatus === "RADIO_FAILURE" &&
@@ -420,6 +426,7 @@ export function canAircraftMove(
     case "STOPPED_ON_RUNWAY":
     case "COMPLETED_DEPARTURE":
     case "COMPLETED_ARRIVAL":
+    case "CRASHED":
       return false;
 
     case "HOLD_POSITION":

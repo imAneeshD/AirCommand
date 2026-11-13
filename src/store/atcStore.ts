@@ -1,6 +1,10 @@
 import { create } from "zustand";
 import {
+  clearCrashSite,
   clearStoppedRunwayEmergency,
+  dispatchCrashRescue,
+  haltRunwayOperations,
+  requestMedicalEvacuation,
   submitClearanceDecision,
   triggerEmergency,
   triggerRadioFailure,
@@ -218,6 +222,10 @@ interface AtcStore {
     type: "ENGINE_FAILURE" | "REJECTED_TAKEOFF_ABORT" | "MEDICAL"
   ) => void;
   towDisabledAircraft: (aircraftId: string) => void;
+  dispatchCrashRescue: (aircraftId: string) => void;
+  haltRunwayOperations: (runwayId: string, aircraftId?: string) => void;
+  requestMedicalEvacuation: (aircraftId: string) => void;
+  clearCrashSite: (aircraftId: string) => void;
   spawnFlight: (kind: "DEPARTURE" | "ARRIVAL") => void;
   setCamera: (cam: Partial<CameraState>) => void;
   zoomAtPoint: (factor: number, worldX?: number, worldY?: number) => void;
@@ -1376,6 +1384,61 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
       lastFeedback: {
         ok,
         text: ok ? `Emergency tug cleared ${aircraftId} off runway.` : "Not stopped on runway.",
+        at: sim.time,
+      },
+    }));
+  },
+
+  dispatchCrashRescue: (aircraftId) => {
+    const { sim } = get();
+    const ok = dispatchCrashRescue(sim, aircraftId);
+    if (ok) radioAudio.playRadioClick("ALERT");
+    set((s) => ({
+      tickVersion: s.tickVersion + 1,
+      lastFeedback: {
+        ok,
+        text: ok ? `Crash Tender & ARFF dispatched to ${aircraftId}.` : "Cannot dispatch ARFF.",
+        at: sim.time,
+      },
+    }));
+  },
+
+  haltRunwayOperations: (runwayId, aircraftId) => {
+    const { sim } = get();
+    const ok = haltRunwayOperations(sim, runwayId, aircraftId);
+    if (ok) radioAudio.playRadioClick("ALERT");
+    set((s) => ({
+      tickVersion: s.tickVersion + 1,
+      lastFeedback: {
+        ok,
+        text: ok ? `Runway ${runwayId} closed. Operations halted.` : "Cannot close runway.",
+        at: sim.time,
+      },
+    }));
+  },
+
+  requestMedicalEvacuation: (aircraftId) => {
+    const { sim } = get();
+    const ok = requestMedicalEvacuation(sim, aircraftId);
+    if (ok) radioAudio.playRadioClick("ALERT");
+    set((s) => ({
+      tickVersion: s.tickVersion + 1,
+      lastFeedback: {
+        ok,
+        text: ok ? `Mass casualty & medical evacuation requested for ${aircraftId}.` : "Cannot request medical.",
+        at: sim.time,
+      },
+    }));
+  },
+
+  clearCrashSite: (aircraftId) => {
+    const { sim } = get();
+    const ok = clearCrashSite(sim, aircraftId);
+    set((s) => ({
+      tickVersion: s.tickVersion + 1,
+      lastFeedback: {
+        ok,
+        text: ok ? `Crash wreckage cleared and airfield operations restored.` : "Cannot clear crash site.",
         at: sim.time,
       },
     }));
