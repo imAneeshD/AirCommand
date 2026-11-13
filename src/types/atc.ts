@@ -142,6 +142,7 @@ export type PilotRequestType =
   | "APPROACH_CLEARANCE"
   | "APPROACH_VECTORS"
   | "GATE_TAXI"
+  | "HANDOFF"
   | "EMERGENCY_PRIORITY";
 
 export interface PilotRequest {

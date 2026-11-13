@@ -235,3 +235,37 @@ test("Tower controller receives and accepts incoming handoff from Approach for a
   assert.equal(arrival.pendingRequest?.type, "LANDING");
   assert.match(arrival.pendingRequest?.message ?? "", /Tower/);
 });
+
+test("Holding short runway: Ground request is HANDOFF to Tower, next required option is Tower handoff", () => {
+  const sim = createScenarioSimulation("LIGHT");
+  const dep = Object.values(sim.aircraft).find((a) => a.flightKind === "DEPARTURE")!;
+  assert.ok(dep, "Must have a departure aircraft");
+
+  // Aircraft taxied to holding point and is holding short for departure runway
+  dep.state = "HOLDING_SHORT";
+  dep.holdingAtRunway = "09L";
+  dep.holdingShortReason = "DEPARTURE_RUNWAY";
+  dep.controller = "GROUND";
+
+  // Stepping simulation: pilot should request Tower frequency from Ground (not takeoff from Ground)
+  stepSimulation(sim, 0.5);
+  assert.equal(dep.pendingRequest?.type, "HANDOFF");
+  assert.equal(dep.pendingRequest?.controller, "GROUND");
+  assert.match(dep.pendingRequest?.message ?? "", /request Tower frequency/);
+
+  // Ground issues handoff to Tower
+  const ho = submitClearanceDecision(
+    sim,
+    {
+      aircraftId: dep.id,
+      controller: "GROUND",
+      type: "HANDOFF",
+      parameters: { targetController: "TOWER", bypassPending: true },
+    },
+    "PLAYER"
+  );
+  assert.ok(ho.ok);
+
+  stepUntilCondition(sim, () => dep.controller === "TOWER");
+  assert.equal(dep.controller, "TOWER");
+});
