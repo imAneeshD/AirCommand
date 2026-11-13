@@ -172,9 +172,15 @@ test("Single-role synchronous clearance waits for acknowledgeSyncClearance befor
   assert.equal(ual.state, "AT_GATE");
   assert.equal(res.clearance.lifecycle, "READBACK_PENDING");
 
-  // On pilot voice completion, acknowledgeSyncClearance fires:
-  const ok = acknowledgeSyncClearance(s, res.clearance.id);
-  assert.equal(ok, true);
+  // On controller voice completion, sync gate releases and pilot reads back once:
+  res.clearance.syncGated = false;
+  res.clearance.readbackDueAt = s.time;
+  stepSimulation(s, 0.2);
   assert.equal(res.clearance.lifecycle, "ACTIVE");
-  assert.equal(ual.state, "PUSHBACK_APPROVED");
+  assert.ok(ual.state === "PUSHBACK_APPROVED" || ual.state === "PUSHING_BACK");
+
+  // Verify clean single to-and-fro exchange: exactly 1 ATC command and 1 pilot reply
+  const msgs = s.radioLog.filter((m) => m.aircraftId === ual.id);
+  assert.equal(msgs.filter((m) => m.category === "ATC_CLEARANCE").length, 1);
+  assert.equal(msgs.filter((m) => m.category === "PILOT_READBACK").length, 1);
 });

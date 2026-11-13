@@ -1,13 +1,9 @@
 import { create } from "zustand";
 import {
-  acknowledgeSyncClearance,
-  addRadioMessage,
   clearStoppedRunwayEmergency,
-  controllerCallsign,
   submitClearanceDecision,
   triggerEmergency,
   triggerRadioFailure,
-  triggerSyncReadbackError,
 } from "../engine/decisionEngine.ts";
 import {
   createScenarioSimulation,
@@ -285,59 +281,13 @@ function dispatchRadioMessagesAudio(
       const clr = ac?.clearances.find((c) => c.syncGated && c.lifecycle === "READBACK_PENDING");
 
       if (clr && sim.config.activePlayerStation !== "ALL" && ac) {
-        // Single role mode: speak ATC command synchronously, then pilot reads back, then execute!
+        // Single role mode: speak ATC command synchronously. When controller finishes speaking,
+        // release the sync gate so processPilotReadbacks naturally generates the single pilot readback!
         radioAudio.speakRadio(msg.text, "CONTROLLER", msg.controller, true, () => {
-          // Check for readback error:
-          const shouldError =
-            ac.armNextReadbackError ||
-            (sim.config.readbackErrorProbability > 0 &&
-              Math.random() < sim.config.readbackErrorProbability);
-
-          if (shouldError) {
-            triggerSyncReadbackError(sim, clr.id);
-            const errMsg = sim.radioLog[sim.radioLog.length - 1];
-            if (errMsg) {
-              spokenRadioMsgIds.add(errMsg.id);
-              radioAudio.playRadioClick("ERROR");
-              radioAudio.speakRadio(errMsg.text, "PILOT", ac.id, true);
-            }
-            if (onUpdate) onUpdate();
-            else useAtcStore.setState((s) => ({ tickVersion: s.tickVersion + 1 }));
-          } else {
-            // Valid pilot readback: log it and speak it!
-            addRadioMessage(sim, {
-              sender: ac.callsign,
-              recipient: controllerCallsign(clr.controller, sim.airport),
-              controller: clr.controller,
-              aircraftId: ac.id,
-              category: "PILOT_READBACK",
-              text: clr.expectedReadbackText,
-            });
-            const pilotMsg = sim.radioLog[sim.radioLog.length - 1];
-            if (pilotMsg) spokenRadioMsgIds.add(pilotMsg.id);
-
-            radioAudio.playRadioClick("PILOT");
-            radioAudio.speakRadio(clr.expectedReadbackText, "PILOT", ac.id, true, () => {
-              // Pilot readback done -> acknowledge clearance -> plane moves!
-              acknowledgeSyncClearance(sim, clr.id);
-              if (onUpdate) onUpdate();
-              else {
-                useAtcStore.setState((s) => ({
-                  tickVersion: s.tickVersion + 1,
-                  lastSpokenRadioId:
-                    sim.radioLog[sim.radioLog.length - 1]?.id ?? s.lastSpokenRadioId,
-                }));
-              }
-            });
-            if (onUpdate) onUpdate();
-            else {
-              useAtcStore.setState((s) => ({
-                tickVersion: s.tickVersion + 1,
-                lastSpokenRadioId:
-                  sim.radioLog[sim.radioLog.length - 1]?.id ?? s.lastSpokenRadioId,
-              }));
-            }
-          }
+          clr.syncGated = false;
+          clr.readbackDueAt = sim.time;
+          if (onUpdate) onUpdate();
+          else useAtcStore.setState((s) => ({ tickVersion: s.tickVersion + 1 }));
         });
       } else {
         radioAudio.speakRadio(msg.text, "CONTROLLER", msg.controller, true);
