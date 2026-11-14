@@ -51,7 +51,7 @@ const CATEGORY_OPTIONS: Array<{ id: AirportCategory | "All"; label: string }> = 
 ];
 
 const COUNTRY_QUICK_FILTERS = [
-  { code: "", label: "Global" },
+  { code: "", label: "Global All" },
   { code: "IN", label: "India Priority" },
   { code: "US", label: "USA" },
   { code: "GB", label: "UK" },
@@ -133,7 +133,7 @@ export const GlobalAirportMap: React.FC = () => {
   const [catalog, setCatalog] = useState<AirportRecord[]>([]);
   const [filteredResults, setFilteredResults] = useState<AirportRecord[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [countryFilter, setCountryFilter] = useState("IN");
+  const [countryFilter, setCountryFilter] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<AirportCategory | "All">("All");
   const [nearbyCenter, setNearbyCenter] = useState<{ lat: number; lon: number } | null>(null);
   const [selectedScenario, setSelectedScenario] = useState<ScenarioId>(sim.scenarioId || "NORMAL_OPS");
@@ -169,7 +169,7 @@ export const GlobalAirportMap: React.FC = () => {
       }
       if (isOnline) {
         try {
-          const res = await apiClient.searchAirports({ limit: 800 });
+          const res = await apiClient.searchAirports({ limit: 1500 });
           if (alive && res.airports.length > 0) {
             await offlineDb.cacheAirports(res.airports);
             const merged = await offlineDb.getAllCachedAirports();
