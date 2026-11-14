@@ -507,7 +507,7 @@ export const TopBar: React.FC = () => {
                 >
                   <span className="flex items-center gap-2">
                     <Users className="w-3.5 h-3.5" />
-                    Multiplayer Hub (3-Player)
+                    Multiplayer Hub (2-5 Players)
                   </span>
                   <span className="text-[10px] text-[var(--atc-muted)]">
                     {isMpActive ? roomState?.roomCode : "Lobby"}
