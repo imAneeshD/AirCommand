@@ -20,6 +20,7 @@ import {
   Search,
   Sparkles,
   Sun,
+  Trash2,
   Users,
   Wifi,
   WifiOff,
@@ -112,6 +113,8 @@ export const GlobalAirportMap: React.FC = () => {
   const toggleTheme = useAtcStore((s) => s.toggleTheme);
   const isOnline = useAtcStore((s) => s.isOnline);
   const sim = useAtcStore((s) => s.sim);
+  const savedAirportId = useAtcStore((s) => s.savedAirportId);
+  const removeLocalOfflineMap = useAtcStore((s) => s.removeLocalOfflineMap);
   const setAppMode = useAtcStore((s) => s.setAppMode);
   const selectAndSaveAirport = useAtcStore((s) => s.selectAndSaveAirport);
   const selectedAirportRecord = useAtcStore((s) => s.selectedAirportRecord);
@@ -730,6 +733,20 @@ export const GlobalAirportMap: React.FC = () => {
           </button>
 
           <button
+            onClick={async () => {
+              const target = savedAirportId || sim.airport.icao;
+              await removeLocalOfflineMap(target);
+              setStatusNote(`Removed local offline map cache for ${target}.`);
+              setTimeout(() => setStatusNote(null), 4000);
+            }}
+            title={`Remove cached local offline map for ${savedAirportId || sim.airport.icao} and reset saved airport`}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded border border-rose-500/40 bg-rose-950/20 hover:bg-rose-950/40 text-rose-300 transition-colors shadow-sm"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+            <span>Remove Local Map</span>
+          </button>
+
+          <button
             onClick={() => setAppMode("SIMULATION")}
             className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded border border-[var(--atc-border)] bg-[var(--atc-surface)] hover:bg-[var(--atc-surface-alt)]"
           >
@@ -1008,8 +1025,22 @@ export const GlobalAirportMap: React.FC = () => {
                   Checking OurAirports & OpenStreetMap infrastructure...
                 </div>
               ) : selectedAirportGeoJson && selectedAirportGeoJson.features.length > 0 ? (
-                <div className="text-[11px] text-[var(--atc-emerald)] px-3 py-2 rounded border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)]">
-                  Infrastructure loaded: {selectedAirportGeoJson.features.length} GeoJSON features ({selectedAirportRecord.source}).
+                <div className="text-[11px] text-[var(--atc-emerald)] px-3 py-2 rounded border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] flex items-center justify-between gap-2">
+                  <span>
+                    Infrastructure loaded: {selectedAirportGeoJson.features.length} GeoJSON features ({selectedAirportRecord.source}).
+                  </span>
+                  <button
+                    onClick={async () => {
+                      await removeLocalOfflineMap(selectedAirportRecord.icao);
+                      setStatusNote(`Removed offline cache for ${selectedAirportRecord.icao}.`);
+                      setTimeout(() => setStatusNote(null), 4000);
+                    }}
+                    title="Remove locally cached custom geometry and reset to default"
+                    className="px-2 py-0.5 rounded border border-rose-500/50 bg-rose-950/30 hover:bg-rose-950/50 text-rose-200 text-[10px] font-mono shrink-0 flex items-center gap-1"
+                  >
+                    <Trash2 className="w-3 h-3 text-rose-400" />
+                    Reset
+                  </button>
                 </div>
               ) : (
                 <div className="text-[11px] text-[var(--atc-muted)] px-3 py-2 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)]">

@@ -642,7 +642,14 @@ class RadioAudioEngine {
       this.safetyTimer = null;
     }
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
+      try {
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+        }
+        window.speechSynthesis.cancel();
+      } catch {
+        // Safe ignore
+      }
     }
     this.resolveSpeechDone();
     this.notify();

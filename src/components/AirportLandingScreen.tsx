@@ -195,11 +195,11 @@ export const AirportLandingScreen: React.FC = () => {
           {savedAirportId && (
             <button
               onClick={forgetSavedAirport}
-              className="px-2.5 py-1.5 rounded-lg border border-[var(--atc-border)] hover:border-[var(--atc-border-strong)] bg-[var(--atc-surface)] text-[var(--atc-text-secondary)] text-xs font-mono flex items-center gap-1.5 shadow-sm"
-              title="Clear saved default airport from localStorage"
+              className="px-2.5 py-1.5 rounded-lg border border-rose-500/40 hover:border-rose-500/70 bg-rose-950/20 text-rose-300 text-xs font-mono flex items-center gap-1.5 shadow-sm"
+              title="Remove local offline map and clear saved default airport"
             >
               <RotateCcw className="w-3.5 h-3.5" />
-              Saved: {savedAirportId}
+              Remove Local Map ({savedAirportId})
             </button>
           )}
 

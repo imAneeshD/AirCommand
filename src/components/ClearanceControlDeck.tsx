@@ -38,6 +38,7 @@ import {
   type GroundResolutionKind,
 } from "../utils/groundConflict.ts";
 import { formatAltitudeReadout } from "../utils/telemetry.ts";
+import { radioAudio } from "../utils/radioAudio.ts";
 import { controllerCallsign, controllerFrequency } from "../engine/decisionEngine.ts";
 import { Accordion } from "./Accordion.tsx";
 
@@ -989,7 +990,10 @@ export const ClearanceControlDeck: React.FC = () => {
                 return (
                   <button
                     key={role}
-                    onClick={() => setDeckTab(role)}
+                    onClick={() => {
+                      setDeckTab(role);
+                      radioAudio.stopAllSpeech();
+                    }}
                     className={`py-1 rounded font-semibold transition-all flex items-center justify-center gap-1 ${
                       isSelected
                         ? "bg-[var(--atc-surface)] text-[var(--atc-text)] shadow-sm border border-[var(--atc-border)]"
