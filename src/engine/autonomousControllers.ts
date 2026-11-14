@@ -47,6 +47,8 @@ function isFinalApproachCrowded(
 ): boolean {
   const rwy = state.airport.runways[runway];
   if (!rwy) return false;
+  const oppId = rwy.oppositeId;
+
   for (const id of state.aircraftOrder) {
     if (id === excludeId) continue;
     const other = state.aircraft[id];
@@ -60,6 +62,14 @@ function isFinalApproachCrowded(
       continue;
     }
     const targetRwy = other.assignedApproach ?? other.targetRunway;
+
+    // IMMEDIATE RECIPROCAL OPPOSING APPROACH CHECK:
+    // If another aircraft is approaching from the opposite reciprocal end of this physical runway,
+    // that is a critical direct head-on conflict!
+    if (oppId && targetRwy === oppId) {
+      return true;
+    }
+
     if (targetRwy !== runway) continue;
     const dist = -alongRunwayNm(rwy, other.x, other.y);
     if (dist > -0.3 && dist < minDistanceNm) {
@@ -75,12 +85,16 @@ function isRunwayActiveForTakeoffOrCrossing(
   excludeId?: string
 ): boolean {
   if (isRunwayOccupied(state, runway, excludeId).occupied) return true;
+  const rwySpec = state.airport.runways[runway];
+  const oppId = rwySpec?.oppositeId;
+
   for (const id of state.aircraftOrder) {
     if (id === excludeId) continue;
     const other = state.aircraft[id];
     if (!other) continue;
+    const isThisOrOpp = other.targetRunway === runway || (oppId && other.targetRunway === oppId);
     if (
-      other.targetRunway === runway &&
+      isThisOrOpp &&
       (other.state === "LINE_UP_WAIT" ||
         other.state === "TAKEOFF_CLEARED" ||
         other.state === "TAKEOFF_ROLL" ||
@@ -88,9 +102,11 @@ function isRunwayActiveForTakeoffOrCrossing(
     ) {
       return true;
     }
+    const isCrossingThisOrOpp =
+      other.holdingAtRunway === runway || (oppId && other.holdingAtRunway === oppId);
     if (
       other.state === "CROSSING_RUNWAY" &&
-      other.holdingAtRunway === runway
+      isCrossingThisOrOpp
     ) {
       return true;
     }
@@ -399,11 +415,30 @@ function runAutonomousTower(state: SimulationState): void {
     if (ac.flightKind === "ARRIVAL" && (ac.state === "FINAL" || ac.state === "APPROACH")) {
       const rwy = ac.assignedApproach ?? ac.targetRunway;
       const rwySpec = state.airport.runways[rwy];
+      const oppId = rwySpec?.oppositeId;
       const along = rwySpec ? alongRunwayNm(rwySpec, ac.x, ac.y) : -10;
       const rwyOccupied = isRunwayActiveForTakeoffOrCrossing(state, rwy, ac.id);
       const aheadLanding = isFinalApproachCrowded(state, rwy, 2.5, ac.id);
 
-      if (!rwyOccupied && !aheadLanding && along >= -8.5 && along < -0.3) {
+      // Check if another arrival is already approaching, cleared to land, or rolling on the opposite reciprocal runway
+      const opposingArrival = oppId
+        ? state.aircraftOrder.some((oid) => {
+            if (oid === ac.id) return false;
+            const o = state.aircraft[oid];
+            if (!o || o.flightKind !== "ARRIVAL") return false;
+            const oRwy = o.assignedApproach ?? o.targetRunway;
+            return (
+              oRwy === oppId &&
+              (o.state === "CLEARED_TO_LAND" ||
+                o.state === "LANDING" ||
+                o.state === "TOUCHDOWN" ||
+                o.state === "ROLLOUT" ||
+                o.state === "FINAL")
+            );
+          })
+        : false;
+
+      if (!rwyOccupied && !aheadLanding && !opposingArrival && along >= -8.5 && along < -0.3) {
         submitClearanceDecision(
           state,
           {
@@ -414,7 +449,7 @@ function runAutonomousTower(state: SimulationState): void {
           },
           "AUTONOMOUS"
         );
-      } else if (rwySpec && along >= -1.2 && (rwyOccupied || aheadLanding)) {
+      } else if (rwySpec && (along >= -1.5 || opposingArrival) && (rwyOccupied || aheadLanding || opposingArrival)) {
         submitClearanceDecision(
           state,
           {

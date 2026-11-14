@@ -7,6 +7,7 @@ import {
   createBaseSimulation,
   createDepartureAircraft,
   findBestGateForAircraft,
+  getActiveRunways,
   isCargoAircraft,
   isMilitaryAircraft,
   resolveWakeCategory,
@@ -107,12 +108,16 @@ function normalizeAircraftType(rawType: string | null, fallbackType: string): st
 }
 
 function pickBestRunway(layout: AirportLayout, desiredHeading: number, kind: "DEPARTURE" | "ARRIVAL"): RunwayId {
+  const activeRunways = getActiveRunways(layout, kind);
   let best = kind === "DEPARTURE" ? layout.primaryDepartureRunway : layout.primaryArrivalRunway;
+  if (!activeRunways.includes(best)) {
+    best = activeRunways[0] ?? layout.runwayIds[0];
+  }
   let bestDiff = 999;
-  for (const rId of layout.runwayIds) {
+  for (const rId of activeRunways) {
     const spec = layout.runways[rId];
     if (!spec) continue;
-    const diff = headingDiffDeg(desiredHeading, spec.heading);
+    const diff = Math.abs(headingDiffDeg(desiredHeading, spec.heading));
     if (diff < bestDiff) {
       bestDiff = diff;
       best = rId;

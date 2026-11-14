@@ -513,6 +513,29 @@ export function updateAircraftMovement(
         ac.verticalSpeed = 0;
         const along = alongRunwayNm(rwy, ac.x, ac.y);
         const cross = crossTrackRunwayNm(rwy, ac.x, ac.y);
+
+        // Runway collision avoidance: emergency braking if another aircraft is ahead on the same runway strip
+        const opposingTrafficAhead = state.aircraftOrder.some((oid) => {
+          if (oid === ac.id) return false;
+          const other = state.aircraft[oid];
+          if (!other || other.altitude > elev + 50) return false;
+          if (other.state === "COMPLETED_ARRIVAL" || other.state === "COMPLETED_DEPARTURE") return false;
+          const distNm = Math.hypot(other.x - ac.x, other.y - ac.y);
+          if (distNm > 0.45) return false;
+          const otherAlong = alongRunwayNm(rwy, other.x, other.y);
+          const otherCross = Math.abs(crossTrackRunwayNm(rwy, other.x, other.y));
+          return otherCross < 0.04 && otherAlong > along && otherAlong - along < 0.45;
+        });
+
+        if (opposingTrafficAhead) {
+          ac.speed = Math.max(0, ac.speed - 35 * dt);
+          if (ac.speed < 1) {
+            ac.speed = 0;
+            ac.state = "STOPPED_ON_RUNWAY";
+          }
+          break;
+        }
+
         let targetExitAlong = rwy.lengthNm - 0.05;
         const assignedNode = ac.vacateAssignedRwyNodeId
           ? state.airport.nodes[ac.vacateAssignedRwyNodeId]

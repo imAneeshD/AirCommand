@@ -1,6 +1,7 @@
 import { deriveFlightMetadata, generateIfrFlightPlan } from "../data/aircraftCatalog.ts";
 import {
   createAirportById,
+  headingDiffDeg,
   runwayPoint,
   runwaySpokenName,
 } from "../data/asteriaAirport.ts";
@@ -1635,6 +1636,36 @@ export function transitionScenarioSimulation(
   });
 }
 
+/**
+ * Returns the list of runways currently active for the given flight kind.
+ * Always respects the airport's primary active configuration (e.g. 09s vs 27s),
+ * ensuring opposing reciprocal runways (180° opposite) are NEVER simultaneously active.
+ */
+export function getActiveRunways(
+  airport: AirportLayout,
+  kind: "ARRIVAL" | "DEPARTURE"
+): RunwayId[] {
+  const primaryId = kind === "ARRIVAL" ? airport.primaryArrivalRunway : airport.primaryDepartureRunway;
+  const primarySpec = airport.runways[primaryId] ?? airport.runways[airport.runwayIds[0]];
+  if (!primarySpec) return airport.runwayIds;
+
+  const primaryHeading = primarySpec.heading;
+  const oppId = primarySpec.oppositeId;
+
+  // Filter runwayIds to only include runways whose headings are aligned in the same operational flow
+  // (within 80 degrees of the primary heading) and strictly exclude the reciprocal opposite runway.
+  const active = airport.runwayIds.filter((id) => {
+    if (id === oppId) return false;
+    const spec = airport.runways[id];
+    if (!spec) return false;
+    if (spec.oppositeId && spec.oppositeId === primaryId) return false;
+    const diff = Math.abs(headingDiffDeg(spec.heading, primaryHeading));
+    return diff < 80;
+  });
+
+  return active.length > 0 ? active : [primaryId];
+}
+
 export function spawnRandomTraffic(
   state: SimulationState,
   kind?: FlightKind
@@ -1707,7 +1738,8 @@ export function spawnRandomTraffic(
       occupiedGateIds
     );
     if (!freeGate) return null;
-    const rwy = state.airport.runwayIds[state.nextIdCounter % state.airport.runwayIds.length];
+    const activeDepRunways = getActiveRunways(state.airport, "DEPARTURE");
+    const rwy = activeDepRunways[state.nextIdCounter % activeDepRunways.length];
     const ac = createDepartureAircraft(state, {
       callsign,
       spokenCallsign,
@@ -1722,8 +1754,8 @@ export function spawnRandomTraffic(
   }
 
   const fromLeft = state.nextIdCounter % 2 === 0;
-  const rwy: RunwayId =
-    state.airport.runwayIds[state.nextIdCounter % state.airport.runwayIds.length];
+  const activeArrRunways = getActiveRunways(state.airport, "ARRIVAL");
+  const rwy: RunwayId = activeArrRunways[state.nextIdCounter % activeArrRunways.length];
   const rwySpec = state.airport.runways[rwy];
   const gateId =
     findBestGateForAircraft(

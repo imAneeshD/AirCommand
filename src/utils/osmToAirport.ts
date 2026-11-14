@@ -75,7 +75,7 @@ function mergeContinuousVisualTaxiways(
   return merged;
 }
 
-function makeRunway(opts: {
+export function makeRunway(opts: {
   id: RunwayId;
   oppositeId: string;
   heading: number;

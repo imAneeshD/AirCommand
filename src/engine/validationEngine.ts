@@ -543,6 +543,7 @@ export function isRunwayOccupied(
 ): { occupied: boolean; occupantIds: string[] } {
   const rwy = simulation.airport.runways[runway];
   if (!rwy) return { occupied: false, occupantIds: [] };
+  const oppId = rwy.oppositeId;
   const occupantIds: string[] = [];
 
   for (const id of simulation.aircraftOrder) {
@@ -570,14 +571,41 @@ export function isRunwayOccupied(
       continue;
     }
 
-    // Also treat landing aircraft inside 1.2 NM short final as runway-active
+    // Also treat landing / rolling aircraft as occupying the physical runway strip
+    // (covers this runway AND its reciprocal opposite runway!)
+    const targetRwy = ac.assignedApproach ?? ac.targetRunway;
+    const isThisOrOpposite = targetRwy === runway || (oppId && targetRwy === oppId);
+
     if (
-      (ac.state === "CLEARED_TO_LAND" || ac.state === "LANDING") &&
-      (ac.assignedApproach ?? ac.targetRunway) === runway &&
-      along >= -1.2 &&
-      along <= rwy.lengthNm
+      (ac.state === "CLEARED_TO_LAND" ||
+        ac.state === "LANDING" ||
+        ac.state === "TOUCHDOWN" ||
+        ac.state === "ROLLOUT") &&
+      isThisOrOpposite
     ) {
       occupantIds.push(ac.id);
+      continue;
+    }
+
+    // Treat lined up / takeoff rolling aircraft on this or reciprocal runway as occupying
+    if (
+      (ac.state === "LINE_UP_WAIT" ||
+        ac.state === "TAKEOFF_CLEARED" ||
+        ac.state === "TAKEOFF_ROLL" ||
+        ac.state === "ROTATE") &&
+      isThisOrOpposite
+    ) {
+      occupantIds.push(ac.id);
+      continue;
+    }
+
+    // Treat crossing aircraft on this or reciprocal runway as occupying
+    if (
+      ac.state === "CROSSING_RUNWAY" &&
+      (ac.holdingAtRunway === runway || (oppId && ac.holdingAtRunway === oppId))
+    ) {
+      occupantIds.push(ac.id);
+      continue;
     }
   }
 
