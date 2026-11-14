@@ -330,15 +330,11 @@ export const FlightStripRack: React.FC = () => {
         {/* IFR Flight Plan Quick Bar */}
         <div className="mt-1 flex items-center justify-between gap-1 text-[10px] font-mono">
           <div className="flex items-center gap-1.5 truncate">
-            <span
-              className={`px-1 py-0.2 rounded text-[8px] font-bold border ${
-                isCleared
-                  ? "bg-emerald-950/60 text-emerald-400 border-emerald-700/60"
-                  : "bg-amber-950/60 text-amber-400 border-amber-700/60 animate-pulse"
-              }`}
-            >
-              {isCleared ? "CLEARED" : "PENDING"}
-            </span>
+            {ac.flightKind === "DEPARTURE" && !isCleared && (
+              <span className="px-1 py-0.2 rounded text-[8px] font-bold border bg-amber-950/60 text-amber-400 border-amber-700/60 animate-pulse">
+                IFR PENDING
+              </span>
+            )}
             <span className="text-[var(--atc-text)] truncate font-semibold">
               {ac.aircraftType}{fp?.equipmentSuffix ?? "/L"} → {fp?.destinationIcao ?? ac.destinationIcao ?? "DEST"} · {fp?.proposedDepartureTimeZ ?? "P2121"}
             </span>
@@ -363,16 +359,6 @@ export const FlightStripRack: React.FC = () => {
             title={ac.state}
           >
             {getAircraftPhaseLabel(ac)}
-          </span>
-
-          <span
-            className={`text-[9px] font-mono px-1.5 py-0.5 rounded shrink-0 ${
-              movable
-                ? "text-[var(--atc-emerald)] bg-[var(--atc-emerald-bg)] font-semibold"
-                : "text-[var(--atc-muted)] bg-[var(--atc-surface-alt)]"
-            }`}
-          >
-            {movable ? "CLEARED" : "HOLD"}
           </span>
         </div>
 
@@ -442,12 +428,6 @@ export const FlightStripRack: React.FC = () => {
             Readback: {pendingRb[pendingRb.length - 1].type}
           </div>
         )}
-
-        {activeClrs.length > 0 && !hasReq && !ac.hasReadbackError && (
-          <div className="mt-1 text-[10px] font-mono text-[var(--atc-muted)] truncate">
-            Active: {activeClrs[activeClrs.length - 1].type}
-          </div>
-        )}
       </div>
     );
   };
@@ -494,10 +474,12 @@ export const FlightStripRack: React.FC = () => {
                 SEL
               </span>
             )}
-            <span
-              className={`w-2 h-2 rounded-full ${isCleared ? "bg-emerald-400" : "bg-amber-400"}`}
-              title={isCleared ? "IFR Cleared" : "Clearance Pending"}
-            />
+            {ac.flightKind === "DEPARTURE" && !isCleared && (
+              <span
+                className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"
+                title="IFR Clearance Pending"
+              />
+            )}
             <span className="text-[9px] font-mono text-[var(--atc-muted)]">
               {ac.aircraftType}
             </span>
