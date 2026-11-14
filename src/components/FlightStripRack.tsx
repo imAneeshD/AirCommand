@@ -206,6 +206,106 @@ export const FlightStripRack: React.FC = () => {
     e.dataTransfer.effectAllowed = "move";
   };
 
+  const handleApprovePilotRequest = (e: React.MouseEvent, ac: Aircraft) => {
+    e.stopPropagation();
+    const req = ac.pendingRequest;
+    if (!req) return;
+
+    if (req.type === "RUNWAY_CHANGE" && req.runway) {
+      issueClearance({
+        aircraftId: ac.id,
+        controller: ac.controller,
+        type: ac.flightKind === "ARRIVAL" ? "APPROACH" : "TAXI",
+        parameters: { runway: req.runway },
+      });
+      return;
+    }
+
+    if (req.type === "TAXI" || req.type === "GATE_TAXI") {
+      issueClearance({
+        aircraftId: ac.id,
+        controller: ac.controller,
+        type: "TAXI",
+        parameters: ac.flightKind === "ARRIVAL" ? { gate: ac.gateId } : { runway: ac.targetRunway },
+      });
+      return;
+    }
+
+    if (req.type === "PUSHBACK") {
+      issueClearance({
+        aircraftId: ac.id,
+        controller: ac.controller,
+        type: "PUSHBACK",
+        parameters: { pushbackDirection: "TAXIWAY_A" },
+      });
+      return;
+    }
+
+    if (req.type === "TAKEOFF") {
+      issueClearance({
+        aircraftId: ac.id,
+        controller: ac.controller,
+        type: "TAKEOFF",
+        parameters: { runway: ac.targetRunway },
+      });
+      return;
+    }
+
+    if (req.type === "LANDING") {
+      issueClearance({
+        aircraftId: ac.id,
+        controller: ac.controller,
+        type: "LAND",
+        parameters: { runway: ac.assignedApproach ?? ac.targetRunway },
+      });
+      return;
+    }
+
+    if (req.type === "CROSS_RUNWAY") {
+      issueClearance({
+        aircraftId: ac.id,
+        controller: ac.controller,
+        type: "CROSS_RUNWAY",
+        parameters: { runway: ac.holdingAtRunway ?? ac.targetRunway },
+      });
+      return;
+    }
+
+    if (req.type === "IFR_CLEARANCE") {
+      issueClearance({
+        aircraftId: ac.id,
+        controller: "DELIVERY",
+        type: "IFR_CLEARANCE",
+        parameters: {
+          altitude: 5000,
+        },
+      });
+      return;
+    }
+
+    if (req.type === "CLIMB_HIGHER") {
+      issueClearance({
+        aircraftId: ac.id,
+        controller: ac.controller,
+        type: "ALTITUDE",
+        parameters: { altitude: Math.min(10000, (ac.assignedAltitude ?? 3000) + 2000) },
+      });
+      return;
+    }
+
+    if (req.type === "APPROACH_VECTORS") {
+      issueClearance({
+        aircraftId: ac.id,
+        controller: ac.controller,
+        type: "HEADING",
+        parameters: { heading: ac.heading },
+      });
+      return;
+    }
+
+    focusAircraft(ac.id);
+  };
+
   const handleDropToColumn = (e: React.DragEvent, targetRole: ControllerRole) => {
     e.preventDefault();
     setDragOverRole(null);
@@ -364,9 +464,9 @@ export const FlightStripRack: React.FC = () => {
 
         {/* Incoming Handoff Request with 1-click ACCEPT Button */}
         {ho && (
-          <div className="mt-1.5 px-2 py-1 rounded bg-[var(--atc-cyan-bg)] border border-[var(--atc-cyan-border)] flex items-center justify-between gap-1 text-[10px] font-mono shadow-sm">
-            <span className="font-bold text-[var(--atc-cyan)] flex items-center gap-1 truncate">
-              <Radio className="w-3 h-3 animate-spin-slow shrink-0" />
+          <div className="mt-1.5 px-2 py-1.5 rounded-md bg-[var(--atc-cyan-bg)] border border-[var(--atc-cyan-border)] flex items-center justify-between gap-2 text-[10px] font-mono shadow-sm">
+            <span className="font-bold text-[var(--atc-cyan)] flex items-center gap-1.5 truncate">
+              <Radio className="w-3.5 h-3.5 animate-spin-slow shrink-0" />
               INCOMING HANDOFF
             </span>
             <button
@@ -375,7 +475,7 @@ export const FlightStripRack: React.FC = () => {
                 e.stopPropagation();
                 respondToHandoff(ho.id, true);
               }}
-              className="px-2 py-0.5 rounded border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:bg-[var(--atc-surface)] hover:border-[var(--atc-emerald)] text-[var(--atc-emerald)] font-mono font-bold text-[9px] transition-colors shrink-0 flex items-center gap-1 cursor-pointer"
+              className="h-5 px-2.5 rounded border border-emerald-400/80 bg-transparent hover:bg-emerald-500/10 hover:border-emerald-300 text-emerald-400 font-mono font-bold text-[9px] tracking-wider uppercase inline-flex items-center justify-center text-center shrink-0 transition-colors cursor-pointer select-none gap-1 pt-[1px]"
             >
               <CheckCircle className="w-2.5 h-2.5" />
               ACCEPT
@@ -385,33 +485,26 @@ export const FlightStripRack: React.FC = () => {
 
         {/* Pilot Request Banner with Inline Approval Button (Only shown in strip as requested) */}
         {!ac.hasReadbackError && pendingRb.length === 0 && hasReq && ac.pendingRequest && !ho && (
-          <div className="mt-1.5 p-1.5 rounded bg-[var(--atc-amber-bg)] border border-[var(--atc-amber-border)] text-[10px] font-mono text-[var(--atc-amber)] flex items-center justify-between gap-1 shadow-sm">
-            <span className="flex items-center gap-1 font-bold truncate">
-              <AlertTriangle className="w-3 h-3 shrink-0" />
-              REQ: {ac.pendingRequest.type}
-              {ac.pendingRequest.runway
-                ? ` ${ac.pendingRequest.runway}`
-                : ac.holdingAtRunway
-                ? ` (${ac.holdingAtRunway})`
-                : ""}
+          <div className="mt-1.5 px-2 py-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-300 flex items-center justify-between gap-2 shadow-sm">
+            <span className="flex items-center gap-1.5 font-mono text-[10px] font-bold text-amber-300 truncate">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-400" />
+              <span className="truncate">
+                REQ: {ac.pendingRequest.type}
+                {ac.pendingRequest.runway
+                  ? ` ${ac.pendingRequest.runway}`
+                  : ac.holdingAtRunway
+                  ? ` (${ac.holdingAtRunway})`
+                  : ""}
+              </span>
             </span>
-            {ac.pendingRequest.type === "RUNWAY_CHANGE" && ac.pendingRequest.runway && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  issueClearance({
-                    aircraftId: ac.id,
-                    controller: ac.controller,
-                    type: ac.flightKind === "ARRIVAL" ? "APPROACH" : "TAXI",
-                    parameters: { runway: ac.pendingRequest!.runway },
-                  });
-                }}
-                className="px-2 py-0.5 rounded border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:bg-[var(--atc-surface)] text-[var(--atc-emerald)] font-bold text-[9px] transition-colors shrink-0 cursor-pointer"
-              >
-                APPROVE
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={(e) => handleApprovePilotRequest(e, ac)}
+              title={`Approve pilot request (${ac.pendingRequest.type})`}
+              className="h-5 px-2.5 rounded border border-emerald-400/80 bg-transparent hover:bg-emerald-500/10 hover:border-emerald-300 text-emerald-400 font-mono font-bold text-[9px] tracking-wider uppercase inline-flex items-center justify-center text-center shrink-0 transition-colors cursor-pointer select-none pt-[1px]"
+            >
+              APPROVE
+            </button>
           </div>
         )}
 
