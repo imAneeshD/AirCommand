@@ -1563,6 +1563,78 @@ export function setStationAutoAssist(
   }
 }
 
+/**
+ * Seamlessly transitions the simulation to a new traffic scenario/model
+ * without restarting the session clock (sim.time), without deleting active flights,
+ * and preserving all active clearances and safety metrics.
+ */
+export function transitionScenarioSimulation(
+  state: SimulationState,
+  newScenarioId: ScenarioId
+): void {
+  const oldScenario = state.scenarioId;
+  state.scenarioId = newScenarioId;
+  state.config.autoSpawnTraffic = newScenarioId !== "SANDBOX";
+
+  // If transitioning to an emergency scenario, declare an emergency on an airborne flight if none currently active
+  if (newScenarioId === "EMERGENCY" || newScenarioId === "EMERGENCY_AND_NORDO") {
+    const hasEmergency = state.aircraftOrder.some(
+      (id) => state.aircraft[id]?.operationMode === "EMERGENCY_OPERATION"
+    );
+    if (!hasEmergency) {
+      const candidateId = state.aircraftOrder.find((id) => {
+        const a = state.aircraft[id];
+        return (
+          a &&
+          (a.state === "APPROACH" || a.state === "FINAL" || a.state === "CLIMB") &&
+          a.operationMode === "NORMAL_OPERATION"
+        );
+      });
+      if (candidateId && state.aircraft[candidateId]) {
+        const ac = state.aircraft[candidateId];
+        ac.operationMode = "EMERGENCY_OPERATION";
+        ac.emergencyType = "ENGINE_FAILURE";
+        ac.squawk = "7700";
+        addRadioMessage(state, {
+          sender: ac.callsign,
+          recipient: "TOWER",
+          controller: ac.controller,
+          category: "EMERGENCY",
+          text: `MAYDAY MAYDAY MAYDAY, ${ac.callsign}, engine failure on final, squawking 7700, requesting immediate priority landing.`,
+        });
+      }
+    }
+  }
+
+  // If transitioning to a busier traffic model, spawn random traffic if active traffic is below cap
+  if (
+    newScenarioId === "HEAVY" ||
+    newScenarioId === "RUSH_HOUR" ||
+    newScenarioId === "ARRIVAL_HEAVY" ||
+    newScenarioId === "DEPARTURE_HEAVY"
+  ) {
+    const activeCount = state.aircraftOrder.filter((id) => {
+      const a = state.aircraft[id];
+      return a && a.state !== "COMPLETED_ARRIVAL" && a.state !== "COMPLETED_DEPARTURE";
+    }).length;
+    if (activeCount < 8) {
+      spawnRandomTraffic(state);
+    }
+  }
+
+  const mins = Math.floor(state.time / 60);
+  const secs = Math.floor(state.time % 60);
+  const timeStr = `T+${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+
+  addRadioMessage(state, {
+    sender: "CONSOLE",
+    recipient: "ATC",
+    controller: state.config.activePlayerStation === "ALL" ? "TOWER" : state.config.activePlayerStation,
+    category: "SYSTEM",
+    text: `Traffic model transitioned from ${oldScenario} to ${newScenarioId}. Operations continue seamlessly from ${timeStr}.`,
+  });
+}
+
 export function spawnRandomTraffic(
   state: SimulationState,
   kind?: FlightKind
