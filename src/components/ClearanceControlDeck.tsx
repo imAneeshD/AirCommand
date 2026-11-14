@@ -22,7 +22,12 @@ import {
   Unlock,
   Wrench,
 } from "lucide-react";
-import { getRunwayExitOptions, getSuggestedTaxiRoutes } from "../data/asteriaAirport.ts";
+import {
+  alongRunwayNm,
+  crossTrackRunwayNm,
+  getRunwayExitOptions,
+  getSuggestedTaxiRoutes,
+} from "../data/asteriaAirport.ts";
 import { hashCallsign } from "../data/aircraftCatalog.ts";
 import { getAircraftPhaseLabel } from "../engine/simulation.ts";
 import {
@@ -309,16 +314,59 @@ export const ClearanceControlDeck: React.FC = () => {
     ? ac.clearances.find((c) => c.id === ac.readbackErrorClearanceId)
     : undefined;
 
-  const currentNodeId =
-    ac.currentNodeId ??
-    (ac.state === "AT_GATE" && ac.gateId ? `GATE_${ac.gateId}` : undefined) ??
-    (ac.state === "PUSHBACK_COMPLETE" && ac.gateId ? `PB_${ac.gateId}` : undefined);
+  const activeRunwayObj = Object.values(sim.airport.runways).find((r) => {
+    const al = alongRunwayNm(r, ac.x, ac.y);
+    const cr = Math.abs(crossTrackRunwayNm(r, ac.x, ac.y));
+    return al >= -0.05 && al <= r.lengthNm + 0.05 && cr <= Math.max(r.widthNm * 1.5, 0.035);
+  });
+  const isPhysicallyOnRunway = Boolean(
+    activeRunwayObj && ac.altitude <= sim.airport.elevationFt + 50
+  );
+  const activeRunwayId = (activeRunwayObj?.id ?? ac.assignedApproach ?? ac.targetRunway) as RunwayId;
 
-  const isArrivalToGate = ac.flightKind === "ARRIVAL";
-  const taxiRoutes = currentNodeId
+  const isStoppedOnRunway = Boolean(
+    isPhysicallyOnRunway &&
+      (ac.state === "STOPPED_ON_RUNWAY" ||
+        ac.state === "HOLD_POSITION" ||
+        ac.state === "TAKEOFF_CANCELLED" ||
+        ac.state === "REJECTED_TAKEOFF" ||
+        ac.state === "BRAKING" ||
+        (ac.state === "ROLLOUT" && ac.speed < 10))
+  );
+
+  const canVacateRwy =
+    !nordoLocked &&
+    (ac.state === "TOUCHDOWN" ||
+      ac.state === "ROLLOUT" ||
+      ac.state === "VACATING_RUNWAY" ||
+      isStoppedOnRunway ||
+      (ac.state === "HOLD_POSITION" && isPhysicallyOnRunway));
+
+  const exitOptions = canVacateRwy
+    ? getRunwayExitOptions(sim.airport, ac, activeRunwayId)
+    : [];
+
+  const effectiveCurrentNodeId = useMemo(() => {
+    if (ac.currentNodeId && !isPhysicallyOnRunway) return ac.currentNodeId;
+    if (ac.state === "AT_GATE" && ac.gateId) return `GATE_${ac.gateId}`;
+    if (ac.state === "PUSHBACK_COMPLETE" && ac.gateId) return `PB_${ac.gateId}`;
+    let bestId = ac.currentNodeId;
+    let bestDist = Infinity;
+    for (const node of Object.values(sim.airport.nodes)) {
+      const d = Math.hypot(node.x - ac.x, node.y - ac.y);
+      if (d < bestDist) {
+        bestDist = d;
+        bestId = node.id;
+      }
+    }
+    return bestId;
+  }, [ac.currentNodeId, ac.state, ac.gateId, ac.x, ac.y, isPhysicallyOnRunway, sim.airport.nodes]);
+
+  const isArrivalToGate = ac.flightKind === "ARRIVAL" || isStoppedOnRunway || isPhysicallyOnRunway;
+  const taxiRoutes = effectiveCurrentNodeId
     ? getSuggestedTaxiRoutes(
         sim.airport,
-        currentNodeId,
+        effectiveCurrentNodeId,
         selectedTaxiRunway,
         ac.gateId,
         isArrivalToGate,
@@ -330,7 +378,7 @@ export const ClearanceControlDeck: React.FC = () => {
   const groundConflict = inspectGroundConflict(sim, ac);
 
   const isHoldingShort = Boolean(
-    ac.state === "HOLDING_SHORT" || ac.holdingAtRunway
+    !isPhysicallyOnRunway && (ac.state === "HOLDING_SHORT" || ac.holdingAtRunway)
   );
   const heldRunway =
     ac.holdingAtRunway ??
@@ -340,8 +388,10 @@ export const ClearanceControlDeck: React.FC = () => {
       (ac.holdingAtRunway && ac.holdingAtRunway !== ac.targetRunway)
   );
   const isDepartureHoldingShort = Boolean(
-    ac.holdingShortReason === "DEPARTURE_RUNWAY" ||
+    isHoldingShort && (
+      ac.holdingShortReason === "DEPARTURE_RUNWAY" ||
       (ac.flightKind === "DEPARTURE" && !isCrossingRequired)
+    )
   );
   const hasMultipleRunwaysOrTaxiways =
     sim.airport.runwayIds.length > 1 || taxiRoutes.length > 1;
@@ -378,11 +428,129 @@ export const ClearanceControlDeck: React.FC = () => {
   const neutralBtn =
     "rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] hover:border-[var(--atc-border-strong)] hover:bg-[var(--atc-surface)] text-[var(--atc-text)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 
+  const renderRunwayVacateCard = () => {
+    if (!canVacateRwy && !isPhysicallyOnRunway && !isStoppedOnRunway) return null;
+    return (
+      <div className="rounded-lg border border-[var(--atc-amber-border)] bg-[var(--atc-surface-alt)] p-3 space-y-2.5 shadow-sm">
+        <div className="flex items-center justify-between gap-1">
+          <div className="font-bold flex items-center gap-1.5 text-[var(--atc-amber)] text-xs">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+            <span>
+              {isStoppedOnRunway
+                ? `STOPPED ON RUNWAY ${activeRunwayId}`
+                : `VACATE RUNWAY ${activeRunwayId}`}
+            </span>
+          </div>
+          {ac.vacateAssignedTaxiway && (
+            <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-[var(--atc-cyan-bg)] text-[var(--atc-cyan)] border border-[var(--atc-cyan-border)]">
+              {ac.expediteVacate ? "EXPEDITE " : ""}VIA {ac.vacateAssignedTaxiway}
+            </span>
+          )}
+        </div>
+
+        <p className="text-[10px] text-[var(--atc-text-secondary)] leading-relaxed">
+          {isStoppedOnRunway
+            ? "Takeoff cancelled / rejected on runway surface. Instruct aircraft to vacate via nearest exit taxiway or dispatch airport rescue & tow to clear the active runway."
+            : `Rollout in progress on runway ${activeRunwayId}. Issue exit clearance.`}
+        </p>
+
+        {exitOptions.length > 0 ? (
+          <div className="space-y-1.5">
+            <button
+              disabled={nordoLocked || isCommandDisabled("VACATE_EXPEDITE")}
+              onMouseEnter={() => setHoverPreviewRoute(exitOptions[0].nodeIds)}
+              onMouseLeave={() => setHoverPreviewRoute(null)}
+              onClick={() => {
+                setHoverPreviewRoute(null);
+                const opt = exitOptions[0];
+                handleIssueClearance(
+                  {
+                    aircraftId: ac.id,
+                    controller: deckTab === "GROUND" ? "GROUND" : (ac.controller === "GROUND" ? "GROUND" : "TOWER"),
+                    type: "VACATE_RUNWAY",
+                    parameters: {
+                      runway: activeRunwayId,
+                      exitRwyNodeId: opt.exitRwyNodeId,
+                      holdShortNodeId: opt.holdShortNodeId,
+                      taxiway: opt.taxiway,
+                      expedite: true,
+                    },
+                  },
+                  "VACATE_EXPEDITE"
+                );
+              }}
+              className="w-full py-1.5 px-2.5 rounded border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] hover:opacity-90 text-[var(--atc-amber)] font-mono text-[11px] font-bold flex items-center justify-between transition-opacity disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <span>EXPEDITE VACATE ({exitOptions[0].taxiway})</span>
+              <ArrowRight className="w-3 h-3 shrink-0" />
+            </button>
+
+            <div className="grid grid-cols-2 gap-1">
+              {exitOptions.slice(0, 4).map((opt) => (
+                <button
+                  key={`${opt.exitRwyNodeId}-${opt.holdShortNodeId}`}
+                  disabled={nordoLocked || isCommandDisabled(`VACATE_${opt.taxiway}`)}
+                  onMouseEnter={() => setHoverPreviewRoute(opt.nodeIds)}
+                  onMouseLeave={() => setHoverPreviewRoute(null)}
+                  onClick={() => {
+                    setHoverPreviewRoute(null);
+                    handleIssueClearance(
+                      {
+                        aircraftId: ac.id,
+                        controller: deckTab === "GROUND" ? "GROUND" : (ac.controller === "GROUND" ? "GROUND" : "TOWER"),
+                        type: "VACATE_RUNWAY",
+                        parameters: {
+                          runway: activeRunwayId,
+                          exitRwyNodeId: opt.exitRwyNodeId,
+                          holdShortNodeId: opt.holdShortNodeId,
+                          taxiway: opt.taxiway,
+                        },
+                      },
+                      `VACATE_${opt.taxiway}`
+                    );
+                  }}
+                  className={`text-left px-2 py-1.5 rounded border text-[10px] font-mono transition-colors disabled:opacity-35 disabled:cursor-not-allowed cursor-pointer ${
+                    ac.vacateAssignedHoldShortId === opt.holdShortNodeId
+                      ? "bg-[var(--atc-cyan-bg)] border-[var(--atc-cyan-border)] text-[var(--atc-cyan)] font-bold"
+                      : "bg-[var(--atc-surface)] border-[var(--atc-border)] hover:border-[var(--atc-accent-border)] text-[var(--atc-text)]"
+                  }`}
+                >
+                  VACATE {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="text-[10px] text-[var(--atc-muted)] font-mono italic">
+            No forward runway exits ahead. Use emergency tow or taxi off.
+          </div>
+        )}
+
+        {(isStoppedOnRunway || ac.operationMode === "EMERGENCY_OPERATION") && (
+          <button
+            type="button"
+            onClick={() => {
+              useAtcStore.getState().towDisabledAircraft(ac.id);
+            }}
+            className="w-full py-2 px-2.5 rounded border border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] hover:opacity-90 text-[var(--atc-red)] font-mono text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+          >
+            <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
+            DISPATCH ARFF & TOW OFF RUNWAY
+          </button>
+        )}
+      </div>
+    );
+  };
+
   const renderTaxiRouteBuilder = () => (
     <div className="rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] p-2 space-y-2">
       <div className="flex items-center justify-between gap-2">
         <span className="text-[10px] font-mono font-bold text-[var(--atc-text-secondary)] uppercase whitespace-nowrap">
-          {isArrivalToGate ? `Taxi to Gate ${ac.gateId ?? ""}` : "Taxi Clearance"}
+          {isArrivalToGate
+            ? isStoppedOnRunway || isPhysicallyOnRunway
+              ? `Taxi to Gate ${ac.gateId ?? "Apron"}`
+              : `Taxi to Gate ${ac.gateId ?? ""}`
+            : "Taxi Clearance"}
         </span>
         {!isArrivalToGate && (
           <span className="text-[10px] font-mono text-[var(--atc-muted)] whitespace-nowrap">
@@ -1435,6 +1603,7 @@ export const ClearanceControlDeck: React.FC = () => {
               ) : (
                 /* NORMAL GROUND VIEW: Pushback, Hold Position, Full Taxi Route Builder, Crossings */
                 <div className="space-y-2.5">
+                  {(isPhysicallyOnRunway || isStoppedOnRunway || canVacateRwy) && renderRunwayVacateCard()}
                   <div className="grid grid-cols-2 gap-1.5">
                     <button
                       disabled={
@@ -1583,23 +1752,35 @@ export const ClearanceControlDeck: React.FC = () => {
                       REJECT TAKEOFF
                     </button>
                   </div>
+
+                  {(isPhysicallyOnRunway || isStoppedOnRunway) && (
+                    <div className="space-y-1.5 pt-1">
+                      {renderRunwayVacateCard()}
+                      <button
+                        disabled={nordoLocked || isCommandDisabled("HANDOFF_GND")}
+                        onClick={() =>
+                          handleIssueClearance(
+                            {
+                              aircraftId: ac.id,
+                              controller: "TOWER",
+                              type: "HANDOFF",
+                              parameters: { targetController: "GROUND" },
+                            },
+                            "HANDOFF_GND"
+                          )
+                        }
+                        className="w-full py-1.5 px-2 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-xs font-semibold disabled:opacity-35 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Radio className="w-3.5 h-3.5" />
+                        HAND OFF TO GROUND ({controllerFrequency("GROUND", sim.airport)})
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
               {ac.flightKind === "ARRIVAL" && (() => {
                 const activeLandRwy = ac.assignedApproach ?? ac.targetRunway;
-                const onSurface = ac.altitude <= sim.airport.elevationFt + 50;
-                const canVacateRwy =
-                  !nordoLocked &&
-                  ac.controller === "TOWER" &&
-                  (ac.state === "TOUCHDOWN" ||
-                    ac.state === "ROLLOUT" ||
-                    ac.state === "VACATING_RUNWAY" ||
-                    (ac.state === "HOLD_POSITION" && onSurface) ||
-                    ac.state === "STOPPED_ON_RUNWAY");
-                const exitOptions = canVacateRwy
-                  ? getRunwayExitOptions(sim.airport, ac, activeLandRwy)
-                  : [];
 
                 return (
                   <div className="space-y-2">
@@ -1675,88 +1856,8 @@ export const ClearanceControlDeck: React.FC = () => {
                       </button>
                     </div>
 
-                    {/* Vacate Runway (Exit Runway onto Taxiway) */}
-                    <div className="rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] p-2 space-y-1.5">
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="text-[10px] font-mono font-bold text-[var(--atc-text-secondary)] uppercase">
-                          Vacate Runway (RWY {activeLandRwy})
-                        </span>
-                        {ac.vacateAssignedTaxiway && (
-                          <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-[var(--atc-cyan-bg)] text-[var(--atc-cyan)] border border-[var(--atc-cyan-border)]">
-                            {ac.expediteVacate ? "EXPEDITE " : ""}
-                            VIA {ac.vacateAssignedTaxiway}
-                          </span>
-                        )}
-                      </div>
-
-                      {canVacateRwy && exitOptions.length > 0 ? (
-                        <div className="space-y-1">
-                          <button
-                            disabled={isCommandDisabled("VACATE_EXPEDITE")}
-                            onMouseEnter={() => setHoverPreviewRoute(exitOptions[0].nodeIds)}
-                            onMouseLeave={() => setHoverPreviewRoute(null)}
-                            onClick={() => {
-                              setHoverPreviewRoute(null);
-                              const opt = exitOptions[0];
-                              handleIssueClearance({
-                                aircraftId: ac.id,
-                                controller: "TOWER",
-                                type: "VACATE_RUNWAY",
-                                parameters: {
-                                  runway: activeLandRwy,
-                                  exitRwyNodeId: opt.exitRwyNodeId,
-                                  holdShortNodeId: opt.holdShortNodeId,
-                                  taxiway: opt.taxiway,
-                                  expedite: true,
-                                },
-                              }, "VACATE_EXPEDITE");
-                            }}
-                            className="w-full py-1.5 px-2.5 rounded border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] hover:opacity-90 text-[var(--atc-amber)] font-mono text-[11px] font-bold flex items-center justify-between transition-opacity disabled:opacity-35 disabled:cursor-not-allowed"
-                          >
-                            <span>EXPEDITE VACATE ({exitOptions[0].taxiway})</span>
-                            <ArrowRight className="w-3 h-3 shrink-0" />
-                          </button>
-
-                          <div className="grid grid-cols-2 gap-1">
-                            {exitOptions.slice(0, 4).map((opt) => (
-                              <button
-                                key={`${opt.exitRwyNodeId}-${opt.holdShortNodeId}`}
-                                disabled={isCommandDisabled(`VACATE_${opt.taxiway}`)}
-                                onMouseEnter={() => setHoverPreviewRoute(opt.nodeIds)}
-                                onMouseLeave={() => setHoverPreviewRoute(null)}
-                                onClick={() => {
-                                  setHoverPreviewRoute(null);
-                                  handleIssueClearance({
-                                    aircraftId: ac.id,
-                                    controller: "TOWER",
-                                    type: "VACATE_RUNWAY",
-                                    parameters: {
-                                      runway: activeLandRwy,
-                                      exitRwyNodeId: opt.exitRwyNodeId,
-                                      holdShortNodeId: opt.holdShortNodeId,
-                                      taxiway: opt.taxiway,
-                                    },
-                                  }, `VACATE_${opt.taxiway}`);
-                                }}
-                                className={`text-left px-2 py-1.5 rounded border text-[10px] font-mono transition-colors disabled:opacity-35 disabled:cursor-not-allowed ${
-                                  ac.vacateAssignedHoldShortId === opt.holdShortNodeId
-                                    ? "bg-[var(--atc-cyan-bg)] border-[var(--atc-cyan-border)] text-[var(--atc-cyan)] font-bold"
-                                    : "bg-[var(--atc-surface)] border-[var(--atc-border)] hover:border-[var(--atc-accent-border)] text-[var(--atc-text)]"
-                                }`}
-                              >
-                                VACATE {opt.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="text-[10px] font-mono text-[var(--atc-muted)]">
-                          {ac.controller !== "TOWER"
-                            ? `Switch / handoff under TOWER control to issue vacate clearance (currently ${ac.controller}).`
-                            : "Available once aircraft lands on the runway (Touchdown / Rollout)."}
-                        </div>
-                      )}
-                    </div>
+                    {/* Vacate Runway Card */}
+                    {renderRunwayVacateCard()}
                   </div>
                 );
               })()}

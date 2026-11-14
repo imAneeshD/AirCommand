@@ -17,6 +17,7 @@ import {
   Radio,
   ShieldAlert,
 } from "lucide-react";
+import { getRunwayExitOptions } from "../data/asteriaAirport.ts";
 import { IfrFlightPlanModal } from "./IfrFlightPlanModal.tsx";
 import { getActiveClearances, getPendingReadbackClearances } from "../engine/clearanceEngine.ts";
 import { getAircraftPhaseLabel } from "../engine/simulation.ts";
@@ -282,12 +283,38 @@ export const FlightStripRack: React.FC = () => {
     }
 
     if (req.type === "TAXI" || req.type === "GATE_TAXI") {
+      const exitOpts = getRunwayExitOptions(sim.airport, ac, ac.targetRunway);
+      if (
+        (ac.state === "STOPPED_ON_RUNWAY" ||
+          ac.state === "TAKEOFF_CANCELLED" ||
+          ac.state === "HOLD_POSITION") &&
+        exitOpts.length > 0
+      ) {
+        issueClearance(
+          {
+            aircraftId: ac.id,
+            controller: ac.controller,
+            type: "VACATE_RUNWAY",
+            parameters: {
+              runway: ac.targetRunway,
+              exitRwyNodeId: exitOpts[0].exitRwyNodeId,
+              holdShortNodeId: exitOpts[0].holdShortNodeId,
+              taxiway: exitOpts[0].taxiway,
+            },
+          },
+          true
+        );
+        return;
+      }
       issueClearance(
         {
           aircraftId: ac.id,
           controller: ac.controller,
           type: "TAXI",
-          parameters: ac.flightKind === "ARRIVAL" ? { gate: ac.gateId } : { runway: ac.targetRunway },
+          parameters:
+            ac.flightKind === "ARRIVAL" || ac.state === "STOPPED_ON_RUNWAY"
+              ? { gate: ac.gateId }
+              : { runway: ac.targetRunway },
         },
         true
       );
@@ -432,11 +459,16 @@ export const FlightStripRack: React.FC = () => {
     const pendingRb = getPendingReadbackClearances(ac);
     const movable = canAircraftMove(ac, sim);
     const ctrl = controllerBadge(ac.controller, ac.flightKind);
-    const hasReq = Boolean(ac.pendingRequest && !ac.pendingRequest.resolved);
-    const isCalling = activeCallerIds.has(ac.id);
-    const ho = pendingHandoffsByAcId.get(ac.id);
     const fp = ac.flightPlan;
     const isCleared = fp ? fp.clearanceStatus === "CLEARED" : ac.flightKind === "ARRIVAL";
+    const hasReq = Boolean(
+      ac.pendingRequest &&
+      !ac.pendingRequest.resolved &&
+      !(ac.pendingRequest.type === "PUSHBACK" && ac.state !== "AT_GATE") &&
+      !(ac.pendingRequest.type === "IFR_CLEARANCE" && isCleared)
+    );
+    const isCalling = activeCallerIds.has(ac.id);
+    const ho = pendingHandoffsByAcId.get(ac.id);
 
     return (
       <div

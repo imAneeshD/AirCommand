@@ -297,6 +297,8 @@ export function updateAircraftStates(state: SimulationState): void {
 
       case "TAKEOFF_CANCELLED": {
         ac.speed = 0;
+        ac.holdingAtRunway = undefined;
+        ac.holdingShortReason = undefined;
         if (state.time - ac.stateEnteredAt >= 0.8) {
           ac.state = "HOLD_POSITION";
           ac.stateEnteredAt = state.time;
@@ -352,6 +354,8 @@ export function updateAircraftStates(state: SimulationState): void {
           ac.speed = 0;
           ac.state = "STOPPED_ON_RUNWAY";
           ac.stateEnteredAt = state.time;
+          ac.holdingAtRunway = undefined;
+          ac.holdingShortReason = undefined;
           addRadioMessage(state, {
             sender: ac.callsign,
             recipient: twrName,
@@ -361,6 +365,22 @@ export function updateAircraftStates(state: SimulationState): void {
             text: `${twrName}, ${ac.spokenCallsign} stopped on runway ${runwaySpokenName(ac.targetRunway)}, requesting equipment/tow.`,
           });
         }
+        break;
+      }
+
+      case "STOPPED_ON_RUNWAY": {
+        ac.speed = 0;
+        ac.holdingAtRunway = undefined;
+        ac.holdingShortReason = undefined;
+        issuePilotRequestIfNeeded(
+          state,
+          ac,
+          "GATE_TAXI",
+          ac.controller,
+          `${controllerCallsign(ac.controller, state.airport)}, ${ac.spokenCallsign}, stopped on runway ${runwaySpokenName(ac.targetRunway)}, request instructions to vacate runway.`,
+          undefined,
+          ac.gateId
+        );
         break;
       }
 

@@ -13,6 +13,9 @@ test("Pilot Request Approval: APPROACH_CLEARANCE is resolved upon issuing APPROA
     targetRunway: "09R",
     bearingDeg: 270,
     aircraftType: "B772",
+    x: 0,
+    y: -10,
+    gateId: "A1",
   });
 
   ac.pendingRequest = {

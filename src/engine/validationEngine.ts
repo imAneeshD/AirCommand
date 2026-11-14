@@ -216,15 +216,33 @@ export function canAircraftExecuteAction(
       const runway = aircraft.assignedApproach ?? aircraft.targetRunway;
       const landClr = getValidClearanceForRunway(aircraft, "LAND", runway);
       const vacateClr = getValidClearanceForRunway(aircraft, "VACATE_RUNWAY", runway);
-      if (!landClr && !vacateClr && !hasLightGun("STEADY_GREEN")) {
+      const rwy = simulationState?.airport?.runways[runway];
+      const onRwyPavement = rwy
+        ? Math.abs(crossTrackRunwayNm(rwy, aircraft.x, aircraft.y)) <= Math.max(rwy.widthNm * 1.5, 0.035) &&
+          alongRunwayNm(rwy, aircraft.x, aircraft.y) >= -0.05 &&
+          alongRunwayNm(rwy, aircraft.x, aircraft.y) <= rwy.lengthNm + 0.05
+        : false;
+      const isDepartureOnRwy =
+        aircraft.flightKind === "DEPARTURE" &&
+        (onRwyPavement ||
+          aircraft.state === "STOPPED_ON_RUNWAY" ||
+          aircraft.state === "TAKEOFF_CANCELLED" ||
+          aircraft.state === "HOLD_POSITION" ||
+          aircraft.state === "ROLLOUT" ||
+          aircraft.state === "VACATING_RUNWAY" ||
+          aircraft.state === "REJECTED_TAKEOFF");
+
+      if (!landClr && !vacateClr && !hasLightGun("STEADY_GREEN") && !isDepartureOnRwy) {
         return {
           allowed: false,
-          reason: "Runway vacation requires prior landing clearance completion.",
+          reason: "Runway vacation requires prior landing clearance completion or aircraft on runway surface.",
         };
       }
       return {
         allowed: true,
-        reason: "Vacating runway following landing rollout.",
+        reason: isDepartureOnRwy
+          ? "Vacating runway following cancelled/rejected takeoff or runway stoppage."
+          : "Vacating runway following landing rollout.",
         clearanceId: vacateClr?.id ?? landClr?.id,
       };
     }
@@ -523,8 +541,13 @@ export function canAircraftMove(
     case "CLEARED_TO_LAND":
     case "LANDING":
     case "TOUCHDOWN":
-    case "ROLLOUT":
       return canAircraftExecuteAction(aircraft, "LAND", simulation).allowed;
+
+    case "ROLLOUT":
+      return (
+        canAircraftExecuteAction(aircraft, "LAND", simulation).allowed ||
+        canAircraftExecuteAction(aircraft, "VACATE_RUNWAY", simulation).allowed
+      );
 
     case "VACATING_RUNWAY":
       return canAircraftExecuteAction(aircraft, "VACATE_RUNWAY", simulation).allowed;
