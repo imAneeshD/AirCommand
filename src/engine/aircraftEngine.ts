@@ -252,9 +252,9 @@ export function updateAircraftStates(state: SimulationState): void {
         const along = alongRunwayNm(rwy, ac.x, ac.y);
         const cross = crossTrackRunwayNm(rwy, ac.x, ac.y);
         const alignedOnRwy =
-          Math.abs(cross) < 0.015 &&
+          Math.abs(cross) < 0.008 &&
           along >= -0.02 &&
-          headingDiffDeg(ac.heading, rwy.heading) < 6;
+          headingDiffDeg(ac.heading, rwy.heading) < 5;
         if (alignedOnRwy) {
           ac.speed = 0;
           if (canAircraftExecuteAction(ac, "TAKEOFF_ROLL", state).allowed) {
@@ -285,9 +285,9 @@ export function updateAircraftStates(state: SimulationState): void {
         const along = alongRunwayNm(rwy, ac.x, ac.y);
         const cross = crossTrackRunwayNm(rwy, ac.x, ac.y);
         const alignedOnRwy =
-          Math.abs(cross) < 0.015 &&
+          Math.abs(cross) < 0.008 &&
           along >= -0.02 &&
-          headingDiffDeg(ac.heading, rwy.heading) < 6;
+          headingDiffDeg(ac.heading, rwy.heading) < 5;
         if (alignedOnRwy) {
           ac.state = "TAKEOFF_ROLL";
           ac.stateEnteredAt = state.time;

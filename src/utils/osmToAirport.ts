@@ -454,8 +454,13 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
         if (al < -0.02 || al > rwy.lengthNm + 0.02) continue;
 
         if (Math.abs(cr) <= rwy.widthNm * 0.75) {
+          const recipRwy = rwy.oppositeId ? runways[rwy.oppositeId] : undefined;
+          const distThis = al;
+          const distOpp = recipRwy ? alongRunwayNm(recipRwy, n.x, n.y) : rwy.lengthNm - al;
+          if (recipRwy && distThis > distOpp) continue;
+
           const isEntry = al < rwy.lengthNm * 0.35;
-          if (n.kind === "TAXIWAY") {
+          if (n.kind === "TAXIWAY" || !n.runwayId) {
             n.kind = isEntry ? "RUNWAY_ENTRY" : "RUNWAY_EXIT";
             n.runwayId = rwyId;
           }
@@ -471,7 +476,15 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
           if (n.kind !== "TAXIWAY" && n.kind !== "HOLD_SHORT") return false;
           const al = alongRunwayNm(rwy, n.x, n.y);
           const cr = Math.abs(crossTrackRunwayNm(rwy, n.x, n.y));
-          return al >= -0.02 && al <= rwy.lengthNm + 0.02 && cr > rwy.widthNm * 0.75 && cr <= 0.085;
+          if (al < -0.02 || al > rwy.lengthNm + 0.02 || cr <= rwy.widthNm * 0.75 || cr > 0.085) return false;
+
+          const recipRwy = rwy.oppositeId ? runways[rwy.oppositeId] : undefined;
+          if (recipRwy) {
+            const distThis = al;
+            const distOpp = alongRunwayNm(recipRwy, n.x, n.y);
+            if (distThis > distOpp) return false;
+          }
+          return true;
         })
         .sort((a, b) => {
           const da = Math.abs(Math.abs(crossTrackRunwayNm(rwy, a.x, a.y)) - 0.055);
