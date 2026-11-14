@@ -4,12 +4,13 @@ import {
   getRunwayExitOptions,
   getSuggestedTaxiRoutes,
   headingDiffDeg,
+  runwaySpokenName,
 } from "../data/asteriaAirport.ts";
 import type { Aircraft, ControllerRole, RunwayId, SimulationState } from "../types/atc.ts";
 import { computeDepAppGuidance } from "../utils/depAppGuidance.ts";
 import { buildResolutionCommands, inspectGroundConflict } from "../utils/groundConflict.ts";
-import { getPendingReadbackClearances } from "./clearanceEngine.ts";
-import { submitClearanceDecision } from "./decisionEngine.ts";
+import { getPendingReadbackClearances, nextId } from "./clearanceEngine.ts";
+import { addRadioMessage, controllerCallsign, submitClearanceDecision } from "./decisionEngine.ts";
 import { isRunwayOccupied } from "./validationEngine.ts";
 
 function isBusyWithReadback(ac: Aircraft): boolean {
@@ -262,7 +263,10 @@ function runAutonomousGround(state: SimulationState): void {
             aircraftId: ac.id,
             controller: "GROUND",
             type: "HANDOFF",
-            parameters: { targetController: "TOWER" },
+            parameters: {
+              targetController: "TOWER",
+              bypassPending: state.config.stationControl.TOWER === "AUTONOMOUS",
+            },
           },
           "AUTONOMOUS"
         );
@@ -478,7 +482,10 @@ function runAutonomousTower(state: SimulationState): void {
           aircraftId: ac.id,
           controller: "TOWER",
           type: "HANDOFF",
-          parameters: { targetController: "GROUND" },
+          parameters: {
+            targetController: "GROUND",
+            bypassPending: state.config.stationControl.GROUND === "AUTONOMOUS",
+          },
         },
         "AUTONOMOUS"
       );
@@ -919,6 +926,69 @@ function runAutonomousCenter(state: SimulationState): void {
 }
 
 /**
+ * Automatically accepts any pending handoffs addressed to autonomous/AI positions
+ * so traffic never stalls waiting for human acceptance at an unmanned station.
+ */
+function autoAcceptHandoffsForAutonomousControllers(state: SimulationState): void {
+  if (!state.handoffs || state.handoffs.length === 0) return;
+  for (const h of state.handoffs) {
+    if (
+      h.status === "PENDING" &&
+      h.toController !== "ACC" &&
+      state.config.stationControl?.[h.toController as ControllerRole] === "AUTONOMOUS"
+    ) {
+      h.status = "ACCEPTED";
+      h.respondedAt = state.time;
+      const ac = state.aircraft[h.aircraftId];
+      if (ac && ac.controller !== h.toController) {
+        ac.controller = h.toController as ControllerRole;
+        ac.lastTransmissionAt = state.time;
+        if (h.toController === "TOWER" && ac.flightKind === "DEPARTURE" && ac.state === "HOLDING_SHORT") {
+          const targetName = controllerCallsign("TOWER", state.airport, ac.flightKind);
+          const msgText = `${targetName}, ${ac.spokenCallsign}, holding short runway ${runwaySpokenName(ac.targetRunway)}, ready for departure.`;
+          ac.pendingRequest = {
+            id: nextId(state, "req"),
+            type: "TAKEOFF",
+            controller: "TOWER",
+            message: msgText,
+            requestedAt: state.time,
+            runway: ac.targetRunway,
+            resolved: false,
+          };
+          addRadioMessage(state, {
+            sender: ac.callsign,
+            recipient: targetName,
+            controller: "TOWER",
+            aircraftId: ac.id,
+            category: "PILOT_REQUEST",
+            text: msgText,
+          });
+        } else if (h.toController === "GROUND" && ac.flightKind === "ARRIVAL") {
+          const targetName = controllerCallsign("GROUND", state.airport, ac.flightKind);
+          const msgText = `${targetName}, ${ac.spokenCallsign}, clear of runway, request taxi to gate.`;
+          ac.pendingRequest = {
+            id: nextId(state, "req"),
+            type: "TAXI",
+            controller: "GROUND",
+            message: msgText,
+            requestedAt: state.time,
+            resolved: false,
+          };
+          addRadioMessage(state, {
+            sender: ac.callsign,
+            recipient: targetName,
+            controller: "GROUND",
+            aircraftId: ac.id,
+            category: "PILOT_REQUEST",
+            text: msgText,
+          });
+        }
+      }
+    }
+  }
+}
+
+/**
  * Autonomous Controllers (Section 26 & 27).
  * Strictly inspect SimulationState and issue ATCClearances via DecisionEngine.
  * Never move aircraft directly.
@@ -928,6 +998,9 @@ export function runAutonomousControllers(state: SimulationState): void {
     return;
   }
   state.lastAutonomousRunAt = state.time;
+
+  // 0. Auto-accept any handoffs addressed to automated controllers
+  autoAcceptHandoffsForAutonomousControllers(state);
 
   if (state.config.stationControl.DELIVERY === "AUTONOMOUS") {
     runAutonomousDelivery(state);

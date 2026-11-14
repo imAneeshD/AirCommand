@@ -69,6 +69,7 @@ export const TopBar: React.FC = () => {
   const setAppMode = useAtcStore((s) => s.setAppMode);
   const endMultiplayerSession = useAtcStore((s) => s.endMultiplayerSession);
   const leaveMultiplayerRoom = useAtcStore((s) => s.leaveMultiplayerRoom);
+  const claimMultiplayerRole = useAtcStore((s) => s.claimMultiplayerRole);
 
   const switchStation = useAtcStore((s) => s.switchStation);
   const toggleAutoAssist = useAtcStore((s) => s.toggleAutoAssist);
@@ -158,7 +159,16 @@ export const TopBar: React.FC = () => {
           {STATIONS.map((st) => {
             const active = sim.config.activePlayerStation === st.role;
             const isAll = st.role === "ALL";
-            const mpLocked = isMpActive && assignedRole !== null && st.role !== assignedRole;
+            const isOtherHuman =
+              isMpActive &&
+              !isAll &&
+              Boolean(
+                roomState?.slots[st.role as ControllerRole]?.playerId &&
+                roomState?.slots[st.role as ControllerRole]?.playerId !== playerId &&
+                roomState?.slots[st.role as ControllerRole]?.connected &&
+                !roomState?.slots[st.role as ControllerRole]?.aiTakeover
+              );
+            const mpLocked = isMpActive && (isAll || isOtherHuman);
             const count = isAll
               ? Object.values(pendingCounts).reduce((a, b) => a + b, 0)
               : pendingCounts[st.role as ControllerRole];
@@ -166,12 +176,24 @@ export const TopBar: React.FC = () => {
               <button
                 key={st.role}
                 disabled={mpLocked}
-                onClick={() => switchStation(st.role)}
+                onClick={() => {
+                  if (isMpActive && !isAll) {
+                    claimMultiplayerRole(st.role as ControllerRole);
+                  } else {
+                    switchStation(st.role);
+                  }
+                }}
                 title={
                   mpLocked
-                    ? `Multiplayer role locked to ${assignedRole}`
+                    ? isAll
+                      ? "Multiplayer mode: select an operational station"
+                      : `Staffed by ${roomState?.slots[st.role as ControllerRole]?.playerName ?? "another controller"}`
+                    : isMpActive
+                    ? active
+                      ? `Your active station: ${st.label}`
+                      : `Take over ${st.label} (currently automated AI backup)`
                     : isAll
-                    ? "ALL AUTO: All 3 stations automated & hear all frequencies [Key: N / A / 4]"
+                    ? "ALL AUTO: All stations automated & hear all frequencies [Key: N / A / 4]"
                     : `Switch role to ${st.label} (${st.freq} MHz) — hear only ${st.label}; other roles auto-managed [Key: ${st.code}]`
                 }
                 className={`px-2.5 py-1 rounded-md text-xs font-mono transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${

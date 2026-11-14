@@ -47,6 +47,8 @@ export const ClearanceControlDeck: React.FC = () => {
   const lastFeedback = useAtcStore((s) => s.lastFeedback);
   const roomState = useAtcStore((s) => s.roomState);
   const assignedRole = useAtcStore((s) => s.assignedRole);
+  const playerId = useAtcStore((s) => s.playerId);
+  const claimMultiplayerRole = useAtcStore((s) => s.claimMultiplayerRole);
   const respondToHandoff = useAtcStore((s) => s.respondToHandoff);
   const claimAircraftStation = useAtcStore((s) => s.claimAircraftStation);
 
@@ -897,8 +899,24 @@ export const ClearanceControlDeck: React.FC = () => {
             </span>
             <button
               type="button"
-              onClick={() => claimAircraftStation(ac.id, lockedRole)}
-              className="py-1 px-2.5 rounded border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:bg-[var(--atc-surface)] text-[var(--atc-cyan)] font-bold text-[10px] shrink-0 transition-colors"
+              onClick={() => {
+                if (!ac) return;
+                const targetRole = ac.controller;
+                const isMp = Boolean(roomState && roomState.status === "ACTIVE");
+                if (isMp) {
+                  const slot = roomState?.slots[targetRole];
+                  const isAiStation = !slot?.playerId || !slot?.connected || slot?.aiTakeover;
+                  if (isAiStation) {
+                    claimMultiplayerRole(targetRole);
+                  }
+                  claimAircraftStation(ac.id, isAiStation ? targetRole : lockedRole);
+                } else {
+                  switchStation(targetRole);
+                  claimAircraftStation(ac.id, targetRole);
+                }
+              }}
+              className="py-1 px-2.5 rounded border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:bg-[var(--atc-surface)] text-[var(--atc-cyan)] font-bold text-[10px] shrink-0 transition-colors shadow-sm"
+              title={`Take over ${controllerCallsign(ac.controller, sim.airport, ac.flightKind)} and control this aircraft`}
             >
               TAKE OVER
             </button>

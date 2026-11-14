@@ -1331,9 +1331,13 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
   },
 
   claimAircraftStation: (aircraftId, targetController) => {
-    const { sim } = get();
+    const { sim, roomState } = get();
     const ac = sim.aircraft[aircraftId];
     if (!ac) return;
+
+    if (roomState && roomState.status === "ACTIVE") {
+      ensureWsClient(set, get).claimAircraft(aircraftId, targetController);
+    }
 
     const fromRole = ac.controller;
     ac.controller = targetController;

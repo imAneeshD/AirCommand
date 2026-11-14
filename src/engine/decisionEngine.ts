@@ -813,10 +813,14 @@ export function submitClearanceDecision(
 
       // Flow: ground control > Handoff req > tower controller accepts / rejects > transfer req to the plane with the signal
       const bypassPending = Boolean(params.bypassPending);
+      // A handoff requires human acceptance ONLY if the target station is manned by a human player:
+      // 1. In multiplayer (where activePlayerStation is "ALL"), if stationControl[targetController] === "PLAYER".
+      // 2. In single-player role-locked mode, if the player's active station matches targetController.
       const isHumanTarget =
         !bypassPending &&
-        state.config.activePlayerStation !== "ALL" &&
-        state.config.activePlayerStation === targetController;
+        (state.config.activePlayerStation === targetController ||
+          (state.config.activePlayerStation === "ALL" &&
+            state.config.stationControl?.[targetController] === "PLAYER"));
 
       if (isHumanTarget) {
         if (!state.handoffs) state.handoffs = [];
@@ -857,6 +861,17 @@ export function submitClearanceDecision(
           ok: true,
           reason: `Handoff requested to ${toLabel}. Awaiting acceptance.`,
         };
+      }
+
+      // If handoff is directly approved (target is autonomous or bypassPending), resolve any pending handoff
+      if (state.handoffs) {
+        for (const h of state.handoffs) {
+          if (h.aircraftId === aircraft.id && h.status === "PENDING") {
+            h.status = "ACCEPTED";
+            h.respondedAt = state.time;
+          }
+        }
+        state.handoffs = [...state.handoffs];
       }
 
       const targetName = controllerCallsign(targetController, state.airport, aircraft.flightKind);

@@ -98,6 +98,35 @@ export class MultiplayerRoomService {
           this.scoring.collectCompletedHandlingTimes(ir.tracker, ir.sim);
         }
         this.syncStationControlWithSlots(ir);
+
+        // Auto-sync sim handoffs to room handoffs and auto-accept any pending handoffs addressed to AI stations
+        if (ir.sim.handoffs && ir.sim.handoffs.length > 0) {
+          for (const sh of ir.sim.handoffs) {
+            const rh = ir.room.handoffs.find((h) => h.id === sh.id);
+            if (!rh) {
+              ir.room.handoffs.push({ ...sh });
+            } else {
+              rh.status = sh.status;
+              rh.respondedAt = sh.respondedAt;
+            }
+          }
+        }
+        for (const h of ir.room.handoffs) {
+          if (
+            h.status === "PENDING" &&
+            h.toController !== "ACC" &&
+            ir.sim.config.stationControl[h.toController as ControllerRole] === "AUTONOMOUS"
+          ) {
+            h.status = "ACCEPTED";
+            h.respondedAt = ir.sim.time;
+            const ac = ir.sim.aircraft[h.aircraftId];
+            if (ac && ac.controller !== h.toController) {
+              ac.controller = h.toController as ControllerRole;
+              ac.lastTransmissionAt = ir.sim.time;
+            }
+          }
+        }
+
         // Omit static sim.airport on 5 Hz ticks to keep deltas tiny (~15 KB vs ~1.6 MB)
         this.broadcastRoomState(ir, false);
       }
@@ -117,6 +146,7 @@ export class MultiplayerRoomService {
       const humanActive = Boolean(slot.playerId && slot.connected && !slot.aiTakeover);
       ir.sim.config.stationControl[role] = humanActive ? "PLAYER" : "AUTONOMOUS";
     }
+    ir.sim.config.activePlayerStation = "ALL";
   }
 
   async createRoom(opts: {
@@ -373,6 +403,69 @@ export class MultiplayerRoomService {
     };
     this.syncStationControlWithSlots(ir);
     this.broadcastRoomState(ir);
+    return { ok: true };
+  }
+
+  claimAircraft(
+    roomCode: string,
+    playerId: string,
+    aircraftId: string,
+    targetRole?: ControllerRole
+  ): { ok: boolean; error?: string } {
+    const ir = this.rooms.get(roomCode.toUpperCase());
+    if (!ir) return { ok: false, error: "Room not found." };
+    const ac = ir.sim.aircraft[aircraftId];
+    if (!ac) return { ok: false, error: "Aircraft not found." };
+
+    const playerRole = ROLES.find((r) => ir.room.slots[r].playerId === playerId);
+    const destRole = targetRole ?? playerRole;
+    if (!destRole) return { ok: false, error: "No destination role specified." };
+
+    const fromRole = ac.controller;
+    ac.controller = destRole;
+    ac.lastTransmissionAt = ir.sim.time;
+
+    // Resolve any pending handoffs for this aircraft
+    if (ir.sim.handoffs) {
+      for (const h of ir.sim.handoffs) {
+        if (h.aircraftId === aircraftId && h.status === "PENDING") {
+          h.status = "ACCEPTED";
+          h.respondedAt = ir.sim.time;
+        }
+      }
+    }
+    if (ir.room.handoffs) {
+      for (const h of ir.room.handoffs) {
+        if (h.aircraftId === aircraftId && h.status === "PENDING") {
+          h.status = "ACCEPTED";
+          h.respondedAt = ir.sim.time;
+        }
+      }
+    }
+
+    if (destRole === "TOWER" && ac.flightKind === "DEPARTURE" && ac.state === "HOLDING_SHORT") {
+      const targetName = controllerCallsign("TOWER", ir.sim.airport, ac.flightKind);
+      const msgText = `${targetName}, ${ac.spokenCallsign}, holding short runway ${runwaySpokenName(ac.targetRunway)}, ready for departure.`;
+      ac.pendingRequest = {
+        id: nextId(ir.sim, "req"),
+        type: "TAKEOFF",
+        controller: "TOWER",
+        message: msgText,
+        requestedAt: ir.sim.time,
+        runway: ac.targetRunway,
+        resolved: false,
+      };
+      addRadioMessage(ir.sim, {
+        sender: ac.callsign,
+        recipient: targetName,
+        controller: "TOWER",
+        aircraftId: ac.id,
+        category: "PILOT_REQUEST",
+        text: msgText,
+      });
+    }
+
+    this.broadcastRoomState(ir, false);
     return { ok: true };
   }
 
