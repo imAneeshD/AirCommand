@@ -1628,11 +1628,12 @@ export function getSuggestedTaxiRoutes(
     destinationNodeId: string,
     nodeIds: string[] | null
   ) => {
-    if (!nodeIds || nodeIds.length === 0 || taxiways.length === 0) return;
+    if (!nodeIds || nodeIds.length === 0) return;
+    const safeTaxiways = taxiways && taxiways.length > 0 ? taxiways : ["A"];
     const pathKey = `${destinationNodeId}|${nodeIds.join(">")}`;
     if (seenPaths.has(pathKey)) return;
 
-    let label = `${basePrefix} via ${taxiways.map(taxiwayFullName).join(", ")}`;
+    let label = `${basePrefix} via ${safeTaxiways.map(taxiwayFullName).join(", ")}`;
     const twKey = `${destinationNodeId}|${label}`;
     if (seenLabelKeys.has(twKey)) {
       // Allow genuinely distinct bypass paths to appear even if taxiway ref sequence simplifies similarly
@@ -1741,13 +1742,39 @@ export function getSuggestedTaxiRoutes(
   const candidateTargets: Array<{ hsId: string; conn: TaxiwayName; distStart: number }> = [];
   for (const entryId of rwy.entryNodeIds) {
     for (const e of airport.edges) {
-      if (e.from !== entryId || e.taxiway === "APRON") continue;
-      const hs = airport.nodes[e.to];
-      if (!hs || hs.kind !== "HOLD_SHORT" || hs.holdShortForRunway !== targetRunway) continue;
+      if ((e.from !== entryId && e.to !== entryId) || e.taxiway === "APRON") continue;
+      const otherId = e.from === entryId ? e.to : e.from;
+      const hs = airport.nodes[otherId];
+      if (!hs || hs.kind !== "HOLD_SHORT" || (hs.holdShortForRunway && hs.holdShortForRunway !== targetRunway)) continue;
       candidateTargets.push({
         hsId: hs.id,
         conn: e.taxiway,
         distStart: hs.isNorthSide === preferNorth ? 0 : 1,
+      });
+    }
+  }
+
+  // Fallback to all hold-short nodes designated for targetRunway or any hold-short on the airport
+  if (candidateTargets.length === 0) {
+    for (const hsId of rwy.holdShortNodeIds) {
+      const hs = airport.nodes[hsId];
+      if (!hs) continue;
+      const conn = airport.edges.find((e) => (e.from === hsId || e.to === hsId) && e.taxiway !== "APRON")?.taxiway ?? "A";
+      candidateTargets.push({
+        hsId,
+        conn,
+        distStart: hs.isNorthSide === preferNorth ? 0 : 1,
+      });
+    }
+  }
+
+  // Fallback to direct runway entry nodes if no hold-shorts found
+  if (candidateTargets.length === 0 && rwy.entryNodeIds.length > 0) {
+    for (const entryId of rwy.entryNodeIds) {
+      candidateTargets.push({
+        hsId: entryId,
+        conn: "A",
+        distStart: 0,
       });
     }
   }
