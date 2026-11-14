@@ -28,6 +28,7 @@ import {
   supersedeClearancesForNewInstruction,
   transitionClearanceLifecycle,
 } from "./clearanceEngine.ts";
+import { getFunnyReadbackQuip } from "./funnyMomentsEngine.ts";
 
 export function addRadioMessage(
   state: SimulationState,
@@ -1539,13 +1540,18 @@ export function processPilotReadbacks(state: SimulationState): void {
       }
       applyAcknowledgedClearance(state, aircraft, clearance);
 
+      const quip = getFunnyReadbackQuip(clearance.type, aircraft.callsign, state.time);
+      const readbackSpeechText = quip
+        ? `${clearance.expectedReadbackText.replace(/\.?$/, "")}, ${quip}.`
+        : clearance.expectedReadbackText;
+
       addRadioMessage(state, {
         sender: aircraft.callsign,
         recipient: controllerCallsign(clearance.controller, state.airport),
         controller: clearance.controller,
         aircraftId: aircraft.id,
         category: "PILOT_READBACK",
-        text: clearance.expectedReadbackText,
+        text: readbackSpeechText,
       });
     }
   }

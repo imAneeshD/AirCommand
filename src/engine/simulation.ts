@@ -22,6 +22,7 @@ import { runAutonomousControllers } from "./autonomousControllers.ts";
 import { nextId } from "./clearanceEngine.ts";
 import { addRadioMessage, controllerCallsign, processPilotReadbacks } from "./decisionEngine.ts";
 import { updateAircraftMovement } from "./movementEngine.ts";
+import { stepFunnyMoments } from "./funnyMomentsEngine.ts";
 
 export const AIRLINES: Array<{ code: string; spoken: string; name: string; types: string[] }> = [
   { code: "UAL", spoken: "United", name: "United Airlines", types: ["B789", "B772", "B739", "B752", "A320"] },
@@ -1814,6 +1815,9 @@ export function stepSimulation(
       state.lastTrafficSpawnAt = state.time;
       spawnRandomTraffic(state);
     }
+
+    // 7. Spontaneous funny ATC banter and lighthearted moments
+    stepFunnyMoments(state, step);
 
     remaining -= step;
   }
