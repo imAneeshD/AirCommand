@@ -34,9 +34,11 @@ function makeManualState(): SimulationState {
   const s = createBaseSimulation("SANDBOX", "GROUND");
   s.config.autoManageOtherStations = false;
   s.config.stationControl = {
+    DELIVERY: "PLAYER",
     GROUND: "PLAYER",
     TOWER: "PLAYER",
     DEPARTURE: "PLAYER",
+    CENTER: "PLAYER",
   };
   s.config.autoSpawnTraffic = false;
   s.config.readbackErrorProbability = 0;
@@ -84,7 +86,9 @@ export function runMandatoryVerificationSuite(): VerificationTestResult[] {
           gateId: "B12",
           targetRunway: "09L",
           requiresPushback: false,
+          controller: "GROUND",
         });
+        if (ual.flightPlan) ual.flightPlan.clearanceStatus = "CLEARED";
         const startX = ual.x;
         const startY = ual.y;
         advance(s, 1);

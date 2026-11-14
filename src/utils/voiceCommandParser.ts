@@ -238,6 +238,8 @@ function controllerForAction(
   ac: Aircraft
 ): ControllerRole {
   switch (type) {
+    case "IFR_CLEARANCE":
+      return "DELIVERY";
     case "PUSHBACK":
     case "TAXI":
     case "HOLD_POSITION":
@@ -258,9 +260,10 @@ function controllerForAction(
     case "SPEED":
     case "APPROACH":
     case "DIRECT":
-      return "DEPARTURE";
+      return ac.controller === "CENTER" ? "CENTER" : "DEPARTURE";
     case "HANDOFF":
     case "UNABLE":
+    default:
       return ac.controller;
   }
 }

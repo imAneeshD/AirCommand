@@ -1,4 +1,4 @@
-import { deriveFlightMetadata } from "../data/aircraftCatalog.ts";
+import { deriveFlightMetadata, generateIfrFlightPlan } from "../data/aircraftCatalog.ts";
 import {
   createAirportById,
   runwayPoint,
@@ -352,9 +352,11 @@ function createDefaultConfig(activeStation: PlayerRoleMode = "ALL"): SimulationC
     activePlayerStation: activeStation,
     autoManageOtherStations: true,
     stationControl: {
+      DELIVERY: activeStation === "DELIVERY" ? "PLAYER" : "AUTONOMOUS",
       GROUND: activeStation === "GROUND" ? "PLAYER" : "AUTONOMOUS",
       TOWER: activeStation === "TOWER" ? "PLAYER" : "AUTONOMOUS",
       DEPARTURE: activeStation === "DEPARTURE" ? "PLAYER" : "AUTONOMOUS",
+      CENTER: activeStation === "CENTER" ? "PLAYER" : "AUTONOMOUS",
     },
     readbackDelaySeconds: 1.2,
     readbackErrorProbability: 0.05,
@@ -522,7 +524,7 @@ export function createDepartureAircraft(
     squawk: String(2100 + (state.nextIdCounter % 600)).padStart(4, "0"),
     ...meta,
     state: "AT_GATE",
-    controller: opts.controller ?? "GROUND",
+    controller: opts.controller ?? "DELIVERY",
     operationMode: "NORMAL_OPERATION",
     emergencyType: "NONE",
     commStatus: "NORMAL",
@@ -561,6 +563,7 @@ export function createDepartureAircraft(
     lastTransmissionAt: -10,
     trail: [],
   };
+  ac.flightPlan = generateIfrFlightPlan(ac, state.airport);
   state.aircraft[ac.id] = ac;
   if (!state.aircraftOrder.includes(ac.id)) {
     state.aircraftOrder.push(ac.id);
@@ -646,6 +649,7 @@ export function createArrivalAircraft(
     lastTransmissionAt: -10,
     trail: [{ x: opts.x, y: opts.y }],
   };
+  ac.flightPlan = generateIfrFlightPlan(ac, state.airport);
   state.aircraft[ac.id] = ac;
   if (!state.aircraftOrder.includes(ac.id)) {
     state.aircraftOrder.push(ac.id);
@@ -1472,25 +1476,29 @@ export function switchPlayerStation(
   state.config.activePlayerStation = newStation;
   if (newStation === "ALL") {
     state.config.stationControl = {
+      DELIVERY: "AUTONOMOUS",
       GROUND: "AUTONOMOUS",
       TOWER: "AUTONOMOUS",
       DEPARTURE: "AUTONOMOUS",
+      CENTER: "AUTONOMOUS",
     };
     addRadioMessage(state, {
       sender: "CONSOLE",
       recipient: "ATC",
       controller: "TOWER",
       category: "SYSTEM",
-      text: "Switched to ALL NEUTRAL (Auto-All) — Ground, Tower, and Departure all automated; monitoring all frequencies.",
+      text: "Switched to ALL AUTO — Clearance Delivery, Ground, Tower, Departure, and Center all automated; monitoring all frequencies.",
     });
     return;
   }
 
   if (state.config.autoManageOtherStations) {
     state.config.stationControl = {
+      DELIVERY: newStation === "DELIVERY" ? "PLAYER" : "AUTONOMOUS",
       GROUND: newStation === "GROUND" ? "PLAYER" : "AUTONOMOUS",
       TOWER: newStation === "TOWER" ? "PLAYER" : "AUTONOMOUS",
       DEPARTURE: newStation === "DEPARTURE" ? "PLAYER" : "AUTONOMOUS",
+      CENTER: newStation === "CENTER" ? "PLAYER" : "AUTONOMOUS",
     };
   }
 
@@ -1532,9 +1540,11 @@ export function setStationAutoAssist(
   state.config.autoManageOtherStations = enabled;
   if (state.config.activePlayerStation === "ALL") {
     state.config.stationControl = {
+      DELIVERY: "AUTONOMOUS",
       GROUND: "AUTONOMOUS",
       TOWER: "AUTONOMOUS",
       DEPARTURE: "AUTONOMOUS",
+      CENTER: "AUTONOMOUS",
     };
     return;
   }
@@ -1542,9 +1552,11 @@ export function setStationAutoAssist(
     switchPlayerStation(state, state.config.activePlayerStation);
   } else {
     state.config.stationControl = {
+      DELIVERY: "PLAYER",
       GROUND: "PLAYER",
       TOWER: "PLAYER",
       DEPARTURE: "PLAYER",
+      CENTER: "PLAYER",
     };
   }
 }

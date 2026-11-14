@@ -196,6 +196,7 @@ test("Handoff clearance commands plane to contact station with frequency, reads 
     gateId: "B12",
     targetRunway: "09L",
     requiresPushback: false,
+    controller: "GROUND",
   });
 
   // UAL is holding short runway 09L ready for handoff to TOWER
@@ -243,6 +244,7 @@ test("Full handoff coordination: Ground req -> Tower accepts/rejects -> transfer
     gateId: "B12",
     targetRunway: "09L",
     requiresPushback: false,
+    controller: "GROUND",
   });
   ual.state = "HOLDING_SHORT";
   ual.holdingShortReason = "DEPARTURE_RUNWAY";

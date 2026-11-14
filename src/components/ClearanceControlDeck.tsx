@@ -10,6 +10,7 @@ import {
   ChevronUp,
   ClipboardList,
   Compass,
+  FileText,
   Info,
   Lock,
   PanelRightClose,
@@ -877,10 +878,22 @@ export const ClearanceControlDeck: React.FC = () => {
               </span>
             </div>
           ) : (
-            <div className="grid grid-cols-3 gap-1 bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] p-1 rounded-md text-[11px] font-mono">
-              {(["GROUND", "TOWER", "DEPARTURE"] as const).map((role) => {
+            <div className="grid grid-cols-5 gap-1 bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] p-1 rounded-md text-[11px] font-mono">
+              {(["DELIVERY", "GROUND", "TOWER", "DEPARTURE", "CENTER"] as const).map((role) => {
                 const isRoleAuto = sim.config.stationControl[role] === "AUTONOMOUS";
                 const isSelected = deckTab === role;
+                const shortLabel =
+                  role === "DELIVERY"
+                    ? "DEL"
+                    : role === "GROUND"
+                    ? "GND"
+                    : role === "TOWER"
+                    ? "TWR"
+                    : role === "DEPARTURE"
+                    ? ac.flightKind === "ARRIVAL"
+                      ? "APP"
+                      : "DEP"
+                    : "CTR";
                 return (
                   <button
                     key={role}
@@ -891,21 +904,97 @@ export const ClearanceControlDeck: React.FC = () => {
                         : "text-[var(--atc-muted)] hover:text-[var(--atc-text)]"
                     }`}
                   >
-                    <span>
-                      {role === "DEPARTURE"
-                        ? ac.flightKind === "ARRIVAL"
-                          ? "APPROACH"
-                          : "DEPARTURE"
-                        : role}
-                    </span>
+                    <span>{shortLabel}</span>
                     {isRoleAuto && (
-                      <span className="text-[8px] px-1 rounded bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)]">
+                      <span className="text-[7px] px-1 rounded bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)]">
                         AI
                       </span>
                     )}
                   </button>
                 );
               })}
+            </div>
+          )}
+
+          {/* CLEARANCE DELIVERY COMMANDS */}
+          {deckTab === "DELIVERY" && (
+            <div className="space-y-3 font-mono">
+              {/* IFR Flight Plan Summary Card */}
+              <div className="p-3 rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-xs text-[var(--atc-text)] flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5 text-[var(--atc-cyan)]" />
+                    IFR FLIGHT PLAN
+                  </span>
+                  <span
+                    className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
+                      ac.flightPlan?.clearanceStatus === "CLEARED"
+                        ? "bg-emerald-950/80 text-emerald-400 border-emerald-700/80"
+                        : "bg-amber-950/80 text-amber-400 border-amber-700/80 animate-pulse"
+                    }`}
+                  >
+                    {ac.flightPlan?.clearanceStatus === "CLEARED" ? "CLEARED" : "PENDING"}
+                  </span>
+                </div>
+                <div className="text-[11px] space-y-1 text-[var(--atc-text-secondary)]">
+                  <div><strong>Aircraft:</strong> {ac.callsign} · {ac.aircraftType}{ac.flightPlan?.equipmentSuffix ?? "/L"} · TAS {ac.flightPlan?.tasKt ?? 440} kt</div>
+                  <div><strong>Proposed:</strong> {ac.flightPlan?.departureIcao ?? "DEP"} · {ac.flightPlan?.proposedDepartureTimeZ ?? "P2121"}</div>
+                  <div><strong>Route:</strong> {ac.flightPlan?.route ?? `${ac.originIcao ?? "ORIG"} … ${ac.destinationIcao ?? "DEST"}`}</div>
+                  <div><strong>Dest:</strong> {ac.flightPlan?.destinationIcao ?? ac.destinationIcao} ({ac.flightPlan?.destinationName ?? ac.destinationName ?? "Destination"})</div>
+                  <div><strong>Beacon:</strong> {ac.flightPlan?.clearanceStatus === "CLEARED" ? ac.flightPlan.assignedBeacon : "—"}</div>
+                </div>
+                {ac.flightPlan?.crewNotes && (
+                  <div className="p-2 rounded bg-[var(--atc-surface)] text-[10px] text-[var(--atc-muted)] italic border border-[var(--atc-border)]">
+                    "{ac.flightPlan.crewNotes}"
+                  </div>
+                )}
+              </div>
+
+              {/* Clearance Actions */}
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  disabled={isCommandDisabled("IFR_CLEARANCE")}
+                  onClick={() =>
+                    handleIssueClearance(
+                      {
+                        aircraftId: ac.id,
+                        controller: "DELIVERY",
+                        type: "IFR_CLEARANCE",
+                        parameters: { altitude: 5000 },
+                      },
+                      "IFR_CLEARANCE"
+                    )
+                  }
+                  className="w-full py-2.5 px-3 rounded-lg bg-[var(--atc-accent)] hover:brightness-105 text-stone-950 font-bold text-xs flex items-center justify-center gap-2 shadow-sm cursor-pointer disabled:opacity-40"
+                >
+                  <Radio className="w-4 h-4" />
+                  ISSUE IFR CLEARANCE (CRAFT)
+                </button>
+
+                <button
+                  type="button"
+                  disabled={
+                    ac.flightPlan?.clearanceStatus !== "CLEARED" ||
+                    isCommandDisabled("HANDOFF_GND")
+                  }
+                  onClick={() =>
+                    handleIssueClearance(
+                      {
+                        aircraftId: ac.id,
+                        controller: "DELIVERY",
+                        type: "HANDOFF",
+                        parameters: { targetController: "GROUND" },
+                      },
+                      "HANDOFF_GND"
+                    )
+                  }
+                  className="w-full py-2.5 px-3 rounded-lg border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:bg-[var(--atc-emerald-border)] text-[var(--atc-emerald)] font-bold text-xs flex items-center justify-center gap-2 shadow-sm cursor-pointer disabled:opacity-35"
+                >
+                  <ArrowRight className="w-4 h-4" />
+                  CONTACT GROUND (121.90) FOR PUSHBACK
+                </button>
+              </div>
             </div>
           )}
 
@@ -1241,14 +1330,29 @@ export const ClearanceControlDeck: React.FC = () => {
                 return (
                   <div className="space-y-2">
                     {(ac.state === "GO_AROUND" || ac.state === "MISSED_APPROACH") && (
-                      <div className="p-2.5 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-300 text-xs space-y-1">
+                      <div className="p-2.5 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-300 text-xs space-y-1.5">
                         <div className="font-bold flex items-center gap-1.5 text-amber-400">
                           <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                           <span>MISSED APPROACH IN PROGRESS</span>
                         </div>
                         <p className="text-[11px] text-[var(--atc-text-secondary)] leading-relaxed">
-                          Climbing to missed approach altitude ({Math.round((sim.airport.elevationFt + 3000) / 500) * 500} ft). Hand off to Approach (APP 121.25) below for radar vectors back to final approach.
+                          Climbing to missed approach altitude ({Math.round((sim.airport.elevationFt + 3000) / 500) * 500} ft). Hand off to Approach (APP {controllerFrequency("DEPARTURE", sim.airport, "ARRIVAL")}) for radar vectors back to final approach.
                         </p>
+                        <button
+                          onClick={() =>
+                            handleIssueClearance({
+                              aircraftId: ac.id,
+                              controller: "TOWER",
+                              type: "HANDOFF",
+                              parameters: { targetController: "DEPARTURE" },
+                            }, "HANDOFF_APP")
+                          }
+                          disabled={nordoLocked || isCommandDisabled("HANDOFF_APP")}
+                          className="w-full py-1.5 px-2 rounded bg-amber-500/25 hover:bg-amber-500/35 border border-amber-400/60 text-amber-200 font-mono text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                        >
+                          <Radio className="w-3.5 h-3.5" />
+                          HAND OFF TO APPROACH ({controllerFrequency("DEPARTURE", sim.airport, "ARRIVAL")})
+                        </button>
                       </div>
                     )}
 
@@ -1968,6 +2072,110 @@ export const ClearanceControlDeck: React.FC = () => {
               </div>
             );
           })()}
+
+          {/* CENTER / AREA CONTROL COMMANDS */}
+          {deckTab === "CENTER" && (
+            <div className="space-y-3 font-mono">
+              <div className="p-3 rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-xs text-[var(--atc-text)] flex items-center gap-1.5">
+                    <Compass className="w-3.5 h-3.5 text-indigo-400" />
+                    AREA CONTROL / ENROUTE CENTER
+                  </span>
+                  <span className="text-[10px] text-[var(--atc-muted)]">
+                    127.50 MHz
+                  </span>
+                </div>
+                <div className="text-[11px] text-[var(--atc-text-secondary)]">
+                  Altitude: <strong>{Math.round(ac.altitude)} ft</strong> ({ac.cruiseFlightLevel ?? "FL340"}) · Speed: <strong>{Math.round(ac.speed)} kt</strong>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                {ac.flightKind === "DEPARTURE" ? (
+                  <>
+                    <button
+                      type="button"
+                      disabled={isCommandDisabled("CLIMB_FL240")}
+                      onClick={() =>
+                        handleIssueClearance(
+                          {
+                            aircraftId: ac.id,
+                            controller: "CENTER",
+                            type: "ALTITUDE",
+                            parameters: { altitude: 24000 },
+                          },
+                          "CLIMB_FL240"
+                        )
+                      }
+                      className="w-full py-2 px-3 rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface)] hover:border-[var(--atc-accent)] text-[var(--atc-text)] font-bold text-xs flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+                    >
+                      CLIMB & MAINTAIN FL240
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isCommandDisabled("CLIMB_FL340")}
+                      onClick={() =>
+                        handleIssueClearance(
+                          {
+                            aircraftId: ac.id,
+                            controller: "CENTER",
+                            type: "ALTITUDE",
+                            parameters: { altitude: 34000 },
+                          },
+                          "CLIMB_FL340"
+                        )
+                      }
+                      className="w-full py-2 px-3 rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface)] hover:border-[var(--atc-accent)] text-[var(--atc-text)] font-bold text-xs flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+                    >
+                      CLIMB & MAINTAIN FL340
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isCommandDisabled("HANDOFF_ACC")}
+                      onClick={() =>
+                        handleIssueClearance(
+                          {
+                            aircraftId: ac.id,
+                            controller: "CENTER",
+                            type: "HANDOFF",
+                            parameters: { targetController: "ACC" },
+                          },
+                          "HANDOFF_ACC"
+                        )
+                      }
+                      className="w-full py-2.5 px-3 rounded-lg border border-indigo-700/60 bg-indigo-950/60 text-indigo-300 hover:bg-indigo-900/60 font-bold text-xs flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+                    >
+                      <ArrowRight className="w-4 h-4" />
+                      HANDOFF TO NEXT ARTCC / SECTOR EXIT
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      disabled={isCommandDisabled("HANDOFF_DEP")}
+                      onClick={() =>
+                        handleIssueClearance(
+                          {
+                            aircraftId: ac.id,
+                            controller: "CENTER",
+                            type: "HANDOFF",
+                            parameters: { targetController: "DEPARTURE" },
+                          },
+                          "HANDOFF_DEP"
+                        )
+                      }
+                      className="w-full py-2.5 px-3 rounded-lg border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:bg-[var(--atc-emerald-border)] text-[var(--atc-emerald)] font-bold text-xs flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+                    >
+                      <ArrowRight className="w-4 h-4" />
+                      HANDOFF TO APPROACH (124.70)
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
         </Accordion>
         )}
 

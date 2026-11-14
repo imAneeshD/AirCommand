@@ -29,9 +29,11 @@ test("Default role in simulation is ALL (ALL AUTO)", () => {
   const base = createBaseSimulation();
   assert.equal(base.config.activePlayerStation, "ALL");
   assert.deepEqual(base.config.stationControl, {
+    DELIVERY: "AUTONOMOUS",
     GROUND: "AUTONOMOUS",
     TOWER: "AUTONOMOUS",
     DEPARTURE: "AUTONOMOUS",
+    CENTER: "AUTONOMOUS",
   });
 
   const scen = createScenarioSimulation();

@@ -337,8 +337,11 @@ test("MultiplayerRoomService enforces role lock, command dedup, explicit handoff
     // Release DEPARTURE slot so rest of test exercises 2 human + 1 AI cleanly
     env.rooms.handleClientDisconnect({ clientId: "sock_d", playerId: "p_dep", roomCode: code, send: () => {} });
 
-    const depAcId = snap.sim.aircraftOrder.find((id) => snap.sim.aircraft[id]?.controller === "GROUND")!;
+    const depAcId = snap.sim.aircraftOrder.find(
+      (id) => snap.sim.aircraft[id]?.controller === "GROUND" || snap.sim.aircraft[id]?.flightKind === "DEPARTURE"
+    )!;
     assert.ok(depAcId);
+    snap.sim.aircraft[depAcId].controller = "GROUND";
 
     // 1. Role restriction: Ground player cannot issue TOWER takeoff commands
     const forbidden = env.rooms.handleCommand({

@@ -124,10 +124,12 @@ function selectExitHoldShortNode(
 export function updateAircraftStates(state: SimulationState): void {
   const elev = state.airport.elevationFt;
   const baseAlt = Math.round(elev / 500) * 500;
+  const delName = controllerCallsign("DELIVERY", state.airport, "DEPARTURE");
   const gndName = controllerCallsign("GROUND", state.airport);
   const twrName = controllerCallsign("TOWER", state.airport);
   const depName = controllerCallsign("DEPARTURE", state.airport, "DEPARTURE");
   const appName = controllerCallsign("DEPARTURE", state.airport, "ARRIVAL");
+  const ctrName = controllerCallsign("CENTER", state.airport);
 
   for (const id of state.aircraftOrder) {
     const ac = state.aircraft[id];
@@ -136,26 +138,42 @@ export function updateAircraftStates(state: SimulationState): void {
     switch (ac.state) {
       case "AT_GATE": {
         const spokenGate = ac.gateId ? formatGateIcao(ac.gateId) : "";
-        if (ac.requiresPushback) {
+        if (
+          ac.flightKind === "DEPARTURE" &&
+          (!ac.flightPlan || ac.flightPlan.clearanceStatus !== "CLEARED")
+        ) {
+          const dest = ac.destinationName ?? ac.destinationIcao ?? "destination";
           issuePilotRequestIfNeeded(
             state,
             ac,
-            "PUSHBACK",
-            "GROUND",
-            `${gndName}, ${ac.spokenCallsign} at gate ${spokenGate}, request pushback.`,
+            "IFR_CLEARANCE",
+            "DELIVERY",
+            `${delName}, ${ac.spokenCallsign} at gate ${spokenGate}, IFR to ${dest}, ready to copy clearance.`,
             ac.targetRunway,
             ac.gateId
           );
-        } else {
-          issuePilotRequestIfNeeded(
-            state,
-            ac,
-            "TAXI",
-            "GROUND",
-            `${gndName}, ${ac.spokenCallsign} at gate ${spokenGate}, ready to taxi.`,
-            ac.targetRunway,
-            ac.gateId
-          );
+        } else if (ac.controller === "GROUND") {
+          if (ac.requiresPushback) {
+            issuePilotRequestIfNeeded(
+              state,
+              ac,
+              "PUSHBACK",
+              "GROUND",
+              `${gndName}, ${ac.spokenCallsign} at gate ${spokenGate}, request pushback.`,
+              ac.targetRunway,
+              ac.gateId
+            );
+          } else {
+            issuePilotRequestIfNeeded(
+              state,
+              ac,
+              "TAXI",
+              "GROUND",
+              `${gndName}, ${ac.spokenCallsign} at gate ${spokenGate}, ready to taxi.`,
+              ac.targetRunway,
+              ac.gateId
+            );
+          }
         }
         break;
       }

@@ -804,6 +804,119 @@ function runAutonomousDeparture(state: SimulationState): void {
   }
 }
 
+function runAutonomousDelivery(state: SimulationState): void {
+  for (const id of state.aircraftOrder) {
+    const ac = state.aircraft[id];
+    if (!ac || ac.controller !== "DELIVERY" || ac.state === "CRASHED") continue;
+
+    if (handleAutonomousReadbackError(state, ac, "DELIVERY")) continue;
+
+    const pendingRb = getPendingReadbackClearances(ac);
+    if (pendingRb.length > 0) continue;
+
+    // 1. Issue IFR clearance if pending
+    if (ac.flightPlan?.clearanceStatus !== "CLEARED") {
+      submitClearanceDecision(
+        state,
+        {
+          aircraftId: ac.id,
+          controller: "DELIVERY",
+          type: "IFR_CLEARANCE",
+          parameters: { altitude: 5000 },
+        },
+        "AUTONOMOUS"
+      );
+      continue;
+    }
+
+    // 2. Once cleared, hand off to Ground Control for pushback & start
+    if (ac.flightPlan?.clearanceStatus === "CLEARED") {
+      submitClearanceDecision(
+        state,
+        {
+          aircraftId: ac.id,
+          controller: "DELIVERY",
+          type: "HANDOFF",
+          parameters: { targetController: "GROUND" },
+        },
+        "AUTONOMOUS"
+      );
+      continue;
+    }
+  }
+}
+
+function runAutonomousCenter(state: SimulationState): void {
+  const elev = state.airport.elevationFt;
+  for (const id of state.aircraftOrder) {
+    const ac = state.aircraft[id];
+    if (!ac || ac.controller !== "CENTER" || ac.state === "CRASHED") continue;
+
+    if (handleAutonomousReadbackError(state, ac, "CENTER")) continue;
+
+    const pendingRb = getPendingReadbackClearances(ac);
+    if (pendingRb.length > 0) continue;
+
+    if (ac.flightKind === "DEPARTURE") {
+      const dist = Math.hypot(ac.x, ac.y);
+      if (dist >= 18 || ac.altitude >= elev + 8000) {
+        submitClearanceDecision(
+          state,
+          {
+            aircraftId: ac.id,
+            controller: "CENTER",
+            type: "HANDOFF",
+            parameters: { targetController: "ACC" },
+          },
+          "AUTONOMOUS"
+        );
+        continue;
+      }
+      if (ac.assignedAltitude === null || ac.assignedAltitude < 24000) {
+        submitClearanceDecision(
+          state,
+          {
+            aircraftId: ac.id,
+            controller: "CENTER",
+            type: "ALTITUDE",
+            parameters: { altitude: 24000 },
+          },
+          "AUTONOMOUS"
+        );
+        continue;
+      }
+    } else {
+      const dist = Math.hypot(ac.x, ac.y);
+      if (dist <= 14) {
+        submitClearanceDecision(
+          state,
+          {
+            aircraftId: ac.id,
+            controller: "CENTER",
+            type: "HANDOFF",
+            parameters: { targetController: "DEPARTURE" },
+          },
+          "AUTONOMOUS"
+        );
+        continue;
+      }
+      if (ac.assignedAltitude === null || ac.assignedAltitude > elev + 6000) {
+        submitClearanceDecision(
+          state,
+          {
+            aircraftId: ac.id,
+            controller: "CENTER",
+            type: "ALTITUDE",
+            parameters: { altitude: Math.round((elev + 5000) / 500) * 500 },
+          },
+          "AUTONOMOUS"
+        );
+        continue;
+      }
+    }
+  }
+}
+
 /**
  * Autonomous Controllers (Section 26 & 27).
  * Strictly inspect SimulationState and issue ATCClearances via DecisionEngine.
@@ -815,6 +928,9 @@ export function runAutonomousControllers(state: SimulationState): void {
   }
   state.lastAutonomousRunAt = state.time;
 
+  if (state.config.stationControl.DELIVERY === "AUTONOMOUS") {
+    runAutonomousDelivery(state);
+  }
   if (state.config.stationControl.GROUND === "AUTONOMOUS") {
     runAutonomousGround(state);
   }
@@ -823,5 +939,8 @@ export function runAutonomousControllers(state: SimulationState): void {
   }
   if (state.config.stationControl.DEPARTURE === "AUTONOMOUS") {
     runAutonomousDeparture(state);
+  }
+  if (state.config.stationControl.CENTER === "AUTONOMOUS") {
+    runAutonomousCenter(state);
   }
 }

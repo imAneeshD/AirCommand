@@ -168,9 +168,11 @@ export class MultiplayerRoomService {
       difficulty,
       status: "LOBBY",
       slots: {
+        DELIVERY: makeSlot("DELIVERY"),
         GROUND: makeSlot("GROUND"),
         TOWER: makeSlot("TOWER"),
         DEPARTURE: makeSlot("DEPARTURE"),
+        CENTER: makeSlot("CENTER"),
       },
       handoffs: [],
       chat: [],

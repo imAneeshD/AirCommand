@@ -96,6 +96,7 @@ export function getPresetCameraForStation(
   const scaleFactor = span > 1.8 ? 1.5 / span : 1;
 
   switch (role) {
+    case "DELIVERY":
     case "GROUND":
       return {
         centerX: 0.02,
@@ -114,7 +115,14 @@ export function getPresetCameraForStation(
         centerY: 0,
         pixelsPerNm: Math.max(24, Math.round(36 * scaleFactor)),
       };
+    case "CENTER":
+      return {
+        centerX: 0,
+        centerY: 0,
+        pixelsPerNm: Math.max(16, Math.round(20 * scaleFactor)),
+      };
     case "ALL":
+    default:
       return {
         centerX: 0.02,
         centerY: 0.01,
