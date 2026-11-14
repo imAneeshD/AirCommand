@@ -169,6 +169,29 @@ class SpeechRecognitionPttController {
 
     return transcript;
   }
+
+  /**
+   * Immediately aborts any ongoing speech recognition and cancels callbacks.
+   * Used when switching controller, closing screen, or navigating away.
+   */
+  public cancel(): void {
+    this.active = false;
+    this.finalized = true;
+    if (this.stopTimeout) {
+      clearTimeout(this.stopTimeout);
+      this.stopTimeout = null;
+    }
+    const rec = this.recognition;
+    this.recognition = null;
+    this.callbacks = {};
+    if (rec) {
+      try {
+        rec.abort?.();
+      } catch {
+        // Safe ignore
+      }
+    }
+  }
 }
 
 export const speechPtt = new SpeechRecognitionPttController();

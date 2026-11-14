@@ -44,6 +44,7 @@ import {
 import { offlineDb } from "../utils/offlineDb.ts";
 import { convertAirportBundleToLayout } from "../utils/osmToAirport.ts";
 import { radioAudio } from "../utils/radioAudio.ts";
+import { speechPtt } from "../utils/speechRecognitionPtt.ts";
 import {
   clearSavedAirportId,
   loadSavedAirportId,
@@ -228,6 +229,7 @@ interface AtcStore {
   ) => void;
   openAirportSelector: () => void;
   forgetSavedAirport: () => void;
+  removeLocalOfflineMap: (icao?: string) => Promise<void>;
   togglePause: () => void;
   setTimeScale: (scale: 1 | 2 | 4) => void;
   issueClearance: (
@@ -622,9 +624,8 @@ async function resolveAirportBundle(
 export const useAtcStore = create<AtcStore>((set, get) => ({
   appMode: initialSavedAirport ? "SIMULATION" : "GLOBAL_MAP",
   setAppMode: (mode) => {
-    if (mode !== "SIMULATION") {
-      radioAudio.stopAllSpeech();
-    }
+    radioAudio.stopAllSpeech();
+    speechPtt.cancel();
     set({ appMode: mode, showAirportSelector: mode === "GLOBAL_MAP" });
   },
   isOnline: typeof navigator === "undefined" ? true : navigator.onLine,
@@ -1187,6 +1188,8 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
   },
 
   claimMultiplayerRole: (role) => {
+    radioAudio.stopAllSpeech();
+    speechPtt.cancel();
     ensureWsClient(set, get).claimRole(role, get().playerName);
   },
 
@@ -1331,6 +1334,8 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
   },
 
   claimAircraftStation: (aircraftId, targetController) => {
+    radioAudio.stopAllSpeech();
+    speechPtt.cancel();
     const { sim, roomState } = get();
     const ac = sim.aircraft[aircraftId];
     if (!ac) return;
@@ -1457,6 +1462,9 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
 
   selectAircraft: (id) => {
     const { sim } = get();
+    if (sim.selectedAircraftId !== id) {
+      radioAudio.stopAllSpeech();
+    }
     sim.selectedAircraftId = id;
     set((s) => ({ tickVersion: s.tickVersion + 1, hoverPreviewRoute: null }));
   },
@@ -1493,6 +1501,7 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
     }
 
     radioAudio.stopAllSpeech();
+    speechPtt.cancel();
     radioAudio.syncMode = role !== "ALL";
     switchPlayerStation(sim, role);
     set((s) => ({
@@ -1622,6 +1631,7 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
   openAirportSelector: () => {
     const { sim } = get();
     radioAudio.stopAllSpeech();
+    speechPtt.cancel();
     sim.paused = true;
     set((s) => ({
       appMode: "GLOBAL_MAP",
@@ -1631,8 +1641,34 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
   },
 
   forgetSavedAirport: () => {
+    void get().removeLocalOfflineMap();
+  },
+
+  removeLocalOfflineMap: async (icaoInput?: string) => {
+    const targetIcao = (icaoInput || get().savedAirportId || get().sim.airport.icao || "").toUpperCase();
+    if (targetIcao) {
+      await offlineDb.removeCachedGeometry(targetIcao);
+    }
     clearSavedAirportId();
-    set({ savedAirportId: null });
+    radioAudio.stopAllSpeech();
+    speechPtt.cancel();
+
+    const isCurrent = get().sim.airport.icao.toUpperCase() === targetIcao;
+    set((s) => ({
+      savedAirportId: null,
+      selectedAirportGeoJson: null,
+      sim: isCurrent
+        ? createScenarioSimulation("NORMAL_OPS", "ALL", "KAST", undefined, { randomize: true })
+        : s.sim,
+      tickVersion: s.tickVersion + 1,
+      lastFeedback: {
+        ok: true,
+        text: targetIcao
+          ? `Removed local offline map cache for ${targetIcao}. Reverted to clean configuration.`
+          : "Removed local offline map cache.",
+        at: s.sim.time,
+      },
+    }));
   },
 
   togglePause: () => {

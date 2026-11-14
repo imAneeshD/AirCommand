@@ -266,6 +266,60 @@ class OfflineDataService {
     });
   }
 
+  /**
+   * Removes cached custom geometry and offline edits for a specific airport ICAO.
+   */
+  async removeCachedGeometry(icaoInput: string): Promise<void> {
+    const icao = icaoInput.toUpperCase();
+    this.memoryGeometries.delete(icao);
+    const existing = this.memoryAirports.get(icao);
+    if (existing) {
+      this.memoryAirports.set(icao, {
+        ...existing,
+        dataQuality: "Verified",
+        hasOsmGeometry: false,
+        geoJson: undefined,
+      });
+    }
+
+    const db = await this.openDb();
+    if (!db) return;
+
+    await new Promise<void>((resolve) => {
+      try {
+        const tx = db.transaction([STORE_GEOMETRIES, STORE_AIRPORTS], "readwrite");
+        tx.objectStore(STORE_GEOMETRIES).delete(icao);
+        if (existing) {
+          tx.objectStore(STORE_AIRPORTS).put(this.memoryAirports.get(icao));
+        }
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      } catch {
+        resolve();
+      }
+    });
+  }
+
+  /**
+   * Clears all cached offline geometries and reset to seed/catalog.
+   */
+  async clearAllOfflineData(): Promise<void> {
+    this.memoryGeometries.clear();
+    const db = await this.openDb();
+    if (!db) return;
+
+    await new Promise<void>((resolve) => {
+      try {
+        const tx = db.transaction([STORE_GEOMETRIES], "readwrite");
+        tx.objectStore(STORE_GEOMETRIES).clear();
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      } catch {
+        resolve();
+      }
+    });
+  }
+
   getBundledFallbackAirport(icaoInput: string): AirportRecord | null {
     return this.memoryAirports.get(icaoInput.toUpperCase()) ?? null;
   }

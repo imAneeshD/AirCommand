@@ -11,6 +11,8 @@ import { RadioCommsLog } from "./components/RadioCommsLog.tsx";
 import { TopBar } from "./components/TopBar.tsx";
 import { VerificationModal } from "./components/VerificationModal.tsx";
 import { useAtcStore } from "./store/atcStore.ts";
+import { radioAudio } from "./utils/radioAudio.ts";
+import { speechPtt } from "./utils/speechRecognitionPtt.ts";
 
 export function App() {
   const appMode = useAtcStore((s) => s.appMode);
@@ -30,6 +32,30 @@ export function App() {
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
+
+  // Immediately stop all speech synthesis & voice input when screen is closed, minimized or backgrounded
+  useEffect(() => {
+    const handleTeardown = () => {
+      radioAudio.stopAllSpeech();
+      speechPtt.cancel();
+    };
+    const handleVisibility = () => {
+      if (document.hidden) {
+        handleTeardown();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("beforeunload", handleTeardown);
+    window.addEventListener("pagehide", handleTeardown);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("beforeunload", handleTeardown);
+      window.removeEventListener("pagehide", handleTeardown);
+      handleTeardown();
+    };
+  }, []);
 
   // Hydrate saved real-world airport & track online/offline state
   useEffect(() => {
