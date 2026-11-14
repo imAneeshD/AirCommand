@@ -461,6 +461,10 @@ export const FlightStripRack: React.FC = () => {
     const ctrl = controllerBadge(ac.controller, ac.flightKind);
     const fp = ac.flightPlan;
     const isCleared = fp ? fp.clearanceStatus === "CLEARED" : ac.flightKind === "ARRIVAL";
+    const isControllerAuto =
+      sim.config.stationControl[ac.controller] === "AUTONOMOUS" ||
+      sim.config.activePlayerStation === "ALL" ||
+      (sim.config.autoManageOtherStations && sim.config.activePlayerStation !== ac.controller);
     const hasReq = Boolean(
       ac.pendingRequest &&
       !ac.pendingRequest.resolved &&
@@ -659,10 +663,14 @@ export const FlightStripRack: React.FC = () => {
             <button
               type="button"
               onClick={(e) => handleApprovePilotRequest(e, ac)}
-              title={`Approve pilot request (${ac.pendingRequest.type})`}
+              title={
+                isControllerAuto
+                  ? `Automated controller is processing (${ac.pendingRequest.type}). Click to approve immediately.`
+                  : `Approve pilot request (${ac.pendingRequest.type})`
+              }
               className="h-5 px-2.5 rounded border border-[var(--atc-emerald)] bg-transparent hover:bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] font-mono font-bold text-[9px] tracking-wider uppercase inline-flex items-center justify-center text-center shrink-0 transition-colors cursor-pointer select-none pt-[1px]"
             >
-              APPROVE
+              {isControllerAuto ? "AUTO..." : "APPROVE"}
             </button>
           </div>
         )}

@@ -65,9 +65,19 @@ function isFinalApproachCrowded(
 
     // IMMEDIATE RECIPROCAL OPPOSING APPROACH CHECK:
     // If another aircraft is approaching from the opposite reciprocal end of this physical runway,
-    // that is a critical direct head-on conflict!
+    // protect the runway if it is on final, landing, or within short approach:
     if (oppId && targetRwy === oppId) {
-      return true;
+      const oppRwy = state.airport.runways[oppId];
+      const oppDist = oppRwy ? -alongRunwayNm(oppRwy, other.x, other.y) : 99;
+      if (
+        other.state === "CLEARED_TO_LAND" ||
+        other.state === "LANDING" ||
+        other.state === "FINAL" ||
+        (oppDist > -0.3 && oppDist < Math.max(minDistanceNm, 4.5))
+      ) {
+        return true;
+      }
+      continue;
     }
 
     if (targetRwy !== runway) continue;
@@ -995,17 +1005,21 @@ function runAutonomousCenter(state: SimulationState): void {
 function autoAcceptHandoffsForAutonomousControllers(state: SimulationState): void {
   if (!state.handoffs || state.handoffs.length === 0) return;
   for (const h of state.handoffs) {
-    if (
-      h.status === "PENDING" &&
+    const isTargetAuto =
       h.toController !== "ACC" &&
-      state.config.stationControl?.[h.toController as ControllerRole] === "AUTONOMOUS"
-    ) {
+      (state.config.stationControl?.[h.toController as ControllerRole] === "AUTONOMOUS" ||
+        state.config.activePlayerStation === "ALL" ||
+        (state.config.autoManageOtherStations && state.config.activePlayerStation !== h.toController));
+
+    if (h.status === "PENDING" && isTargetAuto) {
       h.status = "ACCEPTED";
       h.respondedAt = state.time;
       const ac = state.aircraft[h.aircraftId];
-      if (ac && ac.controller !== h.toController) {
-        ac.controller = h.toController as ControllerRole;
-        ac.lastTransmissionAt = state.time;
+      if (ac) {
+        if (ac.controller !== h.toController) {
+          ac.controller = h.toController as ControllerRole;
+          ac.lastTransmissionAt = state.time;
+        }
         if (h.toController === "TOWER" && ac.flightKind === "DEPARTURE" && ac.state === "HOLDING_SHORT") {
           const targetName = controllerCallsign("TOWER", state.airport, ac.flightKind);
           const msgText = `${targetName}, ${ac.spokenCallsign}, holding short runway ${runwaySpokenName(ac.targetRunway)}, ready for departure.`;
@@ -1031,10 +1045,11 @@ function autoAcceptHandoffsForAutonomousControllers(state: SimulationState): voi
           const msgText = `${targetName}, ${ac.spokenCallsign}, clear of runway, request taxi to gate.`;
           ac.pendingRequest = {
             id: nextId(state, "req"),
-            type: "TAXI",
+            type: "GATE_TAXI",
             controller: "GROUND",
             message: msgText,
             requestedAt: state.time,
+            gate: ac.gateId,
             resolved: false,
           };
           addRadioMessage(state, {
@@ -1052,6 +1067,250 @@ function autoAcceptHandoffsForAutonomousControllers(state: SimulationState): voi
 }
 
 /**
+ * Automatically processes and approves pilot requests addressed to autonomous/AI positions.
+ * Ensures that whenever a station is in AUTO (or when a player controls one station and other stations are automated),
+ * aircraft holding short, requesting taxi, pushback, or approach are cleared automatically without blocking traffic queues.
+ */
+function autoProcessPilotRequestsForAutonomousControllers(state: SimulationState): void {
+  const elev = state.airport.elevationFt;
+  const baseAlt = Math.round(elev / 500) * 500;
+
+  for (const id of state.aircraftOrder) {
+    const ac = state.aircraft[id];
+    if (
+      !ac ||
+      ac.commStatus === "RADIO_FAILURE" ||
+      isBusyWithReadback(ac) ||
+      !ac.pendingRequest ||
+      ac.pendingRequest.resolved
+    ) {
+      continue;
+    }
+
+    const req = ac.pendingRequest;
+    const ctrl = req.controller;
+    const isCtrlAuto =
+      state.config.stationControl?.[ctrl] === "AUTONOMOUS" ||
+      state.config.activePlayerStation === "ALL" ||
+      (state.config.autoManageOtherStations && state.config.activePlayerStation !== ctrl);
+
+    if (!isCtrlAuto) continue;
+
+    // 1. TAKEOFF under Autonomous TOWER
+    if (ctrl === "TOWER" && req.type === "TAKEOFF") {
+      if (ac.state === "HOLDING_SHORT") {
+        const rwy = (req.runway ?? ac.targetRunway) as RunwayId;
+        const safeTakeoff =
+          !isRunwayOccupied(state, rwy, ac.id).occupied &&
+          !isFinalApproachCrowded(state, rwy, 4.2, ac.id) &&
+          !hasRecentDepartureClimbOnRunway(state, rwy, ac.id);
+
+        if (safeTakeoff) {
+          const res = submitClearanceDecision(
+            state,
+            {
+              aircraftId: ac.id,
+              controller: "TOWER",
+              type: "TAKEOFF",
+              parameters: { runway: rwy, initialAltitude: baseAlt + 3000 },
+            },
+            "AUTONOMOUS"
+          );
+          if (res.ok) {
+            req.resolved = true;
+          }
+        } else {
+          const safeLineUp =
+            !isRunwayActiveForTakeoffOrCrossing(state, rwy, ac.id) &&
+            !isFinalApproachCrowded(state, rwy, 3.2, ac.id);
+          if (safeLineUp) {
+            const res = submitClearanceDecision(
+              state,
+              {
+                aircraftId: ac.id,
+                controller: "TOWER",
+                type: "LINE_UP",
+                parameters: { runway: rwy },
+              },
+              "AUTONOMOUS"
+            );
+            if (res.ok) {
+              req.resolved = true;
+            }
+          }
+        }
+      }
+      continue;
+    }
+
+    // 2. PUSHBACK under Autonomous GROUND
+    if (ctrl === "GROUND" && req.type === "PUSHBACK") {
+      if (ac.state === "AT_GATE") {
+        if (isRampClearForPushback(state, ac)) {
+          const res = submitClearanceDecision(
+            state,
+            {
+              aircraftId: ac.id,
+              controller: "GROUND",
+              type: "PUSHBACK",
+              parameters: { pushbackDirection: "TAXIWAY_A" },
+            },
+            "AUTONOMOUS"
+          );
+          if (res.ok) {
+            req.resolved = true;
+          }
+        }
+      }
+      continue;
+    }
+
+    // 3. TAXI / GATE_TAXI under Autonomous GROUND
+    if (ctrl === "GROUND" && (req.type === "TAXI" || req.type === "GATE_TAXI")) {
+      const isArrival = ac.flightKind === "ARRIVAL" || ac.state === "STOPPED_ON_RUNWAY";
+      const startNodeId = ac.currentNodeId ?? findNearestGroundNodeId(state.airport, ac.x, ac.y);
+      if (startNodeId) {
+        const routes = getSuggestedTaxiRoutes(
+          state.airport,
+          startNodeId,
+          ac.targetRunway,
+          ac.gateId,
+          isArrival,
+          state,
+          ac.id
+        );
+        const best = routes.find((r) => r.conflictLevel === "CLEAR") ?? routes[0];
+        if (best) {
+          const res = submitClearanceDecision(
+            state,
+            {
+              aircraftId: ac.id,
+              controller: "GROUND",
+              type: "TAXI",
+              parameters: {
+                routeNodeIds: best.nodeIds,
+                routeTaxiways: best.taxiways,
+                ...(isArrival ? { gate: ac.gateId } : { runway: ac.targetRunway }),
+              },
+            },
+            "AUTONOMOUS"
+          );
+          if (res.ok) {
+            req.resolved = true;
+          }
+        }
+      }
+      continue;
+    }
+
+    // 4. CROSS_RUNWAY under Autonomous GROUND or TOWER
+    if (req.type === "CROSS_RUNWAY") {
+      const rwy = (req.runway ?? ac.holdingAtRunway ?? ac.targetRunway) as RunwayId;
+      const safeToCross =
+        !isRunwayActiveForTakeoffOrCrossing(state, rwy, ac.id) &&
+        !isFinalApproachCrowded(state, rwy, 3.2, ac.id);
+      if (safeToCross) {
+        const res = submitClearanceDecision(
+          state,
+          {
+            aircraftId: ac.id,
+            controller: ctrl,
+            type: "CROSS_RUNWAY",
+            parameters: { runway: rwy },
+          },
+          "AUTONOMOUS"
+        );
+        if (res.ok) {
+          req.resolved = true;
+        }
+      }
+      continue;
+    }
+
+    // 5. IFR_CLEARANCE under Autonomous DELIVERY
+    if (ctrl === "DELIVERY" && req.type === "IFR_CLEARANCE") {
+      const res = submitClearanceDecision(
+        state,
+        {
+          aircraftId: ac.id,
+          controller: "DELIVERY",
+          type: "IFR_CLEARANCE",
+        },
+        "AUTONOMOUS"
+      );
+      if (res.ok) {
+        req.resolved = true;
+      }
+      continue;
+    }
+
+    // 6. APPROACH_CLEARANCE under Autonomous DEPARTURE/APPROACH or TOWER
+    if (
+      (ctrl === "DEPARTURE" || ctrl === "TOWER") &&
+      (req.type === "APPROACH_CLEARANCE" || req.type === "APPROACH_VECTORS" || req.type === "RUNWAY_CHANGE")
+    ) {
+      const rwy = (req.runway ?? ac.assignedApproach ?? ac.targetRunway) as RunwayId;
+      const res = submitClearanceDecision(
+        state,
+        {
+          aircraftId: ac.id,
+          controller: ctrl,
+          type: "APPROACH",
+          parameters: { runway: rwy },
+        },
+        "AUTONOMOUS"
+      );
+      if (res.ok) {
+        req.resolved = true;
+      }
+      continue;
+    }
+
+    // 7. LANDING under Autonomous TOWER
+    if (ctrl === "TOWER" && req.type === "LANDING") {
+      const rwy = (req.runway ?? ac.assignedApproach ?? ac.targetRunway) as RunwayId;
+      const rwyOccupied = isRunwayActiveForTakeoffOrCrossing(state, rwy, ac.id);
+      const aheadLanding = isFinalApproachCrowded(state, rwy, 2.5, ac.id);
+      if (!rwyOccupied && !aheadLanding) {
+        const res = submitClearanceDecision(
+          state,
+          {
+            aircraftId: ac.id,
+            controller: "TOWER",
+            type: "LAND",
+            parameters: { runway: rwy },
+          },
+          "AUTONOMOUS"
+        );
+        if (res.ok) {
+          req.resolved = true;
+        }
+      }
+      continue;
+    }
+
+    // 8. CLIMB_HIGHER under Autonomous DEPARTURE or CENTER
+    if ((ctrl === "DEPARTURE" || ctrl === "CENTER") && req.type === "CLIMB_HIGHER") {
+      const newAlt = Math.min(35000, (ac.assignedAltitude ?? ac.altitude) + 4000);
+      const res = submitClearanceDecision(
+        state,
+        {
+          aircraftId: ac.id,
+          controller: ctrl,
+          type: "ALTITUDE",
+          parameters: { altitude: newAlt },
+        },
+        "AUTONOMOUS"
+      );
+      if (res.ok) {
+        req.resolved = true;
+      }
+      continue;
+    }
+  }
+}
+
+/**
  * Autonomous Controllers (Section 26 & 27).
  * Strictly inspect SimulationState and issue ATCClearances via DecisionEngine.
  * Never move aircraft directly.
@@ -1064,6 +1323,9 @@ export function runAutonomousControllers(state: SimulationState): void {
 
   // 0. Auto-accept any handoffs addressed to automated controllers
   autoAcceptHandoffsForAutonomousControllers(state);
+
+  // Auto-process and auto-approve any pilot requests addressed to automated controllers
+  autoProcessPilotRequestsForAutonomousControllers(state);
 
   if (state.config.stationControl.DELIVERY === "AUTONOMOUS") {
     runAutonomousDelivery(state);
