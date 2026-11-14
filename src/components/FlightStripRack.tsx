@@ -431,7 +431,7 @@ export const FlightStripRack: React.FC = () => {
         <div className="mt-1 flex items-center justify-between gap-1 text-[10px] font-mono">
           <div className="flex items-center gap-1.5 truncate">
             {ac.flightKind === "DEPARTURE" && !isCleared && (
-              <span className="px-1 py-0.2 rounded text-[8px] font-bold border bg-amber-950/60 text-amber-400 border-amber-700/60 animate-pulse">
+              <span className="px-1 py-0.2 rounded text-[8px] font-bold border bg-[var(--atc-amber-bg)] text-[var(--atc-amber)] border-[var(--atc-amber-border)] animate-pulse">
                 IFR PENDING
               </span>
             )}
@@ -475,7 +475,7 @@ export const FlightStripRack: React.FC = () => {
                 e.stopPropagation();
                 respondToHandoff(ho.id, true);
               }}
-              className="h-5 px-2.5 rounded border border-emerald-400/80 bg-transparent hover:bg-emerald-500/10 hover:border-emerald-300 text-emerald-400 font-mono font-bold text-[9px] tracking-wider uppercase inline-flex items-center justify-center text-center shrink-0 transition-colors cursor-pointer select-none gap-1 pt-[1px]"
+              className="h-5 px-2.5 rounded border border-[var(--atc-emerald)] bg-transparent hover:bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] font-mono font-bold text-[9px] tracking-wider uppercase inline-flex items-center justify-center text-center shrink-0 transition-colors cursor-pointer select-none gap-1 pt-[1px]"
             >
               <CheckCircle className="w-2.5 h-2.5" />
               ACCEPT
@@ -485,9 +485,9 @@ export const FlightStripRack: React.FC = () => {
 
         {/* Pilot Request Banner with Inline Approval Button (Only shown in strip as requested) */}
         {!ac.hasReadbackError && pendingRb.length === 0 && hasReq && ac.pendingRequest && !ho && (
-          <div className="mt-1.5 px-2 py-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-300 flex items-center justify-between gap-2 shadow-sm">
-            <span className="flex items-center gap-1.5 font-mono text-[10px] font-bold text-amber-300 truncate">
-              <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-400" />
+          <div className="mt-1.5 px-2 py-1.5 rounded-md border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] flex items-center justify-between gap-2 shadow-sm">
+            <span className="flex items-center gap-1.5 font-mono text-[10px] font-bold text-[var(--atc-amber)] truncate">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-[var(--atc-amber)]" />
               <span className="truncate">
                 REQ: {ac.pendingRequest.type}
                 {ac.pendingRequest.runway
@@ -501,7 +501,7 @@ export const FlightStripRack: React.FC = () => {
               type="button"
               onClick={(e) => handleApprovePilotRequest(e, ac)}
               title={`Approve pilot request (${ac.pendingRequest.type})`}
-              className="h-5 px-2.5 rounded border border-emerald-400/80 bg-transparent hover:bg-emerald-500/10 hover:border-emerald-300 text-emerald-400 font-mono font-bold text-[9px] tracking-wider uppercase inline-flex items-center justify-center text-center shrink-0 transition-colors cursor-pointer select-none pt-[1px]"
+              className="h-5 px-2.5 rounded border border-[var(--atc-emerald)] bg-transparent hover:bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] font-mono font-bold text-[9px] tracking-wider uppercase inline-flex items-center justify-center text-center shrink-0 transition-colors cursor-pointer select-none pt-[1px]"
             >
               APPROVE
             </button>
