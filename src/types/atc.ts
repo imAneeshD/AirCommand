@@ -701,6 +701,7 @@ export interface SimulationState {
   nextIdCounter: number;
   lastAutonomousRunAt: number;
   lastTrafficSpawnAt: number;
+  lastFunnyMomentAt?: number;
   liveSnapshotMeta?: {
     airportIcao: string;
     fetchedAtMs: number;
