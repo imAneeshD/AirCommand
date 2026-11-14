@@ -23,6 +23,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { getRunwayExitOptions, getSuggestedTaxiRoutes } from "../data/asteriaAirport.ts";
+import { hashCallsign } from "../data/aircraftCatalog.ts";
 import { getAircraftPhaseLabel } from "../engine/simulation.ts";
 import {
   canAircraftExecuteAction,
@@ -80,6 +81,23 @@ export const ClearanceControlDeck: React.FC = () => {
   const [customHeading, setCustomHeading] = useState("090");
   const [showAltTaxiways, setShowAltTaxiways] = useState(false);
 
+  // Clearance Delivery Station Parameters
+  const [delRwy, setDelRwy] = useState<RunwayId>("09L");
+  const [delSid, setDelSid] = useState<string>("");
+  const [delAltitude, setDelAltitude] = useState<number>(5000);
+  const [delSquawk, setDelSquawk] = useState<string>("");
+
+  const pendingDeliveries = useMemo(() => {
+    return sim.aircraftOrder
+      .map((id) => sim.aircraft[id])
+      .filter(
+        (a) =>
+          a &&
+          a.flightKind === "DEPARTURE" &&
+          (!a.flightPlan || a.flightPlan.clearanceStatus !== "CLEARED")
+      );
+  }, [sim.aircraftOrder, sim.aircraft, sim.time]);
+
   // Track commands clicked by the player for each aircraft + state, to provide immediate tactile feedback (disabling the button upon click)
   const [clickedCommands, setClickedCommands] = useState<Record<string, { state: string; at: number }>>({});
 
@@ -128,6 +146,22 @@ export const ClearanceControlDeck: React.FC = () => {
       const g = computeDepAppGuidance(sim.airport, ac, rwyId);
       setCustomHeading(String(g.recommendedHeading).padStart(3, "0"));
       setTurnDir(g.recommendedTurnDirection);
+
+      // Delivery parameters initialization
+      setDelRwy(ac.targetRunway);
+      const sid =
+        ac.flightPlan?.sidFix ??
+        ac.assignedDepartureFix ??
+        sim.airport.departureFixIds?.[0] ??
+        "SID 1A";
+      setDelSid(sid);
+      setDelAltitude(5000);
+      setDelSquawk(
+        ac.squawk ||
+          (ac.flightPlan?.assignedBeacon && ac.flightPlan.assignedBeacon !== "—"
+            ? ac.flightPlan.assignedBeacon
+            : String(2100 + (hashCallsign(ac.callsign) % 800)).padStart(4, "0"))
+      );
     }
   }, [ac?.id, ac?.controller, ac?.state, ac?.targetRunway, ac?.assignedApproach, activeRole]);
 
@@ -212,15 +246,55 @@ export const ClearanceControlDeck: React.FC = () => {
             <PanelRightClose className="w-3.5 h-3.5" />
           </button>
         </div>
-        <div className="flex-1 p-5 flex flex-col justify-center items-center text-center">
-          <div className="w-11 h-11 rounded-full bg-[var(--atc-surface)] border border-[var(--atc-border)] flex items-center justify-center mb-3 shadow-[var(--atc-shadow)]">
-            <Radio className="w-5 h-5 text-[var(--atc-muted)]" />
+        {lockedRole === "DELIVERY" ? (
+          <div className="flex-1 p-3 overflow-y-auto space-y-2 font-mono">
+            <div className="flex items-center justify-between text-xs font-bold text-[var(--atc-text)] pb-1.5 border-b border-[var(--atc-border)]">
+              <span className="flex items-center gap-1.5 uppercase tracking-wider text-[var(--atc-accent)]">
+                <FileText className="w-3.5 h-3.5" />
+                Clearance Queue
+              </span>
+              <span className="text-[10px] text-[var(--atc-muted)] font-normal">
+                {pendingDeliveries.length} awaiting copy
+              </span>
+            </div>
+
+            {pendingDeliveries.length === 0 ? (
+              <div className="p-4 text-center text-xs text-[var(--atc-muted)] space-y-1">
+                <CheckCircle className="w-5 h-5 mx-auto text-[var(--atc-emerald)] mb-1" />
+                <div className="font-semibold text-[var(--atc-text)]">All Clearances Issued</div>
+                <div className="text-[10px]">No departures currently awaiting IFR copy.</div>
+              </div>
+            ) : (
+              pendingDeliveries.map((dep) => (
+                <div
+                  key={dep.id}
+                  onClick={() => selectAircraft(dep.id)}
+                  className="p-2.5 rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface)] hover:border-[var(--atc-accent-border)] hover:bg-[var(--atc-surface-alt)] cursor-pointer transition-all space-y-1 shadow-xs"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-xs text-[var(--atc-text)]">{dep.callsign}</span>
+                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-950/80 text-amber-400 border border-amber-700/80 animate-pulse">
+                      PENDING
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-[var(--atc-muted)]">
+                    {dep.aircraftType} · Stand {dep.gateId ? `GATE ${dep.gateId}` : "RAMP"} → {dep.destinationIcao ?? "DEST"}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
-          <div className="text-sm font-semibold text-[var(--atc-text)]">No Aircraft Selected</div>
-          <div className="text-xs text-[var(--atc-muted)] mt-1 max-w-[230px] leading-relaxed">
-            Click any aircraft on the chart or flight strips to inspect telemetry and issue clearances.
+        ) : (
+          <div className="flex-1 p-5 flex flex-col justify-center items-center text-center">
+            <div className="w-11 h-11 rounded-full bg-[var(--atc-surface)] border border-[var(--atc-border)] flex items-center justify-center mb-3 shadow-[var(--atc-shadow)]">
+              <Radio className="w-5 h-5 text-[var(--atc-muted)]" />
+            </div>
+            <div className="text-sm font-semibold text-[var(--atc-text)]">No Aircraft Selected</div>
+            <div className="text-xs text-[var(--atc-muted)] mt-1 max-w-[230px] leading-relaxed">
+              Click any aircraft on the chart or flight strips to inspect telemetry and issue clearances.
+            </div>
           </div>
-        </div>
+        )}
       </aside>
     );
   }
@@ -919,30 +993,69 @@ export const ClearanceControlDeck: React.FC = () => {
           {/* CLEARANCE DELIVERY COMMANDS */}
           {deckTab === "DELIVERY" && (
             <div className="space-y-3 font-mono">
-              {/* IFR Flight Plan Summary Card */}
-              <div className="p-3 rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-xs text-[var(--atc-text)] flex items-center gap-1.5">
-                    <FileText className="w-3.5 h-3.5 text-[var(--atc-cyan)]" />
-                    IFR FLIGHT PLAN
+              {/* 1. Filed Flight Plan Card */}
+              <div className="p-3 rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] space-y-2.5">
+                <div className="flex items-center justify-between border-b border-[var(--atc-border)] pb-2">
+                  <span className="font-bold text-xs text-[var(--atc-text)] flex items-center gap-1.5 uppercase tracking-wider">
+                    <FileText className="w-3.5 h-3.5 text-[var(--atc-accent)]" />
+                    Clearance Delivery · IFR Plan
                   </span>
                   <span
-                    className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
+                    className={`text-[9px] font-bold px-2 py-0.5 rounded border ${
                       ac.flightPlan?.clearanceStatus === "CLEARED"
                         ? "bg-emerald-950/80 text-emerald-400 border-emerald-700/80"
                         : "bg-amber-950/80 text-amber-400 border-amber-700/80 animate-pulse"
                     }`}
                   >
-                    {ac.flightPlan?.clearanceStatus === "CLEARED" ? "CLEARED" : "PENDING"}
+                    {ac.flightPlan?.clearanceStatus === "CLEARED" ? "IFR CLEARED" : "PENDING CLEARANCE"}
                   </span>
                 </div>
-                <div className="text-[11px] space-y-1 text-[var(--atc-text-secondary)]">
-                  <div><strong>Aircraft:</strong> {ac.callsign} · {ac.aircraftType}{ac.flightPlan?.equipmentSuffix ?? "/L"} · TAS {ac.flightPlan?.tasKt ?? 440} kt</div>
-                  <div><strong>Proposed:</strong> {ac.flightPlan?.departureIcao ?? "DEP"} · {ac.flightPlan?.proposedDepartureTimeZ ?? "P2121"}</div>
-                  <div><strong>Route:</strong> {ac.flightPlan?.route ?? `${ac.originIcao ?? "ORIG"} … ${ac.destinationIcao ?? "DEST"}`}</div>
-                  <div><strong>Dest:</strong> {ac.flightPlan?.destinationIcao ?? ac.destinationIcao} ({ac.flightPlan?.destinationName ?? ac.destinationName ?? "Destination"})</div>
-                  <div><strong>Beacon:</strong> {ac.flightPlan?.clearanceStatus === "CLEARED" ? ac.flightPlan.assignedBeacon : "—"}</div>
+
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <div className="p-2 rounded bg-[var(--atc-surface)] border border-[var(--atc-border)]">
+                    <div className="text-[9px] uppercase tracking-wider text-[var(--atc-muted)]">Callsign & Type</div>
+                    <div className="font-bold text-[var(--atc-text)]">{ac.callsign}</div>
+                    <div className="text-[10px] text-[var(--atc-muted)]">
+                      {ac.aircraftType}{ac.flightPlan?.equipmentSuffix ?? "/L"} · TAS {ac.flightPlan?.tasKt ?? 440}kt
+                    </div>
+                  </div>
+
+                  <div className="p-2 rounded bg-[var(--atc-surface)] border border-[var(--atc-border)]">
+                    <div className="text-[9px] uppercase tracking-wider text-[var(--atc-muted)]">Stand & Proposed</div>
+                    <div className="font-bold text-[var(--atc-text)]">{ac.gateId ? `GATE ${ac.gateId}` : "RAMP"}</div>
+                    <div className="text-[10px] text-[var(--atc-accent-text)]">
+                      {ac.flightPlan?.proposedDepartureTimeZ ?? "P2121"}
+                    </div>
+                  </div>
+
+                  <div className="p-2 rounded bg-[var(--atc-surface)] border border-[var(--atc-border)]">
+                    <div className="text-[9px] uppercase tracking-wider text-[var(--atc-muted)]">Origin</div>
+                    <div className="font-bold text-[var(--atc-text)]">{ac.originIcao ?? sim.airport.icao}</div>
+                    <div className="text-[10px] text-[var(--atc-muted)] truncate">{ac.originName ?? sim.airport.name}</div>
+                  </div>
+
+                  <div className="p-2 rounded bg-[var(--atc-surface)] border border-[var(--atc-border)]">
+                    <div className="text-[9px] uppercase tracking-wider text-[var(--atc-muted)]">Destination</div>
+                    <div className="font-bold text-[var(--atc-text)]">{ac.destinationIcao ?? ac.flightPlan?.destinationIcao ?? "DEST"}</div>
+                    <div className="text-[10px] text-[var(--atc-muted)] truncate">{ac.destinationName ?? ac.flightPlan?.destinationName ?? "Destination"}</div>
+                  </div>
+
+                  <div className="col-span-2 p-2 rounded bg-[var(--atc-surface)] border border-[var(--atc-border)]">
+                    <div className="text-[9px] uppercase tracking-wider text-[var(--atc-muted)] flex items-center justify-between">
+                      <span>Filed Route Corridor</span>
+                      <span className="text-[9px] text-[var(--atc-emerald)] font-semibold flex items-center gap-1">
+                        <CheckCircle className="w-2.5 h-2.5" /> ROUTE VERIFIED (NO RESTRICTIONS)
+                      </span>
+                    </div>
+                    <div className="font-mono font-bold text-xs text-[var(--atc-text)] mt-0.5 tracking-wide">
+                      {ac.flightPlan?.route ?? `${ac.originIcao ?? sim.airport.icao} … ${ac.destinationIcao ?? "DEST"}`}
+                    </div>
+                    <div className="text-[10px] text-[var(--atc-muted)] mt-0.5">
+                      Requested Flight Level: <span className="font-bold text-[var(--atc-cyan)]">{ac.cruiseFlightLevel ?? "FL350"}</span>
+                    </div>
+                  </div>
                 </div>
+
                 {ac.flightPlan?.crewNotes && (
                   <div className="p-2 rounded bg-[var(--atc-surface)] text-[10px] text-[var(--atc-muted)] italic border border-[var(--atc-border)]">
                     "{ac.flightPlan.crewNotes}"
@@ -950,50 +1063,162 @@ export const ClearanceControlDeck: React.FC = () => {
                 )}
               </div>
 
-              {/* Clearance Actions */}
-              <div className="space-y-2">
-                <button
-                  type="button"
-                  disabled={isCommandDisabled("IFR_CLEARANCE")}
-                  onClick={() =>
-                    handleIssueClearance(
-                      {
-                        aircraftId: ac.id,
-                        controller: "DELIVERY",
-                        type: "IFR_CLEARANCE",
-                        parameters: { altitude: 5000 },
-                      },
-                      "IFR_CLEARANCE"
-                    )
-                  }
-                  className="w-full py-2.5 px-3 rounded-lg bg-[var(--atc-accent)] hover:brightness-105 text-stone-950 font-bold text-xs flex items-center justify-center gap-2 shadow-sm cursor-pointer disabled:opacity-40"
-                >
-                  <Radio className="w-4 h-4" />
-                  ISSUE IFR CLEARANCE (CRAFT)
-                </button>
+              {/* 2. Interactive ATC Clearance Builder (CRAFT) */}
+              <div className="p-3 rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] space-y-2.5">
+                <div className="flex items-center justify-between border-b border-[var(--atc-border)] pb-1.5">
+                  <span className="font-bold text-xs uppercase tracking-wider text-[var(--atc-accent)] flex items-center gap-1.5">
+                    <Radio className="w-3.5 h-3.5" />
+                    ATC Departure Clearance (CRAFT)
+                  </span>
+                  <span className="text-[10px] text-[var(--atc-muted)]">Clearance Delivery</span>
+                </div>
 
-                <button
-                  type="button"
-                  disabled={
-                    ac.flightPlan?.clearanceStatus !== "CLEARED" ||
-                    isCommandDisabled("HANDOFF_GND")
-                  }
-                  onClick={() =>
-                    handleIssueClearance(
-                      {
-                        aircraftId: ac.id,
-                        controller: "DELIVERY",
-                        type: "HANDOFF",
-                        parameters: { targetController: "GROUND" },
-                      },
-                      "HANDOFF_GND"
-                    )
-                  }
-                  className="w-full py-2.5 px-3 rounded-lg border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:bg-[var(--atc-emerald-border)] text-[var(--atc-emerald)] font-bold text-xs flex items-center justify-center gap-2 shadow-sm cursor-pointer disabled:opacity-35"
-                >
-                  <ArrowRight className="w-4 h-4" />
-                  CONTACT GROUND (121.90) FOR PUSHBACK
-                </button>
+                {/* Form Controls */}
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <label className="text-[10px] text-[var(--atc-muted)] uppercase block mb-1">Departure RWY</label>
+                    <select
+                      value={delRwy}
+                      disabled={ac.flightPlan?.clearanceStatus === "CLEARED"}
+                      onChange={(e) => setDelRwy(e.target.value as RunwayId)}
+                      className="w-full px-2 py-1.5 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)] text-xs font-mono font-bold disabled:opacity-70 cursor-pointer"
+                    >
+                      {sim.airport.runwayIds.map((rwy) => (
+                        <option key={rwy} value={rwy}>
+                          RWY {rwy}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-[var(--atc-muted)] uppercase block mb-1">Assigned SID</label>
+                    <select
+                      value={delSid}
+                      disabled={ac.flightPlan?.clearanceStatus === "CLEARED"}
+                      onChange={(e) => setDelSid(e.target.value)}
+                      className="w-full px-2 py-1.5 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)] text-xs font-mono font-bold disabled:opacity-70 cursor-pointer"
+                    >
+                      {(sim.airport.departureFixIds.length > 0
+                        ? sim.airport.departureFixIds
+                        : ["ALI 1A", "DPN 1A", "OSVIX 1B", "DIRECT"]
+                      ).map((fix) => (
+                        <option key={fix} value={fix}>
+                          {fix.includes(" ") ? fix : `${fix} 1A`}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-[var(--atc-muted)] uppercase block mb-1">Initial Altitude</label>
+                    <select
+                      value={delAltitude}
+                      disabled={ac.flightPlan?.clearanceStatus === "CLEARED"}
+                      onChange={(e) => setDelAltitude(Number(e.target.value))}
+                      className="w-full px-2 py-1.5 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)] text-xs font-mono font-bold disabled:opacity-70 cursor-pointer"
+                    >
+                      {[3000, 4000, 5000, 6000, 7000].map((alt) => (
+                        <option key={alt} value={alt}>
+                          {alt.toLocaleString()} FT (Initial)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-[var(--atc-muted)] uppercase block mb-1 flex items-center justify-between">
+                      <span>Squawk Code</span>
+                      {ac.flightPlan?.clearanceStatus !== "CLEARED" && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const newSq = String(1000 + Math.floor(Math.random() * 6777)).padStart(4, "0");
+                            setDelSquawk(newSq);
+                          }}
+                          className="text-[9px] text-[var(--atc-cyan)] hover:underline cursor-pointer"
+                        >
+                          Re-roll
+                        </button>
+                      )}
+                    </label>
+                    <input
+                      type="text"
+                      value={delSquawk}
+                      disabled={ac.flightPlan?.clearanceStatus === "CLEARED"}
+                      maxLength={4}
+                      onChange={(e) => setDelSquawk(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                      className="w-full px-2 py-1.5 rounded border border-[var(--atc-border)] bg-[var(--atc-surface)] text-xs font-mono font-bold tracking-widest text-[var(--atc-accent)] disabled:opacity-70"
+                    />
+                  </div>
+                </div>
+
+                {/* Phraseology Preview */}
+                <div className="p-2.5 rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface)] space-y-1">
+                  <div className="text-[9px] uppercase tracking-wider text-[var(--atc-muted)]">
+                    Clearance Transmission Preview (Spoken Phraseology)
+                  </div>
+                  <p className="text-[11px] text-[var(--atc-text-secondary)] leading-relaxed italic">
+                    "{ac.spokenCallsign}, cleared to {ac.destinationName ?? ac.destinationIcao ?? "destination"} via {delSid} departure, runway {delRwy}, climb and maintain {delAltitude.toLocaleString()} feet, departure frequency {controllerFrequency("DEPARTURE", sim.airport, "DEPARTURE")}, squawk {delSquawk}."
+                  </p>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="space-y-2 pt-1">
+                  {ac.flightPlan?.clearanceStatus !== "CLEARED" ? (
+                    <button
+                      type="button"
+                      disabled={isCommandDisabled("IFR_CLEARANCE")}
+                      onClick={() =>
+                        handleIssueClearance(
+                          {
+                            aircraftId: ac.id,
+                            controller: "DELIVERY",
+                            type: "IFR_CLEARANCE",
+                            parameters: {
+                              runway: delRwy,
+                              sid: delSid,
+                              altitude: delAltitude,
+                              squawk: delSquawk,
+                            },
+                          },
+                          "IFR_CLEARANCE"
+                        )
+                      }
+                      className="w-full py-2.5 px-3 rounded-lg bg-[var(--atc-accent)] hover:brightness-105 text-stone-950 font-bold text-xs flex items-center justify-center gap-2 shadow-sm cursor-pointer disabled:opacity-40 transition-transform active:scale-95"
+                    >
+                      <Radio className="w-4 h-4" />
+                      ISSUE IFR CLEARANCE (CRAFT)
+                    </button>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="p-2 rounded bg-emerald-950/30 border border-emerald-800/50 text-emerald-400 text-xs flex items-center gap-2">
+                        <CheckCircle className="w-4 h-4 shrink-0" />
+                        <span>IFR Cleared · Aircraft ready at gate. Hand off to Ground.</span>
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={isCommandDisabled("HANDOFF_GND")}
+                        onClick={() =>
+                          handleIssueClearance(
+                            {
+                              aircraftId: ac.id,
+                              controller: "DELIVERY",
+                              type: "HANDOFF",
+                              parameters: { targetController: "GROUND" },
+                            },
+                            "HANDOFF_GND"
+                          )
+                        }
+                        className="w-full py-2.5 px-3 rounded-lg border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:bg-[var(--atc-emerald-border)] text-[var(--atc-emerald)] font-bold text-xs flex items-center justify-center gap-2 shadow-sm cursor-pointer disabled:opacity-35 transition-all"
+                      >
+                        <ArrowRight className="w-4 h-4" />
+                        CONTACT GROUND (121.90) FOR PUSHBACK &amp; START
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
