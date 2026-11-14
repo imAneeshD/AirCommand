@@ -380,28 +380,38 @@ export const ClearanceControlDeck: React.FC = () => {
 
   const renderTaxiRouteBuilder = () => (
     <div className="rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] p-2 space-y-2">
-      <div className="flex items-center justify-between gap-1">
-        <span className="text-[10px] font-mono font-bold text-[var(--atc-text-secondary)] uppercase">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] font-mono font-bold text-[var(--atc-text-secondary)] uppercase whitespace-nowrap">
           {isArrivalToGate ? `Taxi to Gate ${ac.gateId ?? ""}` : "Taxi Clearance"}
         </span>
         {!isArrivalToGate && (
-          <div className="flex gap-1">
-            {sim.airport.runwayIds.map((rwy) => (
-              <button
-                key={rwy}
-                onClick={() => setSelectedTaxiRunway(rwy)}
-                className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition-colors ${
-                  selectedTaxiRunway === rwy
-                    ? "bg-[var(--atc-accent-bg)] border-[var(--atc-accent-border)] text-[var(--atc-accent-text)] font-bold"
-                    : "bg-[var(--atc-surface)] border-[var(--atc-border)] text-[var(--atc-muted)]"
-                }`}
-              >
-                {rwy}
-              </button>
-            ))}
-          </div>
+          <span className="text-[10px] font-mono text-[var(--atc-muted)] whitespace-nowrap">
+            Dest: <strong className="text-[var(--atc-accent-text)]">RWY {selectedTaxiRunway}</strong>
+          </span>
         )}
       </div>
+
+      {!isArrivalToGate && sim.airport.runwayIds.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1 pt-0.5">
+          <span className="text-[9px] font-mono uppercase text-[var(--atc-muted)] mr-0.5 shrink-0">
+            Target RWY:
+          </span>
+          {sim.airport.runwayIds.map((rwy) => (
+            <button
+              key={rwy}
+              type="button"
+              onClick={() => setSelectedTaxiRunway(rwy)}
+              className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition-colors shrink-0 ${
+                selectedTaxiRunway === rwy
+                  ? "bg-[var(--atc-accent-bg)] border-[var(--atc-accent-border)] text-[var(--atc-accent-text)] font-bold shadow-xs"
+                  : "bg-[var(--atc-surface)] border-[var(--atc-border)] text-[var(--atc-muted)] hover:text-[var(--atc-text)] hover:border-[var(--atc-border-hover)]"
+              }`}
+            >
+              {rwy}
+            </button>
+          ))}
+        </div>
+      )}
 
       {taxiRoutes.length > 0 ? (
         <div className="space-y-1.5">
@@ -514,7 +524,8 @@ export const ClearanceControlDeck: React.FC = () => {
               parameters: { runway: rwy },
             })
           }
-          className="py-1.5 px-2 rounded-md border font-mono text-[11px] font-semibold disabled:opacity-35 bg-[var(--atc-emerald-bg)] hover:opacity-90 border-[var(--atc-emerald-border)] text-[var(--atc-emerald)]"
+          className="py-1.5 px-2 rounded-md border font-mono text-[11px] font-semibold disabled:opacity-35 bg-[var(--atc-emerald-bg)] hover:opacity-90 border-[var(--atc-emerald-border)] text-[var(--atc-emerald)] truncate"
+          title={`Cross Runway ${rwy}`}
         >
           CROSS RWY {rwy}
         </button>
@@ -531,7 +542,8 @@ export const ClearanceControlDeck: React.FC = () => {
               parameters: { runway: rwy },
             })
           }
-          className="py-1.5 px-2 rounded-md border font-mono text-[11px] font-semibold disabled:opacity-35 bg-[var(--atc-amber-bg)] hover:opacity-90 border-[var(--atc-amber-border)] text-[var(--atc-amber)]"
+          className="py-1.5 px-2 rounded-md border font-mono text-[11px] font-semibold disabled:opacity-35 bg-[var(--atc-amber-bg)] hover:opacity-90 border-[var(--atc-amber-border)] text-[var(--atc-amber)] truncate"
+          title={`Hold Short Runway ${rwy}`}
         >
           HOLD SHORT {rwy}
         </button>
@@ -2029,27 +2041,37 @@ export const ClearanceControlDeck: React.FC = () => {
                       : "bg-[var(--atc-cyan-bg)]/55 border-[var(--atc-cyan-border)]"
                   }`}
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <span
-                      className={`text-[10px] font-mono font-extrabold tracking-wide ${
-                        isGoAroundOrPattern
-                          ? "text-[var(--atc-amber)]"
-                          : "text-[var(--atc-cyan)]"
-                      }`}
-                    >
-                      {depAppGuidance.headline}
-                    </span>
-                    {ac.flightKind === "ARRIVAL" && (
-                      <div className="flex gap-1">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span
+                        className={`text-[10px] font-mono font-extrabold tracking-wide ${
+                          isGoAroundOrPattern
+                            ? "text-[var(--atc-amber)]"
+                            : "text-[var(--atc-cyan)]"
+                        }`}
+                      >
+                        {depAppGuidance.headline}
+                      </span>
+                      {ac.flightKind === "ARRIVAL" && (
+                        <span className="text-[9px] font-mono text-[var(--atc-muted)] whitespace-nowrap">
+                          RWY <strong className="text-[var(--atc-accent-text)]">{selectedApproachRunway ?? depAppGuidance.recommendedRunway}</strong>
+                        </span>
+                      )}
+                    </div>
+                    {ac.flightKind === "ARRIVAL" && sim.airport.runwayIds.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                        <span className="text-[9px] font-mono uppercase text-[var(--atc-muted)] mr-0.5 shrink-0">
+                          Approach RWY:
+                        </span>
                         {sim.airport.runwayIds.map((r) => (
                           <button
                             key={`rec-rwy-${r}`}
                             type="button"
                             onClick={() => setSelectedApproachRunway(r)}
-                            className={`px-1.5 py-0.5 rounded text-[9px] font-mono border ${
-                              depAppGuidance.recommendedRunway === r
-                                ? "bg-[var(--atc-accent-bg)] border-[var(--atc-accent-border)] text-[var(--atc-accent-text)] font-bold"
-                                : "bg-[var(--atc-surface)] border-[var(--atc-border)] text-[var(--atc-muted)]"
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-mono border transition-colors shrink-0 ${
+                              (selectedApproachRunway ?? depAppGuidance.recommendedRunway) === r
+                                ? "bg-[var(--atc-accent-bg)] border-[var(--atc-accent-border)] text-[var(--atc-accent-text)] font-bold shadow-xs"
+                                : "bg-[var(--atc-surface)] border-[var(--atc-border)] text-[var(--atc-muted)] hover:text-[var(--atc-text)] hover:border-[var(--atc-border-hover)]"
                             }`}
                           >
                             {r}
