@@ -1746,10 +1746,11 @@ export function getSuggestedTaxiRoutes(
       const otherId = e.from === entryId ? e.to : e.from;
       const hs = airport.nodes[otherId];
       if (!hs || hs.kind !== "HOLD_SHORT" || (hs.holdShortForRunway && hs.holdShortForRunway !== targetRunway)) continue;
+      const hsAlong = alongRunwayNm(rwy, hs.x, hs.y);
       candidateTargets.push({
         hsId: hs.id,
         conn: e.taxiway,
-        distStart: hs.isNorthSide === preferNorth ? 0 : 1,
+        distStart: (hs.isNorthSide === preferNorth ? 0 : 1) + Math.max(0, hsAlong) * 0.5,
       });
     }
   }
@@ -1760,10 +1761,11 @@ export function getSuggestedTaxiRoutes(
       const hs = airport.nodes[hsId];
       if (!hs) continue;
       const conn = airport.edges.find((e) => (e.from === hsId || e.to === hsId) && e.taxiway !== "APRON")?.taxiway ?? "A";
+      const hsAlong = alongRunwayNm(rwy, hs.x, hs.y);
       candidateTargets.push({
         hsId,
         conn,
-        distStart: hs.isNorthSide === preferNorth ? 0 : 1,
+        distStart: (hs.isNorthSide === preferNorth ? 0 : 1) + Math.max(0, hsAlong) * 0.5,
       });
     }
   }
@@ -1771,10 +1773,12 @@ export function getSuggestedTaxiRoutes(
   // Fallback to direct runway entry nodes if no hold-shorts found
   if (candidateTargets.length === 0 && rwy.entryNodeIds.length > 0) {
     for (const entryId of rwy.entryNodeIds) {
+      const entryNode = airport.nodes[entryId];
+      const entryAlong = entryNode ? alongRunwayNm(rwy, entryNode.x, entryNode.y) : 0;
       candidateTargets.push({
         hsId: entryId,
         conn: "A",
-        distStart: 0,
+        distStart: Math.max(0, entryAlong) * 0.5,
       });
     }
   }

@@ -425,15 +425,18 @@ export function updateAircraftMovement(
         if (!rwy) break;
         const curAlong = alongRunwayNm(rwy, ac.x, ac.y);
         const curCross = Math.abs(crossTrackRunwayNm(rwy, ac.x, ac.y));
-        const leadDist = curCross > 0.008 ? Math.min(0.035, curCross * 0.6) : 0;
-        const lineupAlong = Math.max(0.03, Math.min(rwy.lengthNm - 0.5, curAlong + leadDist));
+        const leadDist = curCross > 0.005 ? Math.min(0.045, Math.max(0.015, curCross * 0.75)) : 0.01;
+        const forwardAlong = Math.max(0.02, curAlong + leadDist);
+        const lineupAlong = Math.min(rwy.lengthNm - 0.03, forwardAlong);
         const targetPt = runwayPoint(rwy, lineupAlong, 0);
 
         if (curCross > 0.004) {
           ac.speed = 16;
           moveTowardPoint(ac, targetPt.x, targetPt.y, ac.speed, dt);
         } else {
-          const centerPt = runwayPoint(rwy, Math.max(0.03, Math.min(rwy.lengthNm - 0.5, curAlong)), 0);
+          const step = (ac.speed / 3600) * dt;
+          const nextAlong = Math.max(0.02, Math.min(rwy.lengthNm - 0.03, curAlong + step));
+          const centerPt = runwayPoint(rwy, nextAlong, 0);
           ac.x = centerPt.x;
           ac.y = centerPt.y;
           ac.heading = turnTowardHeading(ac.heading, rwy.heading, 110 * dt, "NEAREST");
@@ -456,9 +459,11 @@ export function updateAircraftMovement(
         const accel = ac.wakeCategory === "HEAVY" ? 9.8 : 10.8;
         ac.speed = Math.min(168, ac.speed + accel * dt);
         const step = (ac.speed / 3600) * dt;
-        const rad = (ac.heading * Math.PI) / 180;
-        ac.x += Math.sin(rad) * step;
-        ac.y += Math.cos(rad) * step;
+        const curAlong = alongRunwayNm(rwy, ac.x, ac.y);
+        const newAlong = curAlong + step;
+        const centerPt = runwayPoint(rwy, newAlong, 0);
+        ac.x = centerPt.x;
+        ac.y = centerPt.y;
         break;
       }
 
