@@ -519,7 +519,7 @@ export interface AirportGeoJsonFeature {
   id?: string;
   properties: Record<string, unknown>;
   geometry: {
-    type: "Point" | "LineString" | "Polygon";
+    type: "Point" | "LineString" | "Polygon" | "MultiPolygon";
     coordinates: unknown;
   };
 }

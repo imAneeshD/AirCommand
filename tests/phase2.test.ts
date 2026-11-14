@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   alongRunwayNm,
+  crossTrackRunwayNm,
   getRunwayExitOptions,
   getSuggestedTaxiRoutes,
   runwayPoint,
@@ -161,6 +162,46 @@ test("Real airport OurAirports + OSM/manual GeoJSON converts to connected simula
     assert.ok(firstAc);
     const label = getAircraftPhaseLabel(firstAc);
     assert.ok(label.length > 0);
+  } finally {
+    env.cleanup();
+  }
+});
+
+test("Real airport layout handles bidirectional runways, terminal/apron gate anchoring, and pushback runway clearance (VIDD)", () => {
+  const env = createTempTestEnv();
+  try {
+    const vidd = env.airportService.getAirport("VIDD");
+    if (vidd) {
+      const layout = convertAirportBundleToLayout(vidd);
+      assert.ok(layout.runways["12"], "Runway 12 should exist");
+      assert.ok(layout.runways["30"], "Reciprocal runway 30 should exist");
+      assert.ok(layout.runwayIds.includes("12") && layout.runwayIds.includes("30"));
+      assert.ok(layout.gateIds.length > 0, "Should generate gate IDs");
+
+      // Check pushback points do not violate runway centerlines
+      for (const gid of layout.gateIds) {
+        const gateNode = layout.nodes[`GATE_${gid}`];
+        assert.ok(gateNode, `Gate node GATE_${gid} must exist`);
+        assert.ok(gateNode.pairedSpotId, `Gate ${gid} must have pushback target`);
+        const pbNode = layout.nodes[gateNode.pairedSpotId];
+        assert.ok(pbNode, `Pushback node ${gateNode.pairedSpotId} must exist in nodes`);
+
+        for (const rwy of Object.values(layout.runways)) {
+          const along = alongRunwayNm(rwy, pbNode.x, pbNode.y);
+          if (along >= -0.05 && along <= rwy.lengthNm + 0.05) {
+            // Distance from runway centerline must not be inside active runway width
+            const cr = Math.abs(crossTrackRunwayNm(rwy, pbNode.x, pbNode.y));
+            assert.ok(cr >= rwy.widthNm * 0.45, `Pushback for ${gid} must not be inside runway ${rwy.id}`);
+          }
+        }
+
+        // Check taxi routes exist to both runways
+        const routesR12 = getSuggestedTaxiRoutes(layout, `GATE_${gid}`, "12", gid, false);
+        const routesR30 = getSuggestedTaxiRoutes(layout, `GATE_${gid}`, "30", gid, false);
+        assert.ok(routesR12.length > 0, `Must have taxi route from ${gid} to runway 12`);
+        assert.ok(routesR30.length > 0, `Must have taxi route from ${gid} to runway 30`);
+      }
+    }
   } finally {
     env.cleanup();
   }
