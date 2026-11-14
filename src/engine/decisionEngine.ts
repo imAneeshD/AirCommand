@@ -655,7 +655,14 @@ export function submitClearanceDecision(
     }
 
     case "VACATE_RUNWAY": {
-      if (command.controller !== "TOWER") {
+      const isStoppedOrDep =
+        aircraft.flightKind === "DEPARTURE" ||
+        aircraft.controller === "GROUND" ||
+        aircraft.state === "STOPPED_ON_RUNWAY" ||
+        aircraft.state === "TAKEOFF_CANCELLED" ||
+        aircraft.state === "REJECTED_TAKEOFF";
+
+      if (command.controller !== "TOWER" && (!isStoppedOrDep || command.controller !== "GROUND")) {
         return {
           ok: false,
           reason: `Vacate runway clearances must be issued by Tower Control (selected: ${command.controller}).`,
@@ -667,7 +674,9 @@ export function submitClearanceDecision(
         aircraft.state === "ROLLOUT" ||
         aircraft.state === "VACATING_RUNWAY" ||
         (aircraft.state === "HOLD_POSITION" && onSurface) ||
-        aircraft.state === "STOPPED_ON_RUNWAY";
+        aircraft.state === "STOPPED_ON_RUNWAY" ||
+        aircraft.state === "TAKEOFF_CANCELLED" ||
+        aircraft.state === "REJECTED_TAKEOFF";
       if (!canVacateState) {
         return {
           ok: false,
@@ -976,6 +985,8 @@ function applyClearanceImmediateEffects(
           clr.lifecycle = "CANCELLED";
         }
       }
+      aircraft.holdingAtRunway = undefined;
+      aircraft.holdingShortReason = undefined;
       if (aircraft.state === "TAKEOFF_ROLL" || aircraft.state === "ROTATE") {
         aircraft.state = "BRAKING";
         aircraft.stateEnteredAt = state.time;
@@ -984,16 +995,21 @@ function applyClearanceImmediateEffects(
         aircraft.stateEnteredAt = state.time;
         aircraft.speed = 0;
       }
-      if (aircraft.pendingRequest?.type === "TAKEOFF") {
+      if (aircraft.pendingRequest) {
         aircraft.pendingRequest.resolved = true;
       }
       break;
     }
     case "REJECT_TAKEOFF": {
+      aircraft.holdingAtRunway = undefined;
+      aircraft.holdingShortReason = undefined;
       aircraft.state = "REJECTED_TAKEOFF";
       aircraft.operationMode = "EMERGENCY_OPERATION";
       aircraft.emergencyType = "REJECTED_TAKEOFF_ABORT";
       aircraft.stateEnteredAt = state.time;
+      if (aircraft.pendingRequest) {
+        aircraft.pendingRequest.resolved = true;
+      }
       state.incidents.push({
         id: nextId(state, "inc"),
         timestamp: state.time,
@@ -1029,6 +1045,8 @@ function applyClearanceImmediateEffects(
       aircraft.vacateAssignedHoldShortId = holdShortNodeId;
       aircraft.vacateAssignedTaxiway = taxiway;
       aircraft.expediteVacate = Boolean(clearance.parameters.expedite);
+      aircraft.holdingAtRunway = undefined;
+      aircraft.holdingShortReason = undefined;
 
       if (aircraft.state === "VACATING_RUNWAY") {
         if (holdShortNodeId && state.airport.nodes[holdShortNodeId]) {
@@ -1037,7 +1055,9 @@ function applyClearanceImmediateEffects(
       } else if (
         aircraft.state === "TOUCHDOWN" ||
         aircraft.state === "HOLD_POSITION" ||
-        aircraft.state === "STOPPED_ON_RUNWAY"
+        aircraft.state === "STOPPED_ON_RUNWAY" ||
+        aircraft.state === "TAKEOFF_CANCELLED" ||
+        aircraft.state === "REJECTED_TAKEOFF"
       ) {
         const rwy = state.airport.runways[rwyId];
         const rwyNode = exitRwyNodeId ? state.airport.nodes[exitRwyNodeId] : undefined;
@@ -1189,7 +1209,9 @@ function applyAcknowledgedClearance(
       aircraft.assignedAltitude = aircraft.assignedAltitude ?? initialAlt;
       aircraft.assignedHeading = aircraft.assignedHeading ?? rwySpec?.heading ?? 90;
       aircraft.assignedSpeed = aircraft.assignedSpeed ?? 210;
-      if (aircraft.pendingRequest?.type === "TAKEOFF") {
+      aircraft.holdingAtRunway = undefined;
+      aircraft.holdingShortReason = undefined;
+      if (aircraft.pendingRequest) {
         aircraft.pendingRequest.resolved = true;
       }
       aircraft.state = "TAKEOFF_CLEARED";
