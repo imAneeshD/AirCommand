@@ -114,6 +114,7 @@ export const GlobalAirportMap: React.FC = () => {
   const isOnline = useAtcStore((s) => s.isOnline);
   const sim = useAtcStore((s) => s.sim);
   const savedAirportId = useAtcStore((s) => s.savedAirportId);
+  const hasActiveSession = useAtcStore((s) => s.hasActiveSession);
   const removeLocalOfflineMap = useAtcStore((s) => s.removeLocalOfflineMap);
   const setAppMode = useAtcStore((s) => s.setAppMode);
   const selectAndSaveAirport = useAtcStore((s) => s.selectAndSaveAirport);
@@ -732,26 +733,30 @@ export const GlobalAirportMap: React.FC = () => {
             {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
 
-          <button
-            onClick={async () => {
-              const target = savedAirportId || sim.airport.icao;
-              await removeLocalOfflineMap(target);
-              setStatusNote(`Removed local offline map cache for ${target}.`);
-              setTimeout(() => setStatusNote(null), 4000);
-            }}
-            title={`Remove cached local offline map for ${savedAirportId || sim.airport.icao} and reset saved airport`}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded border border-rose-500/40 bg-rose-950/20 hover:bg-rose-950/40 text-rose-300 transition-colors shadow-sm"
-          >
-            <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-            <span>Remove Local Map</span>
-          </button>
+          {(hasActiveSession || Boolean(savedAirportId)) && (
+            <>
+              <button
+                onClick={async () => {
+                  const target = savedAirportId || sim.airport.icao;
+                  await removeLocalOfflineMap(target);
+                  setStatusNote(`Removed local offline map cache for ${target}.`);
+                  setTimeout(() => setStatusNote(null), 4000);
+                }}
+                title={`Remove cached local offline map for ${savedAirportId || sim.airport.icao} and reset saved airport`}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded border border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] hover:bg-[var(--atc-surface)] text-[var(--atc-red)] transition-colors shadow-sm"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Remove Local Map</span>
+              </button>
 
-          <button
-            onClick={() => setAppMode("SIMULATION")}
-            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded border border-[var(--atc-border)] bg-[var(--atc-surface)] hover:bg-[var(--atc-surface-alt)]"
-          >
-            Resume ({sim.airport.icao})
-          </button>
+              <button
+                onClick={() => setAppMode("SIMULATION")}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded border border-[var(--atc-border)] bg-[var(--atc-surface)] hover:bg-[var(--atc-surface-alt)]"
+              >
+                Resume ({savedAirportId || sim.airport.icao})
+              </button>
+            </>
+          )}
         </div>
       </header>
 
@@ -1036,9 +1041,9 @@ export const GlobalAirportMap: React.FC = () => {
                       setTimeout(() => setStatusNote(null), 4000);
                     }}
                     title="Remove locally cached custom geometry and reset to default"
-                    className="px-2 py-0.5 rounded border border-rose-500/50 bg-rose-950/30 hover:bg-rose-950/50 text-rose-200 text-[10px] font-mono shrink-0 flex items-center gap-1"
+                    className="px-2 py-0.5 rounded border border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] hover:bg-[var(--atc-surface)] text-[var(--atc-red)] text-[10px] font-mono shrink-0 flex items-center gap-1 transition-colors"
                   >
-                    <Trash2 className="w-3 h-3 text-rose-400" />
+                    <Trash2 className="w-3 h-3" />
                     Reset
                   </button>
                 </div>

@@ -142,6 +142,7 @@ interface AtcStore {
   tickVersion: number;
   lastSpokenRadioId: string | null;
   savedAirportId: AirportId | null;
+  hasActiveSession: boolean;
   showAirportSelector: boolean;
   camera: CameraState;
   hoverPreviewRoute: string[] | null;
@@ -641,6 +642,7 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
   tickVersion: 0,
   lastSpokenRadioId: null,
   savedAirportId: initialSavedAirport,
+  hasActiveSession: Boolean(initialSavedAirport),
   showAirportSelector: initialSavedAirport === null,
   camera: getPresetCameraForStation("ALL"),
   hoverPreviewRoute: null,
@@ -851,6 +853,7 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
       appMode: "SIMULATION",
       showAirportSelector: false,
       savedAirportId: activeRecord.icao,
+      hasActiveSession: true,
       selectedAirportRecord: activeRecord,
       selectedAirportGeoJson: geojson,
       airportDetailLoading: false,
@@ -1034,6 +1037,7 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
       appMode: "SIMULATION",
       showAirportSelector: false,
       savedAirportId: activeRecord.icao,
+      hasActiveSession: true,
       selectedAirportRecord: activeRecord,
       selectedAirportGeoJson: geojson,
       airportDetailLoading: false,
@@ -1612,6 +1616,7 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
       tickVersion: 0,
       lastSpokenRadioId: null,
       savedAirportId: airportId,
+      hasActiveSession: true,
       showAirportSelector: false,
       roomState: null,
       assignedRole: null,
@@ -1656,6 +1661,7 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
     const isCurrent = get().sim.airport.icao.toUpperCase() === targetIcao;
     set((s) => ({
       savedAirportId: null,
+      hasActiveSession: false,
       selectedAirportGeoJson: null,
       sim: isCurrent
         ? createScenarioSimulation("NORMAL_OPS", "ALL", "KAST", undefined, { randomize: true })
