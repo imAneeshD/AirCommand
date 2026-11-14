@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   FileText,
   X,
@@ -11,8 +11,10 @@ import {
   AlertCircle,
   UserCheck,
 } from "lucide-react";
-import type { Aircraft } from "../types/atc.ts";
+import type { Aircraft, RunwayId } from "../types/atc.ts";
 import { useAtcStore } from "../store/atcStore.ts";
+import { hashCallsign } from "../data/aircraftCatalog.ts";
+import { controllerFrequency } from "../engine/decisionEngine.ts";
 
 interface IfrFlightPlanModalProps {
   aircraft: Aircraft | null;
@@ -33,12 +35,29 @@ export const IfrFlightPlanModal: React.FC<IfrFlightPlanModalProps> = ({
   const activeStation = sim.config.activePlayerStation;
   const canIssueDelivery = activeStation === "ALL" || activeStation === "DELIVERY";
 
+  const [modalRwy, setModalRwy] = useState<RunwayId>(aircraft.targetRunway ?? "09L");
+  const [modalSid, setModalSid] = useState<string>(
+    fp?.sidFix ?? aircraft.assignedDepartureFix ?? sim.airport.departureFixIds?.[0] ?? "SID 1A"
+  );
+  const [modalAlt, setModalAlt] = useState<number>(5000);
+  const [modalSquawk, setModalSquawk] = useState<string>(
+    aircraft.squawk ||
+      (fp?.assignedBeacon && fp.assignedBeacon !== "—"
+        ? fp.assignedBeacon
+        : String(2100 + (hashCallsign(aircraft.callsign) % 800)).padStart(4, "0"))
+  );
+
   const handleIssueClearance = () => {
     issueClearance({
       aircraftId: aircraft.id,
       controller: "DELIVERY",
       type: "IFR_CLEARANCE",
-      parameters: { altitude: 5000 },
+      parameters: {
+        runway: modalRwy,
+        sid: modalSid,
+        altitude: modalAlt,
+        squawk: modalSquawk,
+      },
     });
   };
 
@@ -207,6 +226,101 @@ export const IfrFlightPlanModal: React.FC<IfrFlightPlanModalProps> = ({
             </div>
           )}
 
+          {/* Interactive CRAFT Clearance Configuration (if pending and can issue) */}
+          {!isCleared && canIssueDelivery && (
+            <div className="p-3 rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface)] space-y-2">
+              <div className="flex items-center justify-between border-b border-[var(--atc-border)] pb-1.5">
+                <span className="font-bold text-xs uppercase tracking-wider text-[var(--atc-accent)] flex items-center gap-1.5">
+                  <Radio className="w-3.5 h-3.5" />
+                  ATC Departure Clearance (CRAFT)
+                </span>
+                <span className="text-[10px] text-[var(--atc-muted)]">Clearance Delivery</span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <label className="text-[10px] text-[var(--atc-muted)] uppercase block mb-1">Departure RWY</label>
+                  <select
+                    value={modalRwy}
+                    onChange={(e) => setModalRwy(e.target.value as RunwayId)}
+                    className="w-full px-2 py-1 rounded border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] text-xs font-mono font-bold cursor-pointer"
+                  >
+                    {sim.airport.runwayIds.map((rwy) => (
+                      <option key={rwy} value={rwy}>
+                        RWY {rwy}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] text-[var(--atc-muted)] uppercase block mb-1">Assigned SID</label>
+                  <select
+                    value={modalSid}
+                    onChange={(e) => setModalSid(e.target.value)}
+                    className="w-full px-2 py-1 rounded border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] text-xs font-mono font-bold cursor-pointer"
+                  >
+                    {(sim.airport.departureFixIds.length > 0
+                      ? sim.airport.departureFixIds
+                      : ["ALI 1A", "DPN 1A", "OSVIX 1B", "DIRECT"]
+                    ).map((fix) => (
+                      <option key={fix} value={fix}>
+                        {fix.includes(" ") ? fix : `${fix} 1A`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] text-[var(--atc-muted)] uppercase block mb-1">Initial Altitude</label>
+                  <select
+                    value={modalAlt}
+                    onChange={(e) => setModalAlt(Number(e.target.value))}
+                    className="w-full px-2 py-1 rounded border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] text-xs font-mono font-bold cursor-pointer"
+                  >
+                    {[3000, 4000, 5000, 6000, 7000].map((alt) => (
+                      <option key={alt} value={alt}>
+                        {alt.toLocaleString()} FT (Initial)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] text-[var(--atc-muted)] uppercase block mb-1 flex items-center justify-between">
+                    <span>Squawk Beacon</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newSq = String(1000 + Math.floor(Math.random() * 6777)).padStart(4, "0");
+                        setModalSquawk(newSq);
+                      }}
+                      className="text-[9px] text-[var(--atc-cyan)] hover:underline cursor-pointer"
+                    >
+                      Re-roll
+                    </button>
+                  </label>
+                  <input
+                    type="text"
+                    value={modalSquawk}
+                    maxLength={4}
+                    onChange={(e) => setModalSquawk(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                    className="w-full px-2 py-1 rounded border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] text-xs font-mono font-bold tracking-widest text-[var(--atc-accent)]"
+                  />
+                </div>
+              </div>
+
+              <div className="p-2 rounded border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] space-y-0.5">
+                <div className="text-[9px] uppercase tracking-wider text-[var(--atc-muted)]">
+                  Spoken Clearance Preview
+                </div>
+                <p className="text-[10px] text-[var(--atc-text-secondary)] italic leading-relaxed">
+                  "{aircraft.spokenCallsign}, cleared to {aircraft.destinationName ?? aircraft.destinationIcao ?? "destination"} via {modalSid} departure, runway {modalRwy}, climb and maintain {modalAlt.toLocaleString()} feet, departure {controllerFrequency("DEPARTURE", sim.airport, "DEPARTURE")}, squawk {modalSquawk}."
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Clearance Status Summary Box */}
           <div
             className={`p-3 rounded-lg border ${
@@ -221,11 +335,11 @@ export const IfrFlightPlanModal: React.FC<IfrFlightPlanModalProps> = ({
               ) : (
                 <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
               )}
-              {isCleared ? "IFR Clearance Issued & Acknowledged" : "Clearance Not Yet Issued"}
+              {isCleared ? "IFR Clearance Issued & Acknowledged" : "Clearance Pending"}
             </div>
             <p className="text-[11px] leading-relaxed opacity-90">
               {isCleared
-                ? `Cleared to ${fp?.destinationIcao ?? aircraft.destinationIcao} via ${fp?.sidFix ?? "SID"}, climb and maintain ${fp?.assignedAltitude ?? "5,000 ft"}, departure ${fp?.departureFrequency ?? "124.70"}, squawk ${fp?.assignedBeacon ?? aircraft.squawk}.`
+                ? `Cleared to ${fp?.destinationIcao ?? aircraft.destinationIcao} via ${fp?.sidFix ?? "SID"}, climb and maintain ${fp?.assignedAltitude ?? "5,000 ft"}, departure ${fp?.departureFrequency ?? "124.70"}, squawk ${fp?.assignedBeacon ?? aircraft.squawk}. Ready for pushback with Ground.`
                 : "Aircraft is at gate awaiting IFR route clearance copy from Clearance Delivery controller."}
             </p>
           </div>

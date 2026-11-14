@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   Activity,
   AlertTriangle,
+  ArrowRight,
   CheckCircle,
   Crosshair,
   FileText,
@@ -62,6 +63,12 @@ function stateBadgeStyle(ac: Aircraft): string {
   }
   if (ac.state === "TAXIING" || ac.state === "CROSSING_RUNWAY" || ac.state === "PUSHING_BACK") {
     return "bg-[var(--atc-cyan-bg)] text-[var(--atc-cyan)] border-[var(--atc-cyan-border)]";
+  }
+  if (ac.state === "AT_GATE" && ac.flightKind === "DEPARTURE") {
+    if (ac.flightPlan?.clearanceStatus === "CLEARED") {
+      return "bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] border-[var(--atc-emerald-border)]";
+    }
+    return "bg-[var(--atc-amber-bg)] text-[var(--atc-amber)] border-[var(--atc-amber-border)]";
   }
   return "bg-[var(--atc-surface-alt)] text-[var(--atc-text-secondary)] border-[var(--atc-border)]";
 }
@@ -459,8 +466,31 @@ export const FlightStripRack: React.FC = () => {
             className={`px-1.5 py-0.5 rounded border text-[9px] font-mono font-semibold truncate ${stateBadgeStyle(ac)}`}
             title={ac.state}
           >
-            {getAircraftPhaseLabel(ac)}
+            {ac.state === "AT_GATE" && ac.flightKind === "DEPARTURE"
+              ? isCleared
+                ? "IFR Cleared"
+                : "Waiting Clearance"
+              : getAircraftPhaseLabel(ac)}
           </span>
+          {isCleared && ac.controller === "DELIVERY" && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                issueClearance({
+                  aircraftId: ac.id,
+                  controller: "DELIVERY",
+                  type: "HANDOFF",
+                  parameters: { targetController: "GROUND" },
+                });
+              }}
+              title="Hand off aircraft to Ground Control for pushback & taxi"
+              className="h-5 px-2 rounded border border-[var(--atc-emerald)] bg-[var(--atc-emerald-bg)] hover:bg-[var(--atc-emerald-border)] text-[var(--atc-emerald)] font-mono font-bold text-[9px] tracking-wider uppercase inline-flex items-center gap-1 transition-colors cursor-pointer select-none"
+            >
+              <ArrowRight className="w-2.5 h-2.5" />
+              CONTACT GND
+            </button>
+          )}
         </div>
 
         {/* Incoming Handoff Request with 1-click ACCEPT Button */}

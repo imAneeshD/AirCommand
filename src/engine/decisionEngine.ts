@@ -323,18 +323,21 @@ export function submitClearanceDecision(
     }
 
     case "IFR_CLEARANCE": {
-      const dest = aircraft.destinationName ?? aircraft.destinationIcao ?? "destination";
-      const sid = aircraft.assignedDepartureFix ?? state.airport.departureFixIds?.[0] ?? "departure";
+      const dest = (params.destination as string) ?? aircraft.destinationName ?? aircraft.destinationIcao ?? "destination";
+      const sid = (params.sid as string) ?? aircraft.assignedDepartureFix ?? state.airport.departureFixIds?.[0] ?? "departure";
       const alt = (params.altitude as number | string) ?? 5000;
-      const depFreq = controllerFrequency("DEPARTURE", state.airport, "DEPARTURE");
-      const squawk = aircraft.squawk || String(2100 + (hashCallsign(aircraft.callsign) % 800)).padStart(4, "0");
+      const rwy = (params.runway as string) ?? aircraft.targetRunway ?? state.airport.primaryDepartureRunway ?? "";
+      const depFreq = (params.depFreq as string) ?? controllerFrequency("DEPARTURE", state.airport, "DEPARTURE");
+      const squawk = (params.squawk as string) ?? (aircraft.squawk || String(2100 + (hashCallsign(aircraft.callsign) % 800)).padStart(4, "0"));
       params.sid = sid;
       params.altitude = alt;
+      params.runway = rwy;
       params.depFreq = depFreq;
       params.squawk = squawk;
       params.destination = dest;
-      phraseology = `${aircraft.spokenCallsign}, cleared to ${dest} via ${sid} departure, climb and maintain ${alt} feet, departure frequency ${depFreq}, squawk ${squawk}.`;
-      expectedReadback = `Cleared to ${dest} via ${sid}, climb maintain ${alt}, departure ${depFreq}, squawk ${squawk}, ${aircraft.spokenCallsign}.`;
+      const rwySegment = rwy ? `, runway ${rwy}` : "";
+      phraseology = `${aircraft.spokenCallsign}, cleared to ${dest} via ${sid} departure${rwySegment}, climb and maintain ${alt} feet, departure frequency ${depFreq}, squawk ${squawk}.`;
+      expectedReadback = `Cleared to ${dest} via ${sid}${rwySegment}, climb maintain ${alt}, departure ${depFreq}, squawk ${squawk}, ${aircraft.spokenCallsign}.`;
       break;
     }
 
@@ -1062,12 +1065,21 @@ function applyAcknowledgedClearance(
       }
       const squawk = (clearance.parameters.squawk as string) ?? aircraft.squawk;
       aircraft.squawk = squawk;
+      if (clearance.parameters.runway && typeof clearance.parameters.runway === "string") {
+        aircraft.targetRunway = clearance.parameters.runway as RunwayId;
+      }
+      if (clearance.parameters.sid && typeof clearance.parameters.sid === "string") {
+        aircraft.assignedDepartureFix = clearance.parameters.sid;
+      }
       if (aircraft.flightPlan) {
         aircraft.flightPlan.clearanceStatus = "CLEARED";
         aircraft.flightPlan.assignedBeacon = squawk;
         aircraft.flightPlan.clearanceIssuedAt = state.time;
         if (clearance.parameters.altitude) {
           aircraft.flightPlan.assignedAltitude = `${clearance.parameters.altitude} ft`;
+        }
+        if (clearance.parameters.sid) {
+          aircraft.flightPlan.sidFix = String(clearance.parameters.sid);
         }
         aircraft.flightPlan.remarks = "Cleared via SID, ready for push and start";
       }

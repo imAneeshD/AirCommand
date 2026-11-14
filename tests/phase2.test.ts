@@ -207,6 +207,78 @@ test("Real airport layout handles bidirectional runways, terminal/apron gate anc
   }
 });
 
+test("Clearance Delivery (CD) workflow: filed plan review -> CRAFT departure clearance -> readback ack -> transfer to Ground for pushback", () => {
+  const env = createTempTestEnv();
+  try {
+    const sim = createScenarioSimulation("LOW_TRAFFIC", "DELIVERY", "ASTERIA");
+    // Find departure aircraft at gate
+    const depId = sim.aircraftOrder.find((id) => {
+      const a = sim.aircraft[id];
+      return a && a.flightKind === "DEPARTURE" && a.state === "AT_GATE";
+    });
+    assert.ok(depId, "Must have a departure aircraft at gate");
+    const ac = sim.aircraft[depId];
+    assert.equal(ac.controller, "DELIVERY");
+    assert.ok(ac.flightPlan);
+    assert.equal(ac.flightPlan.clearanceStatus, "PENDING");
+
+    // 1. Controller issues CRAFT IFR clearance with assigned runway, SID, altitude, and squawk
+    const decision = submitClearanceDecision(
+      sim,
+      {
+        aircraftId: ac.id,
+        controller: "DELIVERY",
+        type: "IFR_CLEARANCE",
+        parameters: {
+          runway: "09L",
+          sid: "OSVIX 1A",
+          altitude: 5000,
+          squawk: "4621",
+        },
+      },
+      "PLAYER"
+    );
+    assert.equal(decision.ok, true);
+
+    const clr = ac.clearances[ac.clearances.length - 1];
+    assert.ok(clr);
+    assert.equal(clr.type, "IFR_CLEARANCE");
+    assert.ok(clr.phraseology.includes("OSVIX 1A"));
+    assert.ok(clr.phraseology.includes("runway 09L"));
+    assert.ok(clr.phraseology.includes("5000"));
+    assert.ok(clr.phraseology.includes("4621"));
+
+    // 2. Step simulation to complete readback
+    for (let i = 0; i < 15; i++) {
+      stepSimulation(sim, 0.5);
+    }
+    assert.equal(ac.flightPlan.clearanceStatus, "CLEARED");
+    assert.equal(ac.squawk, "4621");
+    assert.equal(ac.state, "AT_GATE", "Aircraft stays at gate (IFR cleared != cleared for takeoff)");
+
+    // 3. Controller transfers aircraft to Ground
+    const transferDec = submitClearanceDecision(
+      sim,
+      {
+        aircraftId: ac.id,
+        controller: "DELIVERY",
+        type: "HANDOFF",
+        parameters: { targetController: "GROUND", bypassPending: true },
+      },
+      "PLAYER"
+    );
+    assert.equal(transferDec.ok, true);
+
+    // Step simulation to acknowledge handoff
+    for (let i = 0; i < 15; i++) {
+      stepSimulation(sim, 0.5);
+    }
+    assert.equal(ac.controller, "GROUND");
+  } finally {
+    env.cleanup();
+  }
+});
+
 test("ADSBProviderService caches backend queries, preserves read-only tracks, marks stale aircraft, and backs off on 429", async () => {
   let upstreamCalls = 0;
   let shouldRateLimit = false;
