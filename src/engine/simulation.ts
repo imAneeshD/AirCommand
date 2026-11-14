@@ -1693,7 +1693,7 @@ export function spawnRandomTraffic(
     return a && a.flightKind === "DEPARTURE" && a.state !== "COMPLETED_DEPARTURE";
   }).length;
 
-  const chooseKind: FlightKind =
+  let chooseKind: FlightKind =
     kind ??
     (state.scenarioId === "ARRIVAL_HEAVY"
       ? state.nextIdCounter % 4 === 0
@@ -1703,8 +1703,12 @@ export function spawnRandomTraffic(
       ? state.nextIdCounter % 4 === 0
         ? "ARRIVAL"
         : "DEPARTURE"
+      : activeDepartures === 0
+      ? "DEPARTURE"
       : activeArrivals === 0
       ? "ARRIVAL"
+      : activeDepartures < activeArrivals
+      ? "DEPARTURE"
       : activeArrivals < activeDepartures
       ? "ARRIVAL"
       : state.nextIdCounter % 2 === 0
@@ -1713,10 +1717,22 @@ export function spawnRandomTraffic(
 
   const useIndiaFleet = state.airport.icao.startsWith("V") || state.airport.country === "India";
   const pool = useIndiaFleet ? [...INDIA_AND_INTL_AIRLINES, ...AIRLINES.slice(0, 2)] : AIRLINES;
-  const airline = pool[state.nextIdCounter % pool.length];
-  const flightNum = 100 + ((state.nextIdCounter * 43) % 890);
-  const callsign = `${airline.code}${flightNum}`;
+  
+  let airline = pool[state.nextIdCounter % pool.length];
+  let flightNum = 100 + ((state.nextIdCounter * 43) % 890);
+  let callsign = `${airline.code}${flightNum}`;
+
+  // Advance counter across candidates to prevent callsign collision deadlock
+  let attempts = 0;
+  while (state.aircraft[callsign] && attempts < 50) {
+    state.nextIdCounter += 1;
+    airline = pool[state.nextIdCounter % pool.length];
+    flightNum = 100 + ((state.nextIdCounter * 43) % 890);
+    callsign = `${airline.code}${flightNum}`;
+    attempts += 1;
+  }
   if (state.aircraft[callsign]) return null;
+
   const spokenCallsign = `${airline.spoken} ${flightNum}`;
   const acType = airline.types[state.nextIdCounter % airline.types.length];
   const isCargo = isCargoAircraft(callsign, acType);
@@ -1732,25 +1748,31 @@ export function spawnRandomTraffic(
   }
 
   if (chooseKind === "DEPARTURE") {
-    const freeGate = findBestGateForAircraft(
+    let freeGate = findBestGateForAircraft(
       state.airport,
       { aircraftType: acType, callsign, isCargo, isMilitary, wakeCategory: wakeCat },
       occupiedGateIds
     );
-    if (!freeGate) return null;
-    const activeDepRunways = getActiveRunways(state.airport, "DEPARTURE");
-    const rwy = activeDepRunways[state.nextIdCounter % activeDepRunways.length];
-    const ac = createDepartureAircraft(state, {
-      callsign,
-      spokenCallsign,
-      airline: airline.name,
-      aircraftType: acType,
-      gateId: freeGate,
-      targetRunway: rwy,
-      requiresPushback: !freeGate.startsWith("S") && !freeGate.toUpperCase().includes("REMOTE"),
-    });
-    updateAircraftStates(state);
-    return ac;
+    if (!freeGate) {
+      freeGate = state.airport.gateIds.find((g) => !occupiedGateIds.has(g)) ?? null;
+    }
+    if (freeGate) {
+      const activeDepRunways = getActiveRunways(state.airport, "DEPARTURE");
+      const rwy = activeDepRunways[state.nextIdCounter % activeDepRunways.length];
+      const ac = createDepartureAircraft(state, {
+        callsign,
+        spokenCallsign,
+        airline: airline.name,
+        aircraftType: acType,
+        gateId: freeGate,
+        targetRunway: rwy,
+        requiresPushback: !freeGate.startsWith("S") && !freeGate.toUpperCase().includes("REMOTE"),
+      });
+      updateAircraftStates(state);
+      return ac;
+    }
+    // If no gate is currently free for departure, smoothly fall back to spawning an ARRIVAL
+    chooseKind = "ARRIVAL";
   }
 
   const fromLeft = state.nextIdCounter % 2 === 0;
@@ -1902,8 +1924,37 @@ export function stepSimulation(
     // 5. Check safety separation & runway conflicts
     checkSeparationAndConflicts(state);
 
+    // 5b. Prune old completed departures (>25s after completion) and completed arrivals (>60s after gate arrival)
+    const toPrune: string[] = [];
+    for (const id of state.aircraftOrder) {
+      const ac = state.aircraft[id];
+      if (!ac) {
+        toPrune.push(id);
+        continue;
+      }
+      if (ac.state === "COMPLETED_DEPARTURE" && state.time - ac.stateEnteredAt >= 25) {
+        toPrune.push(id);
+      } else if (ac.state === "COMPLETED_ARRIVAL" && state.time - ac.stateEnteredAt >= 60) {
+        toPrune.push(id);
+      }
+    }
+    if (toPrune.length > 0) {
+      const pruneSet = new Set(toPrune);
+      state.aircraftOrder = state.aircraftOrder.filter((id) => !pruneSet.has(id));
+      for (const id of toPrune) {
+        if (state.selectedAircraftId === id) {
+          state.selectedAircraftId = state.aircraftOrder[0] ?? null;
+        }
+        delete state.aircraft[id];
+      }
+    }
+
     // 6. Auto-spawn periodic traffic if enabled
-    const spawnPeriod =
+    const activeCount = state.aircraftOrder.filter((id) => {
+      const a = state.aircraft[id];
+      return a && a.state !== "COMPLETED_ARRIVAL" && a.state !== "COMPLETED_DEPARTURE";
+    }).length;
+    const baseSpawnPeriod =
       state.scenarioId === "LOW_TRAFFIC"
         ? 55
         : state.scenarioId === "RUSH_HOUR" || state.scenarioId === "HEAVY"
@@ -1911,9 +1962,10 @@ export function stepSimulation(
         : state.scenarioId === "LIGHT"
         ? 34
         : 22;
+    // When active traffic is critically low (< 4), spawn faster so the airfield never sits empty
+    const spawnPeriod = activeCount < 4 ? Math.min(baseSpawnPeriod, 6) : baseSpawnPeriod;
     if (
       state.config.autoSpawnTraffic &&
-      !state.liveSnapshotMeta?.liveSyncEnabled &&
       state.time - state.lastTrafficSpawnAt >= spawnPeriod
     ) {
       state.lastTrafficSpawnAt = state.time;

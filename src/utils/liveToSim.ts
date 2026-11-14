@@ -530,7 +530,7 @@ export function convertLiveTracksToSimulation(opts: {
       sim.aircraftOrder[0];
   }
 
-  sim.config.autoSpawnTraffic = chosen.length === 0;
+  sim.config.autoSpawnTraffic = scenarioId !== "SANDBOX";
 
   sim.liveSnapshotMeta = {
     airportIcao: opts.airportRecord.icao,
