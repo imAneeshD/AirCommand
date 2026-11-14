@@ -353,7 +353,8 @@ function runAutonomousGround(state: SimulationState): void {
       ac.speed <= 1 &&
       state.time - ac.stateEnteredAt >= 3.5 &&
       !ac.yieldToAircraftId &&
-      !ac.stepBackTargetNodeId
+      !ac.stepBackTargetNodeId &&
+      !ac.stepBackRouteNodeIds
     ) {
       const conflict = inspectGroundConflict(state, ac);
       if (conflict?.mutualDeadlock && conflict.blocker) {

@@ -135,43 +135,76 @@ export function updateAircraftMovement(
         ac.verticalSpeed = 0;
 
         // Taxiway step-back / pull-back resolution (clearing an intersection deadlock)
-        if (ac.stepBackTargetNodeId) {
-          const targetNode = state.airport.nodes[ac.stepBackTargetNodeId];
+        if (ac.stepBackTargetNodeId || (ac.stepBackRouteNodeIds && ac.stepBackRouteNodeIds.length > 0)) {
+          if (!ac.stepBackRouteNodeIds || ac.stepBackRouteNodeIds.length === 0) {
+            if (ac.stepBackTargetNodeId) {
+              ac.stepBackRouteNodeIds = [ac.stepBackTargetNodeId];
+            }
+          }
+
+          const nextNodeId = ac.stepBackRouteNodeIds?.[0] ?? ac.stepBackTargetNodeId;
+          const targetNode = nextNodeId ? state.airport.nodes[nextNodeId] : undefined;
+
           if (!targetNode) {
             ac.stepBackTargetNodeId = undefined;
+            ac.stepBackRouteNodeIds = undefined;
             ac.speed = 0;
             ac.state = "HOLD_POSITION";
             ac.stateEnteredAt = state.time;
             break;
           }
-          ac.speed = 7;
+
+          ac.speed = 10;
           const dx = targetNode.x - ac.x;
           const dy = targetNode.y - ac.y;
           const dist = Math.hypot(dx, dy);
           const step = (ac.speed / 3600) * dt;
+
           if (dist <= Math.max(step, 0.003)) {
             ac.x = targetNode.x;
             ac.y = targetNode.y;
             ac.currentNodeId = targetNode.id;
-            ac.speed = 0;
-            ac.stepBackTargetNodeId = undefined;
-            completeClearancesOfType(ac, "PUSHBACK");
-            const idxInRoute = ac.assignedRouteNodeIds.indexOf(targetNode.id);
-            if (idxInRoute >= 0) {
-              ac.routeStepIndex = idxInRoute;
-            } else if (ac.assignedRouteNodeIds.length > 0) {
-              const firstNext = ac.assignedRouteNodeIds[0];
-              const edgeExists = state.airport.edges.some(
-                (e) => e.from === targetNode.id && e.to === firstNext
+
+            if (ac.stepBackRouteNodeIds && ac.stepBackRouteNodeIds.length > 1) {
+              ac.stepBackRouteNodeIds.shift();
+              ac.stepBackTargetNodeId = ac.stepBackRouteNodeIds[0];
+            } else {
+              ac.speed = 0;
+              ac.stepBackTargetNodeId = undefined;
+              ac.stepBackRouteNodeIds = undefined;
+              completeClearancesOfType(ac, "PUSHBACK");
+
+              // Orient heading cleanly with connected taxiway branch edge
+              const connectedEdges = state.airport.edges.filter(
+                (e) => (e.from === targetNode.id || e.to === targetNode.id) && !e.runwayCrossing
               );
-              if (edgeExists) {
-                ac.assignedRouteNodeIds = [targetNode.id, ...ac.assignedRouteNodeIds];
-                ac.routeStepIndex = 0;
+              if (connectedEdges.length > 0) {
+                const otherEndId = connectedEdges[0].from === targetNode.id ? connectedEdges[0].to : connectedEdges[0].from;
+                const otherEnd = state.airport.nodes[otherEndId];
+                if (otherEnd) {
+                  const edgeAngle = ((Math.atan2(otherEnd.x - targetNode.x, otherEnd.y - targetNode.y) * 180) / Math.PI + 360) % 360;
+                  ac.heading = edgeAngle;
+                }
               }
+
+              const idxInRoute = ac.assignedRouteNodeIds.indexOf(targetNode.id);
+              if (idxInRoute >= 0) {
+                ac.routeStepIndex = idxInRoute;
+              } else if (ac.assignedRouteNodeIds.length > 0) {
+                const firstNext = ac.assignedRouteNodeIds[0];
+                const edgeExists = state.airport.edges.some(
+                  (e) => e.from === targetNode.id && e.to === firstNext
+                );
+                if (edgeExists) {
+                  ac.assignedRouteNodeIds = [targetNode.id, ...ac.assignedRouteNodeIds];
+                  ac.routeStepIndex = 0;
+                }
+              }
+
+              ac.state = "HOLD_POSITION";
+              ac.holdingShortReason = "TRAFFIC";
+              ac.stateEnteredAt = state.time;
             }
-            ac.state = "HOLD_POSITION";
-            ac.holdingShortReason = "TRAFFIC";
-            ac.stateEnteredAt = state.time;
           } else {
             ac.x += (dx / dist) * step;
             ac.y += (dy / dist) * step;

@@ -1178,17 +1178,32 @@ export const ClearanceControlDeck: React.FC = () => {
                 <div className="space-y-2.5">
                   <div className="grid grid-cols-2 gap-1.5">
                     <button
-                      disabled={nordoLocked || (ac.state !== "AT_GATE" && ac.state !== "HOLD_POSITION") || isCommandDisabled("PUSHBACK")}
-                      onClick={() =>
-                        handleIssueClearance({
-                          aircraftId: ac.id,
-                          controller: "GROUND",
-                          type: "PUSHBACK",
-                        }, "PUSHBACK")
+                      disabled={
+                        nordoLocked ||
+                        (ac.state !== "AT_GATE" &&
+                          ac.state !== "HOLD_POSITION" &&
+                          ac.state !== "TAXIING") ||
+                        isCommandDisabled("PUSHBACK")
+                      }
+                      onClick={() => {
+                        if (ac.state !== "AT_GATE") {
+                          runGroundResolution("PUSHBACK_STEP");
+                        } else {
+                          handleIssueClearance({
+                            aircraftId: ac.id,
+                            controller: "GROUND",
+                            type: "PUSHBACK",
+                          }, "PUSHBACK");
+                        }
+                      }}
+                      title={
+                        ac.state !== "AT_GATE"
+                          ? "Push back to nearest intersection branch out of the opposite aircraft's way"
+                          : "Approve pushback from gate"
                       }
                       className="py-2 px-2 rounded-md border font-mono text-[11px] font-bold transition-colors disabled:opacity-35 disabled:cursor-not-allowed bg-[var(--atc-accent-bg)] hover:opacity-90 border-[var(--atc-accent-border)] text-[var(--atc-accent-text)]"
                     >
-                      APPROVE PUSHBACK
+                      {ac.state === "AT_GATE" ? "APPROVE PUSHBACK" : "PUSH BACK CLEAR"}
                     </button>
                     <button
                       disabled={nordoLocked || ac.altitude > sim.airport.elevationFt + 50 || isCommandDisabled("HOLD_POSITION")}
