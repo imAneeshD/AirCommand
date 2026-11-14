@@ -363,6 +363,17 @@ wss.on("connection", (ws) => {
         return;
       }
 
+      if (type === "CLAIM_AIRCRAFT") {
+        const res = roomService.claimAircraft(
+          String(msg.roomCode ?? client.roomCode ?? ""),
+          client.playerId,
+          String(msg.aircraftId ?? ""),
+          msg.targetRole as ControllerRole | undefined
+        );
+        client.send({ type: "ACTION_RESULT", action: "CLAIM_AIRCRAFT", ...res });
+        return;
+      }
+
       if (type === "SET_READY") {
         const res = roomService.setReady(
           String(msg.roomCode ?? client.roomCode ?? ""),

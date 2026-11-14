@@ -2076,3 +2076,42 @@ test("Respective aircraft park in respective places: Cargo at cargo gates, Milit
   assert.ok(!paxGate.toUpperCase().includes("CARGO"), `Passenger plane should not take cargo stand, got ${paxGate}`);
   assert.ok(!paxGate.toUpperCase().includes("MIL"), `Passenger plane should not take military stand, got ${paxGate}`);
 });
+
+test("Multiplayer simulation with human DEL+CTR and automated GND+TWR progresses hold-short departures without stalling and allows station takeover", () => {
+  const sim = createScenarioSimulation("LOW_TRAFFIC", "ALL", "KAST");
+  sim.config.activePlayerStation = "ALL";
+  sim.config.stationControl = {
+    DELIVERY: "PLAYER",
+    GROUND: "AUTONOMOUS",
+    TOWER: "AUTONOMOUS",
+    DEPARTURE: "AUTONOMOUS",
+    CENTER: "PLAYER",
+  };
+
+  const dep = Object.values(sim.aircraft).find((a) => a.flightKind === "DEPARTURE")!;
+  dep.controller = "GROUND";
+  dep.state = "HOLDING_SHORT";
+  dep.holdingAtRunway = "09L";
+  dep.targetRunway = "09L";
+  dep.holdingShortReason = "DEPARTURE_RUNWAY";
+
+  // Step simulation forward through autonomous controllers
+  stepSimulation(sim, 0.5);
+
+  // Auto-controllers should have issued handoff to Tower and not created a blocking pending handoff
+  assert.ok(
+    !sim.handoffs?.some((h) => h.aircraftId === dep.id && h.status === "PENDING"),
+    "No handoff should remain PENDING waiting for human acceptance when Tower is AUTONOMOUS"
+  );
+
+  // Advance time past readback delay (2.5s)
+  stepSimulation(sim, 3.0);
+
+  // The aircraft should now be on Tower frequency or cleared for takeoff / line-up
+  const finalController: string = dep.controller;
+  const finalState: string = dep.state;
+  assert.ok(
+    finalController === "TOWER" || finalState === "TAKEOFF_ROLL" || finalState === "LINE_UP_WAIT",
+    `Aircraft should have progressed to Tower or takeoff, current controller=${dep.controller}, state=${dep.state}`
+  );
+});

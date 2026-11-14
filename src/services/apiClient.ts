@@ -297,6 +297,10 @@ export class MultiplayerWsClient {
     this.send({ type: "CLAIM_ROLE", role, ...(playerName ? { playerName } : {}) });
   }
 
+  claimAircraft(aircraftId: string, targetRole?: ControllerRole): void {
+    this.send({ type: "CLAIM_AIRCRAFT", aircraftId, ...(targetRole ? { targetRole } : {}) });
+  }
+
   setReady(ready: boolean): void {
     this.send({ type: "SET_READY", ready });
   }
