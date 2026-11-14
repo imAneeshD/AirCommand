@@ -339,7 +339,9 @@ export function submitClearanceDecision(
     }
 
     case "PUSHBACK": {
-      const isStepBack = Boolean(params.stepBack);
+      const isStepBack =
+        Boolean(params.stepBack) ||
+        (aircraft.state !== "AT_GATE" && aircraft.altitude <= state.airport.elevationFt + 50);
       const allowTaxiStepBack =
         isStepBack &&
         aircraft.altitude <= state.airport.elevationFt + 50 &&
@@ -355,6 +357,7 @@ export function submitClearanceDecision(
         };
       }
       if (allowTaxiStepBack) {
+        params.stepBack = true;
         const reqTarget = typeof params.targetNodeId === "string" ? params.targetNodeId : undefined;
         if (reqTarget && state.airport.nodes[reqTarget]) {
           params.targetNodeId = reqTarget;
@@ -1075,14 +1078,22 @@ function applyAcknowledgedClearance(
       if (aircraft.pendingRequest?.type === "PUSHBACK") {
         aircraft.pendingRequest.resolved = true;
       }
-      if (clearance.parameters.stepBack && typeof clearance.parameters.targetNodeId === "string") {
-        aircraft.stepBackTargetNodeId = clearance.parameters.targetNodeId;
+      if (clearance.parameters.stepBack) {
+        if (typeof clearance.parameters.targetNodeId === "string") {
+          aircraft.stepBackTargetNodeId = clearance.parameters.targetNodeId;
+        }
+        if (Array.isArray(clearance.parameters.routeNodeIds)) {
+          aircraft.stepBackRouteNodeIds = [...(clearance.parameters.routeNodeIds as string[])];
+        } else if (aircraft.stepBackTargetNodeId) {
+          aircraft.stepBackRouteNodeIds = [aircraft.stepBackTargetNodeId];
+        }
         aircraft.yieldToAircraftId =
           typeof clearance.parameters.yieldToAircraftId === "string"
             ? clearance.parameters.yieldToAircraftId
             : undefined;
       } else {
         aircraft.stepBackTargetNodeId = undefined;
+        aircraft.stepBackRouteNodeIds = undefined;
       }
       aircraft.state = "PUSHBACK_APPROVED";
       aircraft.stateEnteredAt = state.time;

@@ -8,6 +8,7 @@ import type {
   AirportLayout,
   ClearanceCommandInput,
   SimulationState,
+  TaxiwayName,
 } from "../types/atc.ts";
 
 export type GroundResolutionKind =
@@ -24,8 +25,89 @@ export interface GroundConflictReport {
   reason: string;
   bypassRoute: SuggestedTaxiRoute | null;
   stepBackNodeId: string | null;
+  stepBackRouteNodeIds?: string[];
   stepBackLabel: string | null;
   recommendedAction: Exclude<GroundResolutionKind, "AUTO_RESOLVE"> | null;
+}
+
+function distToSegment(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq < 1e-8) return Math.hypot(px - x1, py - y1);
+  const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lenSq));
+  const projX = x1 + t * dx;
+  const projY = y1 + t * dy;
+  return Math.hypot(px - projX, py - projY);
+}
+
+function distToBlockerForwardCorridor(
+  px: number,
+  py: number,
+  blocker: Aircraft | null,
+  airport: AirportLayout
+): number {
+  if (!blocker) return Infinity;
+
+  let minDist = Infinity;
+
+  // 1. If blocker has planned route ahead, check segments of the route
+  if (blocker.assignedRouteNodeIds && blocker.assignedRouteNodeIds.length >= 2) {
+    const startIdx = Math.max(0, blocker.routeStepIndex);
+    const firstNode = airport.nodes[blocker.assignedRouteNodeIds[startIdx]];
+    if (firstNode) {
+      const d = distToSegment(px, py, blocker.x, blocker.y, firstNode.x, firstNode.y);
+      if (d < minDist) minDist = d;
+    }
+    const endIdx = Math.min(blocker.assignedRouteNodeIds.length - 1, startIdx + 6);
+    for (let i = startIdx; i < endIdx; i++) {
+      const n1 = airport.nodes[blocker.assignedRouteNodeIds[i]];
+      const n2 = airport.nodes[blocker.assignedRouteNodeIds[i + 1]];
+      if (!n1 || !n2) continue;
+      const d = distToSegment(px, py, n1.x, n1.y, n2.x, n2.y);
+      if (d < minDist) minDist = d;
+    }
+  }
+
+  // 2. Also check forward projection along blocker heading (at least 0.25 NM ahead)
+  const bRad = (blocker.heading * Math.PI) / 180;
+  const bFwdX = blocker.x + Math.sin(bRad) * 0.25;
+  const bFwdY = blocker.y + Math.cos(bRad) * 0.25;
+  const forwardRayDist = distToSegment(px, py, blocker.x, blocker.y, bFwdX, bFwdY);
+  if (forwardRayDist < minDist) minDist = forwardRayDist;
+
+  // Direct distance to blocker nose/center
+  const directDist = Math.hypot(px - blocker.x, py - blocker.y);
+  if (directDist < minDist) minDist = directDist;
+
+  return minDist;
+}
+
+function getNodeConnectedNeighbors(
+  nodeId: string,
+  airport: AirportLayout
+): Array<{ to: string; taxiway: TaxiwayName }> {
+  const neighbors: Array<{ to: string; taxiway: TaxiwayName }> = [];
+  const seen = new Set<string>();
+  for (const e of airport.edges) {
+    if (e.runwayCrossing) continue;
+    if (e.from === nodeId && !seen.has(e.to)) {
+      neighbors.push({ to: e.to, taxiway: e.taxiway });
+      seen.add(e.to);
+    }
+    if (e.to === nodeId && !seen.has(e.from)) {
+      neighbors.push({ to: e.from, taxiway: e.taxiway });
+      seen.add(e.from);
+    }
+  }
+  return neighbors;
+}
+
+function isIntersectionNode(nodeId: string, airport: AirportLayout): boolean {
+  const neighbors = getNodeConnectedNeighbors(nodeId, airport);
+  if (neighbors.length >= 3) return true;
+  const twys = new Set(neighbors.map((n) => n.taxiway).filter(Boolean));
+  return twys.size >= 2;
 }
 
 function isSurfaceContender(ac: Aircraft | undefined, elevFt: number): ac is Aircraft {
@@ -45,32 +127,66 @@ export function findBestStepBackNode(
   airport: AirportLayout,
   ac: Aircraft,
   blocker: Aircraft | null
-): { nodeId: string; label: string } | null {
-  const blockerDistFrom = (nx: number, ny: number) =>
-    blocker ? Math.hypot(nx - blocker.x, ny - blocker.y) : Infinity;
-
+): { nodeId: string; routeNodeIds: string[]; label: string } | null {
   const curDistToBlocker = blocker ? Math.hypot(ac.x - blocker.x, ac.y - blocker.y) : 0;
+  const SAFE_CLEARANCE_NM = 0.018; // ~33m lateral clearance from blocker corridor
+  const MAX_STEP_BACK_NM = 0.12; // Keep pushback localized to nearest intersection within ~220m
 
-  // 1. Prefer stepping back to prior route waypoint behind the current segment
+  const rad = (ac.heading * Math.PI) / 180;
+  const fwdX = Math.sin(rad);
+  const fwdY = Math.cos(rad);
+
+  // 1. First priority: Check immediate prior waypoints along aircraft's own route
   if (ac.assignedRouteNodeIds.length >= 2) {
-    const candidateIdx = Math.max(0, ac.routeStepIndex - 1);
-    const candIds = [ac.assignedRouteNodeIds[ac.routeStepIndex], ac.assignedRouteNodeIds[candidateIdx]];
-    for (const nid of candIds) {
+    const curIdx = Math.max(0, ac.routeStepIndex);
+    const backtrackPath: string[] = [];
+    for (let i = curIdx - 1; i >= 0; i--) {
+      const nid = ac.assignedRouteNodeIds[i];
       if (!nid) continue;
       const node = airport.nodes[nid];
       if (!node || node.runwayId) continue;
-      const dAc = Math.hypot(node.x - ac.x, node.y - ac.y);
-      if (dAc < 0.008 || dAc > 0.25) continue;
-      if (!blocker || blockerDistFrom(node.x, node.y) > curDistToBlocker + 0.01) {
-        return { nodeId: node.id, label: node.label ?? node.id };
+
+      const dFromAc = Math.hypot(node.x - ac.x, node.y - ac.y);
+      if (dFromAc > MAX_STEP_BACK_NM) break;
+      backtrackPath.push(nid);
+
+      // Check if this prior route node is an intersection/junction
+      if (isIntersectionNode(nid, airport)) {
+        const neighbors = getNodeConnectedNeighbors(nid, airport);
+        for (const nbr of neighbors) {
+          const bNode = airport.nodes[nbr.to];
+          if (!bNode || bNode.runwayId) continue;
+          if (backtrackPath.includes(bNode.id)) continue;
+
+          const latDist = distToBlockerForwardCorridor(bNode.x, bNode.y, blocker, airport);
+          const distToB = Math.hypot(bNode.x - ac.x, bNode.y - ac.y);
+
+          if (latDist >= SAFE_CLEARANCE_NM && distToB <= MAX_STEP_BACK_NM) {
+            return {
+              nodeId: bNode.id,
+              routeNodeIds: [...backtrackPath, bNode.id],
+              label: bNode.label ?? nbr.taxiway ?? `Intersection TWY ${nbr.taxiway ?? ""}`,
+            };
+          }
+        }
+      }
+
+      // Or if the prior node itself is already laterally clear of blocker's corridor
+      const nodeLatDist = distToBlockerForwardCorridor(node.x, node.y, blocker, airport);
+      if (nodeLatDist >= SAFE_CLEARANCE_NM && dFromAc >= 0.008) {
+        return {
+          nodeId: node.id,
+          routeNodeIds: [...backtrackPath],
+          label: node.label ?? `Intersection ${node.id}`,
+        };
       }
     }
   }
 
-  // 2. Otherwise search connected non-runway neighbors moving behind nose or away from blocker
+  // 2. Second priority: Local BFS search backwards (within MAX_STEP_BACK_NM)
   let anchorId = ac.currentNodeId;
   if (!anchorId || !airport.nodes[anchorId]) {
-    let bestD = 0.09;
+    let bestD = 0.08;
     for (const n of Object.values(airport.nodes)) {
       if (n.runwayId) continue;
       const d = Math.hypot(n.x - ac.x, n.y - ac.y);
@@ -82,35 +198,117 @@ export function findBestStepBackNode(
   }
   if (!anchorId) return null;
 
-  const rad = (ac.heading * Math.PI) / 180;
-  const fwdX = Math.sin(rad);
-  const fwdY = Math.cos(rad);
+  interface SearchNode {
+    id: string;
+    path: string[];
+    dist: number;
+  }
 
-  let best: { nodeId: string; label: string; score: number } | null = null;
-  for (const edge of airport.edges) {
-    if (edge.from !== anchorId) continue;
-    const target = airport.nodes[edge.to];
-    if (!target || target.runwayId) continue;
-    const dx = target.x - ac.x;
-    const dy = target.y - ac.y;
-    const dist = Math.hypot(dx, dy);
-    if (dist < 0.012 || dist > 0.28) continue;
+  const queue: SearchNode[] = [{ id: anchorId, path: [anchorId], dist: 0 }];
+  const visited = new Set<string>([anchorId]);
 
-    const backwardDot = -((dx * fwdX + dy * fwdY) / dist); // +1 = straight behind tail
-    const blockerGain = blocker ? blockerDistFrom(target.x, target.y) - curDistToBlocker : 0;
-    const score = backwardDot * 2 + blockerGain * 20;
-    if (backwardDot > 0 || blockerGain > 0.015) {
-      if (!best || score > best.score) {
-        best = {
-          nodeId: target.id,
-          label: target.label ?? edge.taxiway ?? target.id,
-          score,
-        };
+  let bestBranchSolution: { nodeId: string; routeNodeIds: string[]; label: string; score: number } | null = null;
+  let bestFallbackSolution: { nodeId: string; routeNodeIds: string[]; label: string; score: number } | null = null;
+
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    if (cur.dist > MAX_STEP_BACK_NM) continue;
+
+    const curNode = airport.nodes[cur.id];
+    if (!curNode) continue;
+
+    const neighbors = getNodeConnectedNeighbors(cur.id, airport);
+
+    if (isIntersectionNode(cur.id, airport)) {
+      for (const nbr of neighbors) {
+        if (cur.path.includes(nbr.to)) continue;
+        const bNode = airport.nodes[nbr.to];
+        if (!bNode || bNode.runwayId) continue;
+
+        const latDist = distToBlockerForwardCorridor(bNode.x, bNode.y, blocker, airport);
+        const distFromAc = Math.hypot(bNode.x - ac.x, bNode.y - ac.y);
+
+        if (latDist >= SAFE_CLEARANCE_NM && distFromAc <= MAX_STEP_BACK_NM) {
+          const score = latDist * 100 - distFromAc * 10;
+          if (!bestBranchSolution || score > bestBranchSolution.score) {
+            const cleanPath = cur.path[0] === anchorId ? cur.path.slice(1) : cur.path;
+            bestBranchSolution = {
+              nodeId: bNode.id,
+              routeNodeIds: [...cleanPath, bNode.id],
+              label: bNode.label ?? nbr.taxiway ?? `Intersection TWY ${nbr.taxiway ?? ""}`,
+              score,
+            };
+          }
+        }
+      }
+    }
+
+    for (const nbr of neighbors) {
+      if (visited.has(nbr.to)) continue;
+      const target = airport.nodes[nbr.to];
+      if (!target || target.runwayId) continue;
+
+      const dx = target.x - ac.x;
+      const dy = target.y - ac.y;
+      const distFromAc = Math.hypot(dx, dy);
+      if (distFromAc > MAX_STEP_BACK_NM) continue;
+
+      const backwardDot = -((dx * fwdX + dy * fwdY) / Math.max(0.001, distFromAc));
+      const latDist = distToBlockerForwardCorridor(target.x, target.y, blocker, airport);
+      const blockerDist = blocker ? Math.hypot(target.x - blocker.x, target.y - blocker.y) : Infinity;
+
+      if (backwardDot >= -0.2 || blockerDist > curDistToBlocker + 0.008) {
+        visited.add(nbr.to);
+        const nextDist = cur.dist + Math.hypot(target.x - curNode.x, target.y - curNode.y);
+        queue.push({
+          id: nbr.to,
+          path: [...cur.path, nbr.to],
+          dist: nextDist,
+        });
+
+        const fallbackScore = latDist * 40 + blockerDist * 20 - distFromAc * 10;
+        if (!bestFallbackSolution || fallbackScore > bestFallbackSolution.score) {
+          const cleanPath = cur.path[0] === anchorId ? cur.path.slice(1) : cur.path;
+          bestFallbackSolution = {
+            nodeId: target.id,
+            routeNodeIds: [...cleanPath, target.id],
+            label: target.label ?? nbr.taxiway ?? target.id,
+            score: fallbackScore,
+          };
+        }
       }
     }
   }
 
-  return best ? { nodeId: best.nodeId, label: best.label } : null;
+  if (bestBranchSolution) {
+    return {
+      nodeId: bestBranchSolution.nodeId,
+      routeNodeIds: bestBranchSolution.routeNodeIds,
+      label: bestBranchSolution.label,
+    };
+  }
+
+  // 3. Fallback: immediate prior route waypoint
+  if (ac.assignedRouteNodeIds.length >= 2) {
+    const candidateIdx = Math.max(0, ac.routeStepIndex - 1);
+    const candIds = [ac.assignedRouteNodeIds[candidateIdx], ac.assignedRouteNodeIds[ac.routeStepIndex]];
+    for (const nid of candIds) {
+      if (!nid) continue;
+      const node = airport.nodes[nid];
+      if (!node || node.runwayId) continue;
+      const dAc = Math.hypot(node.x - ac.x, node.y - ac.y);
+      if (dAc < 0.008 || dAc > 0.25) continue;
+      return { nodeId: node.id, routeNodeIds: [node.id], label: node.label ?? node.id };
+    }
+  }
+
+  return bestFallbackSolution
+    ? {
+        nodeId: bestFallbackSolution.nodeId,
+        routeNodeIds: bestFallbackSolution.routeNodeIds,
+        label: bestFallbackSolution.label,
+      }
+    : null;
 }
 
 export function findBestBypassRoute(
@@ -300,6 +498,7 @@ export function inspectGroundConflict(
     reason,
     bypassRoute,
     stepBackNodeId: stepBack?.nodeId ?? null,
+    stepBackRouteNodeIds: stepBack?.routeNodeIds,
     stepBackLabel: stepBack?.label ?? null,
     recommendedAction,
   };
@@ -355,6 +554,7 @@ export function buildResolutionCommands(
       parameters: {
         stepBack: true,
         targetNodeId: report.stepBackNodeId,
+        routeNodeIds: report.stepBackRouteNodeIds ?? [report.stepBackNodeId],
         yieldToAircraftId: report.blocker?.id,
         immediate: true,
       },

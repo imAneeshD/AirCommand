@@ -1745,8 +1745,90 @@ test("Ground traffic deadlock detector and 1-click Wait & Pass, Push Back Step, 
   assert.equal(submitClearanceDecision(sim, pushCmds[0], "PLAYER").ok, true);
   assert.equal(dep.state, "PUSHING_BACK");
   assert.ok(dep.stepBackTargetNodeId);
-  for (let i = 0; i < 40; i++) stepSimulation(sim, 1.0);
+  for (let i = 0; i < 80; i++) {
+    if (!dep.stepBackTargetNodeId) break;
+    stepSimulation(sim, 1.0);
+  }
   assert.equal(dep.stepBackTargetNodeId, undefined);
+  assert.equal(dep.state, "HOLD_POSITION");
+});
+
+test("Blocked taxiway aircraft pushes back into intersection branch clear of opposite plane corridor", () => {
+  const sim = createScenarioSimulation("NORMAL_OPS", "GROUND", "KAST");
+  const dep = createDepartureAircraft(sim, {
+    callsign: "IGO946",
+    spokenCallsign: "iFly 946",
+    gateId: sim.airport.gateIds[0],
+    targetRunway: sim.airport.primaryDepartureRunway,
+    requiresPushback: false,
+    controller: "GROUND",
+  });
+  const arr = createArrivalAircraft(sim, {
+    callsign: "IGO372",
+    spokenCallsign: "iFly 372",
+    x: 0,
+    y: 0,
+    heading: 90,
+    altitude: sim.airport.elevationFt,
+    speed: 0,
+    targetRunway: sim.airport.primaryArrivalRunway,
+    gateId: sim.airport.gateIds[1],
+    state: "FINAL",
+    controller: "GROUND",
+  });
+
+  const r1 = getSuggestedTaxiRoutes(sim.airport, `GATE_${dep.gateId}`, sim.airport.primaryDepartureRunway, dep.gateId, false)[0];
+  const midA = sim.airport.nodes[r1.nodeIds[2]]!;
+  const midB = sim.airport.nodes[r1.nodeIds[3]]!;
+  const dirDeg = ((Math.atan2(midB.x - midA.x, midB.y - midA.y) * 180) / Math.PI + 360) % 360;
+  const oppDeg = (dirDeg + 180) % 360;
+  const ux = Math.sin((dirDeg * Math.PI) / 180);
+  const uy = Math.cos((dirDeg * Math.PI) / 180);
+
+  dep.state = "TAXIING";
+  dep.currentNodeId = midA.id;
+  dep.x = midA.x;
+  dep.y = midA.y;
+  dep.heading = dirDeg;
+  dep.speed = 0;
+  dep.assignedRouteNodeIds = r1.nodeIds.slice(1);
+  dep.assignedRouteTaxiways = r1.taxiways;
+  dep.routeStepIndex = 1;
+
+  arr.state = "TAXIING";
+  arr.currentNodeId = midB.id;
+  arr.x = midA.x + ux * 0.038;
+  arr.y = midA.y + uy * 0.038;
+  arr.heading = oppDeg;
+  arr.speed = 0;
+  const revSlice = [...r1.nodeIds].reverse();
+  arr.assignedRouteNodeIds = revSlice;
+  arr.assignedRouteTaxiways = r1.taxiways;
+  arr.routeStepIndex = 0;
+
+  const report = inspectGroundConflict(sim, dep);
+  assert.ok(report);
+  assert.ok(report.stepBackNodeId);
+  assert.ok(report.stepBackRouteNodeIds && report.stepBackRouteNodeIds.length >= 1);
+
+  const targetNode = sim.airport.nodes[report.stepBackNodeId]!;
+  assert.ok(targetNode);
+  const dToBlocker = Math.hypot(targetNode.x - arr.x, targetNode.y - arr.y);
+  assert.ok(dToBlocker > 0.03);
+
+  const cmds = buildResolutionCommands(sim, dep, "PUSHBACK_STEP");
+  assert.ok(cmds[0] && cmds[0].type === "PUSHBACK");
+  assert.equal(submitClearanceDecision(sim, cmds[0], "PLAYER").ok, true);
+  assert.equal(dep.state, "PUSHING_BACK");
+  assert.ok(dep.stepBackRouteNodeIds && dep.stepBackRouteNodeIds.length > 0);
+
+  for (let i = 0; i < 90; i++) {
+    if (dep.state === "HOLD_POSITION") break;
+    stepSimulation(sim, 1.0);
+  }
+  assert.equal(dep.state, "HOLD_POSITION");
+  assert.equal(dep.stepBackTargetNodeId, undefined);
+  assert.equal(dep.yieldToAircraftId, arr.id);
 });
 
 test("Go-Around aircraft never freeze in midair and canAircraftMove returns true without stalling", () => {
