@@ -26,6 +26,7 @@ import { formatAltitudeReadout } from "../utils/telemetry.ts";
 import { getDeadlockedAircraftIds } from "../utils/groundConflict.ts";
 import { radioAudio } from "../utils/radioAudio.ts";
 import { getActiveCallingSignals } from "../utils/radioSignals.ts";
+import { VoiceWaveform } from "./VoiceWaveform.tsx";
 import { Accordion } from "./Accordion.tsx";
 
 type StripFilter = "ALL" | "STATION" | "DEP" | "ARR";
@@ -362,6 +363,14 @@ export const FlightStripRack: React.FC = () => {
             <span className="text-[10px] font-mono text-[var(--atc-muted)] shrink-0">
               {ac.aircraftType}
             </span>
+            {isCalling && (
+              <VoiceWaveform
+                size="xs"
+                isSpeaking={true}
+                className="text-[var(--atc-amber)] shrink-0 ml-0.5"
+                title={`${ac.callsign} transmitting voice`}
+              />
+            )}
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
@@ -385,13 +394,13 @@ export const FlightStripRack: React.FC = () => {
             {isCalling && (
               <span
                 title="Actively transmitting voice on radio"
-                className="px-1.5 py-0.5 rounded bg-[var(--atc-amber-bg)] text-[var(--atc-amber)] border border-[var(--atc-amber-border)] text-[9px] font-mono font-bold inline-flex items-center gap-1"
+                className="px-1.5 py-0.5 rounded bg-[var(--atc-amber-bg)] text-[var(--atc-amber)] border border-[var(--atc-amber-border)] text-[9px] font-mono font-bold inline-flex items-center gap-1.5"
               >
-                <span className="inline-flex items-end gap-[1.5px] h-2.5" aria-hidden="true">
-                  <span className="w-[2px] h-1.5 bg-amber-500 rounded-full animate-pulse" />
-                  <span className="w-[2px] h-2.5 bg-amber-500 rounded-full animate-bounce" />
-                  <span className="w-[2px] h-1 bg-amber-500 rounded-full animate-pulse" />
-                </span>
+                <VoiceWaveform
+                  size="xs"
+                  isSpeaking={true}
+                  className="text-[var(--atc-amber)]"
+                />
                 TX
               </span>
             )}
@@ -483,11 +492,17 @@ export const FlightStripRack: React.FC = () => {
           </div>
         )}
 
-        {/* Pilot Request Banner with Inline Approval Button (Only shown in strip as requested) */}
+        {/* Pilot Request Banner with Inline Approval Button and Voice Waveform */}
         {!ac.hasReadbackError && pendingRb.length === 0 && hasReq && ac.pendingRequest && !ho && (
           <div className="mt-1.5 px-2 py-1.5 rounded-md border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] flex items-center justify-between gap-2 shadow-sm">
             <span className="flex items-center gap-1.5 font-mono text-[10px] font-bold text-[var(--atc-amber)] truncate">
               <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-[var(--atc-amber)]" />
+              <VoiceWaveform
+                size="xs"
+                isSpeaking={true}
+                className="text-[var(--atc-amber)] shrink-0 opacity-90"
+                title="Pilot voice request active"
+              />
               <span className="truncate">
                 REQ: {ac.pendingRequest.type}
                 {ac.pendingRequest.runway
@@ -516,9 +531,15 @@ export const FlightStripRack: React.FC = () => {
         )}
 
         {!ac.hasReadbackError && pendingRb.length > 0 && (
-          <div className="mt-1.5 px-1.5 py-0.5 rounded bg-[var(--atc-cyan-bg)] border border-[var(--atc-cyan-border)] text-[10px] font-mono text-[var(--atc-cyan)] flex items-center gap-1">
+          <div className="mt-1.5 px-1.5 py-0.5 rounded bg-[var(--atc-cyan-bg)] border border-[var(--atc-cyan-border)] text-[10px] font-mono text-[var(--atc-cyan)] flex items-center gap-1.5">
             <Radio className="w-3 h-3 shrink-0 animate-pulse" />
-            Readback: {pendingRb[pendingRb.length - 1].type}
+            <VoiceWaveform
+              size="xs"
+              isSpeaking={true}
+              className="text-[var(--atc-cyan)] shrink-0 opacity-90"
+              title="Pilot readback transmission active"
+            />
+            <span className="truncate">Readback: {pendingRb[pendingRb.length - 1].type}</span>
           </div>
         )}
       </div>
@@ -560,6 +581,14 @@ export const FlightStripRack: React.FC = () => {
             <span className="font-mono font-bold text-xs text-[var(--atc-text)] truncate">
               {ac.callsign}
             </span>
+            {isCalling && (
+              <VoiceWaveform
+                size="xs"
+                isSpeaking={true}
+                className="text-[var(--atc-amber)] shrink-0 ml-0.5"
+                title={`${ac.callsign} transmitting voice`}
+              />
+            )}
           </div>
           <div className="flex items-center gap-1 shrink-0">
             {isSelected && (
