@@ -808,7 +808,7 @@ export const ClearanceControlDeck: React.FC = () => {
                 onClick={() => dispatchCrashRescue(ac.id)}
                 className={`w-full py-2 px-2.5 rounded-md text-xs font-bold transition-all flex items-center justify-center gap-2 ${
                   ac.crashDetails?.arffDispatched
-                    ? "bg-emerald-950/60 border border-emerald-500/80 text-emerald-300 cursor-default"
+                    ? "bg-emerald-100 text-emerald-900 border border-emerald-300 dark:bg-emerald-950/60 dark:border-emerald-500/80 dark:text-emerald-300 cursor-default"
                     : "bg-red-600 hover:bg-red-500 text-white shadow-md animate-pulse"
                 }`}
               >
@@ -1037,8 +1037,8 @@ export const ClearanceControlDeck: React.FC = () => {
                   <span
                     className={`text-[9px] font-bold px-2 py-0.5 rounded border ${
                       ac.flightPlan?.clearanceStatus === "CLEARED"
-                        ? "bg-emerald-950/80 text-emerald-400 border-emerald-700/80"
-                        : "bg-amber-950/80 text-amber-400 border-amber-700/80 animate-pulse"
+                        ? "bg-emerald-100 text-emerald-900 border-emerald-300 dark:bg-emerald-950/80 dark:text-emerald-300 dark:border-emerald-700/80"
+                        : "bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950/80 dark:text-amber-300 dark:border-amber-700/80 animate-pulse"
                     }`}
                   >
                     {ac.flightPlan?.clearanceStatus === "CLEARED" ? "IFR CLEARED" : "PENDING CLEARANCE"}
@@ -1226,8 +1226,8 @@ export const ClearanceControlDeck: React.FC = () => {
                     </button>
                   ) : (
                     <div className="space-y-2">
-                      <div className="p-2 rounded bg-emerald-950/30 border border-emerald-800/50 text-emerald-400 text-xs flex items-center gap-2">
-                        <CheckCircle className="w-4 h-4 shrink-0" />
+                      <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-900 dark:bg-emerald-950/50 dark:border-emerald-700/60 dark:text-emerald-300 text-xs font-semibold flex items-center gap-2 shadow-sm">
+                        <CheckCircle className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
                         <span>IFR Cleared · Aircraft ready at gate. Hand off to Ground.</span>
                       </div>
 
@@ -1245,10 +1245,10 @@ export const ClearanceControlDeck: React.FC = () => {
                             "HANDOFF_GND"
                           )
                         }
-                        className="w-full py-2.5 px-3 rounded-lg border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:bg-[var(--atc-emerald-border)] text-[var(--atc-emerald)] font-bold text-xs flex items-center justify-center gap-2 shadow-sm cursor-pointer disabled:opacity-35 transition-all"
+                        className="w-full py-2.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-all transform active:scale-[0.99]"
                       >
-                        <ArrowRight className="w-4 h-4" />
-                        CONTACT GROUND (121.90) FOR PUSHBACK &amp; START
+                        <ArrowRight className="w-4 h-4 shrink-0" />
+                        <span>CONTACT GROUND ({controllerFrequency("GROUND", sim.airport)} MHz) FOR PUSHBACK &amp; START</span>
                       </button>
                     </div>
                   )}
@@ -1351,7 +1351,7 @@ export const ClearanceControlDeck: React.FC = () => {
                             parameters: { targetController: "TOWER" },
                           }, "HANDOFF_TOWER")
                         }
-                        className="w-full py-2 px-3 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:bg-[var(--atc-surface)] hover:border-[var(--atc-cyan)] text-[var(--atc-cyan)] font-mono font-bold text-xs transition-colors flex items-center justify-center gap-1.5 disabled:opacity-35 disabled:cursor-not-allowed"
+                        className="w-full py-2.5 px-3 rounded-lg bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white font-mono font-bold text-xs transition-colors flex items-center justify-center gap-1.5 shadow-md cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         <Radio className="w-4 h-4" />
                         HANDOFF → TOWER ({controllerFrequency("TOWER", sim.airport)} MHz)
