@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Mic, MicOff } from "lucide-react";
+import { Mic, MicOff, CheckCircle2, AlertTriangle, Radio } from "lucide-react";
 import { useAtcStore } from "../store/atcStore.ts";
 import { radioAudio } from "../utils/radioAudio.ts";
 import {
@@ -61,8 +61,12 @@ export const VoicePttButton: React.FC = () => {
         return;
       }
       selectAircraft(parsed.aircraftId);
-      issueClearance(parsed.command);
-      showToast(true, `Executed: ${parsed.summary}`);
+      const res = issueClearance(parsed.command, true);
+      if (res && !res.ok) {
+        showToast(false, res.reason || "Clearance rejected by ATC rules");
+      } else {
+        showToast(true, `Executed: ${parsed.summary}`);
+      }
     },
     [issueClearance, selectAircraft, showToast]
   );
@@ -122,14 +126,24 @@ export const VoicePttButton: React.FC = () => {
     const captured = currentTranscriptRef.current.trim();
     setInterimText("");
 
-    // Stop speech recognition controller immediately and fetch accumulated transcript
+    // Stop speech recognition controller and fetch accumulated transcript
     const fromPtt = speechPtt.stop().trim();
     const candidate = fromPtt || captured;
 
     if (candidate && !executedThisTurnRef.current) {
       executeTranscript(candidate);
-    } else if (!candidate && !executedThisTurnRef.current) {
-      showToast(false, "No voice command heard — hold V clearly while speaking.");
+    } else {
+      // Short delay for final onresult/onend buffer flush
+      window.setTimeout(() => {
+        if (!executedThisTurnRef.current) {
+          const fallback = currentTranscriptRef.current.trim();
+          if (fallback) {
+            executeTranscript(fallback);
+          } else {
+            showToast(false, "No voice command heard — hold V clearly while speaking.");
+          }
+        }
+      }, 300);
     }
   }, [executeTranscript, listening, showToast]);
 
@@ -197,26 +211,42 @@ export const VoicePttButton: React.FC = () => {
 
       {(listening || toast) && (
         <div
-          className={`absolute right-0 top-full mt-2 w-72 z-50 px-2.5 py-2 rounded-lg border shadow-xl text-[11px] font-mono ${
+          className={`absolute right-0 top-full mt-2 w-80 z-50 p-2.5 rounded-lg border-2 shadow-2xl text-[12px] font-mono select-none ${
             listening
-              ? "bg-red-950/95 border-red-500 text-white"
+              ? "bg-slate-950 border-red-500 text-white shadow-red-950/60"
               : toast?.ok
-              ? "bg-[var(--atc-emerald-bg)] border-[var(--atc-emerald-border)] text-[var(--atc-emerald)]"
-              : "bg-[var(--atc-amber-bg)] border-[var(--atc-amber-border)] text-[var(--atc-amber)]"
+              ? "bg-slate-950 border-emerald-500 text-emerald-200 shadow-emerald-950/60"
+              : "bg-slate-950 border-amber-500 text-amber-200 shadow-amber-950/60"
           }`}
         >
           {listening ? (
             <div>
-              <div className="font-bold flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-red-400 animate-ping" />
-                MIC HOT — SPEAK CLEARANCE (RELEASE [V])
+              <div className="font-bold flex items-center gap-1.5 text-red-400">
+                <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping shrink-0" />
+                <span>MIC LIVE · TRANSMITTING (HOLD [V])</span>
               </div>
-              <div className="mt-1 text-red-100 italic">
-                {interimText || 'Say e.g. "Delta 437 cleared for takeoff"'}
+              <div className="mt-1.5 px-2 py-1.5 rounded bg-slate-900 border border-red-900/60 text-slate-100 text-[11px] leading-snug">
+                {interimText ? (
+                  <span className="text-white font-semibold">{interimText}</span>
+                ) : (
+                  <span className="text-slate-400 italic">Listening... Speak ATC clearance now</span>
+                )}
               </div>
             </div>
           ) : (
-            <div className="font-semibold">{toast?.text}</div>
+            <div className="flex items-start gap-2">
+              {toast?.ok ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+              ) : (
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              )}
+              <div className="leading-snug">
+                <div className="text-[10px] uppercase font-bold tracking-wider opacity-75">
+                  {toast?.ok ? "Voice Clearance" : "Clearance Rejected"}
+                </div>
+                <div className="font-semibold text-white mt-0.5">{toast?.text}</div>
+              </div>
+            </div>
           )}
         </div>
       )}

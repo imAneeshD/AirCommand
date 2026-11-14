@@ -919,8 +919,8 @@ export const RadarScopeCanvas: React.FC = () => {
         })()
       )}
 
-      {/* Top-Right Micro Legend (placed left of Compass Rose) */}
-      <div className="pointer-events-none absolute top-2.5 right-14 px-2.5 py-1 rounded-md bg-[var(--atc-surface)]/92 border border-[var(--atc-border)] shadow-[var(--atc-shadow)] text-[10px] font-mono text-[var(--atc-muted)] hidden xl:flex items-center gap-3 backdrop-blur-sm">
+      {/* Bottom-Right Micro Legend (cleanly separated from top toolbar, compass, and PTT dropdowns) */}
+      <div className="pointer-events-none absolute bottom-3 right-3 px-2.5 py-1 rounded-md bg-[var(--atc-surface)]/95 border border-[var(--atc-border)] shadow-[var(--atc-shadow)] text-[10px] font-mono text-[var(--atc-muted)] hidden xl:flex items-center gap-3 backdrop-blur-sm z-10">
         <span className="flex items-center gap-1">
           <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" /> Hold / Req
         </span>
