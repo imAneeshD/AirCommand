@@ -447,7 +447,7 @@ function ensureWsClient(set: (fn: (s: AtcStore) => Partial<AtcStore>) => void, g
 
       // Determine this client's role in the multiplayer room
       const myRole =
-        (["GROUND", "TOWER", "DEPARTURE"] as ControllerRole[]).find(
+        (["DELIVERY", "GROUND", "TOWER", "DEPARTURE", "CENTER"] as ControllerRole[]).find(
           (r) => room.slots[r].playerId === state.playerId
         ) ?? state.assignedRole;
 

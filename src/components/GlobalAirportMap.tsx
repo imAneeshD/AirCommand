@@ -12,6 +12,7 @@ import {
   Edit3,
   Filter,
   Globe2,
+  Loader2,
   MapPin,
   Moon,
   Plane,
@@ -140,6 +141,8 @@ export const GlobalAirportMap: React.FC = () => {
   const [basemapVariant, setBasemapVariant] = useState<MapBasemapVariant>("chart");
   const [convertingLive, setConvertingLive] = useState(false);
   const [seedMpWithLive, setSeedMpWithLive] = useState(false);
+  const [isCreatingMultiplayer, setIsCreatingMultiplayer] = useState(false);
+  const [isJoiningRoom, setIsJoiningRoom] = useState(false);
 
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -613,14 +616,31 @@ export const GlobalAirportMap: React.FC = () => {
   };
 
   const handleCreateMultiplayer = async () => {
+    if (isCreatingMultiplayer) return;
     const targetIcao = selectedAirportRecord?.icao ?? "VIDP";
-    await createMultiplayerRoom({
-      airportIcao: targetIcao,
-      scenarioId: selectedScenario,
-      difficulty: selectedDifficulty,
-      preferredRole: "TOWER",
-      seedFromLive: seedMpWithLive,
-    });
+    try {
+      setIsCreatingMultiplayer(true);
+      await createMultiplayerRoom({
+        airportIcao: targetIcao,
+        scenarioId: selectedScenario,
+        difficulty: selectedDifficulty,
+        preferredRole: "TOWER",
+        seedFromLive: seedMpWithLive,
+      });
+    } finally {
+      setIsCreatingMultiplayer(false);
+    }
+  };
+
+  const handleJoinMultiplayer = async (codeToJoin: string) => {
+    const cleanCode = codeToJoin.trim().toUpperCase();
+    if (!cleanCode || isJoiningRoom) return;
+    try {
+      setIsJoiningRoom(true);
+      joinMultiplayerRoom(cleanCode);
+    } finally {
+      setTimeout(() => setIsJoiningRoom(false), 1200);
+    }
   };
 
   return (
@@ -639,7 +659,7 @@ export const GlobalAirportMap: React.FC = () => {
               </span>
             </div>
             <p className="text-[11px] text-[var(--atc-muted)] truncate">
-              OurAirports + OpenStreetMap + Live ADS-B + 3-Player Multiplayer
+              OurAirports + OpenStreetMap + Live ADS-B + Multiplayer (2-5 Players)
             </p>
           </div>
         </div>
@@ -674,8 +694,8 @@ export const GlobalAirportMap: React.FC = () => {
               value={joinCode}
               onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && joinCode.trim() && isOnline) {
-                  joinMultiplayerRoom(joinCode);
+                if (e.key === "Enter" && joinCode.trim() && isOnline && !isJoiningRoom) {
+                  void handleJoinMultiplayer(joinCode);
                 }
               }}
               placeholder="ROOM CODE"
@@ -683,11 +703,12 @@ export const GlobalAirportMap: React.FC = () => {
               className="w-20 bg-transparent text-xs font-mono uppercase focus:outline-none"
             />
             <button
-              onClick={() => joinCode && joinMultiplayerRoom(joinCode)}
-              disabled={!joinCode || !isOnline}
-              className="px-2 py-0.5 text-[11px] font-semibold rounded bg-[var(--atc-cyan-bg)] text-[var(--atc-cyan)] border border-[var(--atc-cyan-border)] disabled:opacity-40"
+              onClick={() => joinCode && void handleJoinMultiplayer(joinCode)}
+              disabled={!joinCode || !isOnline || isJoiningRoom}
+              className="px-2 py-0.5 text-[11px] font-semibold rounded bg-[var(--atc-cyan-bg)] text-[var(--atc-cyan)] border border-[var(--atc-cyan-border)] disabled:opacity-40 flex items-center gap-1"
             >
-              Join Room
+              {isJoiningRoom && <Loader2 className="w-3 h-3 animate-spin" />}
+              <span>{isJoiningRoom ? "Joining..." : "Join Room"}</span>
             </button>
           </div>
 
@@ -1167,17 +1188,22 @@ export const GlobalAirportMap: React.FC = () => {
                     onChange={(e) => setSeedMpWithLive(e.target.checked)}
                     className="rounded border-[var(--atc-border)]"
                   />
-                  Seed 3-Player Co-op Room with Live ADS-B Flights
+                  Seed Multiplayer Room with Live ADS-B Flights
                 </label>
 
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={handleCreateMultiplayer}
-                    disabled={!isOnline}
+                    disabled={!isOnline || isCreatingMultiplayer}
+                    title="Start Multiplayer Session with up to 5 controller roles"
                     className="py-2 px-2.5 rounded-lg border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] text-[var(--atc-cyan)] font-semibold text-xs flex items-center justify-center gap-1.5 disabled:opacity-45"
                   >
-                    <Users className="w-3.5 h-3.5" />
-                    3-Player Co-op
+                    {isCreatingMultiplayer ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Users className="w-3.5 h-3.5" />
+                    )}
+                    {isCreatingMultiplayer ? "Starting..." : "Multiplayer Co-op (2-5P)"}
                   </button>
 
                   <button
@@ -1206,6 +1232,26 @@ export const GlobalAirportMap: React.FC = () => {
           )}
         </aside>
       </div>
+
+      {/* Starting Multiplayer Session Modal / Loading Overlay */}
+      {isCreatingMultiplayer && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[var(--atc-panel)] border border-[var(--atc-cyan-border)] rounded-xl p-6 shadow-2xl max-w-sm w-full flex flex-col items-center gap-3 text-center">
+            <Loader2 className="w-8 h-8 text-[var(--atc-cyan)] animate-spin" />
+            <div>
+              <h3 className="text-sm font-bold uppercase tracking-wider text-[var(--atc-text)]">
+                Starting Multiplayer Session...
+              </h3>
+              <p className="text-xs text-[var(--atc-muted)] mt-1 font-mono">
+                Provisioning room at {selectedAirportRecord?.icao ?? "VIDP"} · 5 ATC Stations
+              </p>
+            </div>
+            <p className="text-[11px] text-[var(--atc-cyan)] animate-pulse font-mono">
+              Connecting to AirCommand Multiplayer Relay...
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

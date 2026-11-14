@@ -41,7 +41,7 @@ interface InternalRoom {
   clients: Map<string, ConnectedClient>; // clientId -> ConnectedClient
 }
 
-const ROLES: ControllerRole[] = ["GROUND", "TOWER", "DEPARTURE"];
+const ROLES: ControllerRole[] = ["DELIVERY", "GROUND", "TOWER", "DEPARTURE", "CENTER"];
 
 function generateRoomCode(existing: Map<string, InternalRoom>): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -297,7 +297,7 @@ export class MultiplayerRoomService {
       if (!assignedRole) {
         return {
           ok: false,
-          error: `Room ${code} is full — all 3 ATC roles (GROUND, TOWER, DEPARTURE) are already taken.`,
+          error: `Room ${code} is full — all 5 ATC roles (DELIVERY, GROUND, TOWER, DEPARTURE, CENTER) are already taken.`,
         };
       }
     }
@@ -440,7 +440,7 @@ export class MultiplayerRoomService {
     if (connectedRoles.length < 2) {
       return {
         ok: false,
-        error: "Minimum 2 human players required to start multiplayer. Share the room code with a teammate (unclaimed 3rd station runs on AI).",
+        error: "Minimum 2 human players required to start multiplayer. Share the room code with teammates (unclaimed stations run on AI backup).",
       };
     }
 
@@ -452,8 +452,8 @@ export class MultiplayerRoomService {
       senderPlayerId: "SYSTEM",
       senderName: "SYSTEM",
       senderRole: "SYSTEM",
-      text: `Simulation started at ${ir.room.airportIcao} (${ir.room.scenarioId}). Humans: ${connectedRoles.join(", ")}${
-        aiRoles.length > 0 ? ` · AI Backup: ${aiRoles.join(", ")}` : " · All 3 human seats staffed"
+      text: `Simulation started at ${ir.room.airportIcao} (${ir.room.scenarioId}). Staffed: ${connectedRoles.join(", ")}${
+        aiRoles.length > 0 ? ` · AI Backup: ${aiRoles.join(", ")}` : " · All 5 human seats staffed"
       }.`,
     });
     this.db.saveRoomSession(ir.room);

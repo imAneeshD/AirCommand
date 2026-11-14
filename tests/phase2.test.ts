@@ -314,28 +314,52 @@ test("MultiplayerRoomService enforces role lock, command dedup, explicit handoff
     assert.equal(snap.sim.config.stationControl.GROUND, "PLAYER");
     assert.equal(snap.sim.config.stationControl.TOWER, "PLAYER");
     assert.equal(snap.sim.config.stationControl.DEPARTURE, "AUTONOMOUS");
+    assert.equal(snap.sim.config.stationControl.DELIVERY, "AUTONOMOUS");
+    assert.equal(snap.sim.config.stationControl.CENTER, "AUTONOMOUS");
 
-    // 3rd player joins by code without specifying role -> auto-assigned remaining DEPARTURE role
+    // 3rd player joins by code with preferred DEPARTURE role
     const joinD = env.rooms.joinRoom({
       roomCode: code,
       playerId: "p_dep",
       playerName: "DepCtrl",
+      preferredRole: "DEPARTURE",
     });
     assert.equal(joinD.ok, true);
     assert.equal(joinD.assignedRole, "DEPARTURE");
     assert.equal(snap.sim.config.stationControl.DEPARTURE, "PLAYER");
 
-    // 4th player cannot join once all 3 seats are occupied
-    const join4 = env.rooms.joinRoom({
+    // 4th & 5th players claim remaining DELIVERY and CENTER roles
+    const joinDel = env.rooms.joinRoom({
+      roomCode: code,
+      playerId: "p_del",
+      playerName: "DelCtrl",
+      preferredRole: "DELIVERY",
+    });
+    assert.equal(joinDel.ok, true);
+    assert.equal(joinDel.assignedRole, "DELIVERY");
+
+    const joinCtr = env.rooms.joinRoom({
+      roomCode: code,
+      playerId: "p_ctr",
+      playerName: "CtrCtrl",
+      preferredRole: "CENTER",
+    });
+    assert.equal(joinCtr.ok, true);
+    assert.equal(joinCtr.assignedRole, "CENTER");
+
+    // 6th player cannot join once all 5 seats are occupied
+    const join6 = env.rooms.joinRoom({
       roomCode: code,
       playerId: "p_extra",
       playerName: "ExtraCtrl",
     });
-    assert.equal(join4.ok, false);
-    assert.match(join4.error ?? "", /full/i);
+    assert.equal(join6.ok, false);
+    assert.match(join6.error ?? "", /full/i);
 
-    // Release DEPARTURE slot so rest of test exercises 2 human + 1 AI cleanly
+    // Release DEPARTURE, DELIVERY, and CENTER slots so rest of test exercises 2 human + AI cleanly
     env.rooms.handleClientDisconnect({ clientId: "sock_d", playerId: "p_dep", roomCode: code, send: () => {} });
+    env.rooms.handleClientDisconnect({ clientId: "sock_del", playerId: "p_del", roomCode: code, send: () => {} });
+    env.rooms.handleClientDisconnect({ clientId: "sock_ctr", playerId: "p_ctr", roomCode: code, send: () => {} });
 
     const depAcId = snap.sim.aircraftOrder.find(
       (id) => snap.sim.aircraft[id]?.controller === "GROUND" || snap.sim.aircraft[id]?.flightKind === "DEPARTURE"

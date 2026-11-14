@@ -4,6 +4,7 @@ import {
   Bot,
   CheckCircle2,
   Copy,
+  Loader2,
   Lock,
   Plane,
   Play,
@@ -17,10 +18,12 @@ import {
 import { useAtcStore } from "../store/atcStore.ts";
 import type { ControllerRole, DifficultyLevel, ScenarioId } from "../types/atc.ts";
 
-const ROLES: Array<{ role: ControllerRole; title: string; scope: string }> = [
-  { role: "GROUND", title: "Ground Control", scope: "Pushback, Taxi Routes, Gates & Hold-Shorts" },
-  { role: "TOWER", title: "Tower Control", scope: "Runway Crossings, Line Up, Takeoff & Landing" },
-  { role: "DEPARTURE", title: "Departure Control", scope: "Climb Altitude, Heading Vectors & Airspeed" },
+const ROLES: Array<{ role: ControllerRole; title: string; scope: string; short: string }> = [
+  { role: "DELIVERY", title: "Clearance Delivery", scope: "IFR Flight Plans, CRAFT Clearances & Squawk Beacons", short: "DEL" },
+  { role: "GROUND", title: "Ground Control", scope: "Pushback, Taxi Routes, Gates & Hold-Shorts", short: "GND" },
+  { role: "TOWER", title: "Tower Local Control", scope: "Runway Crossings, Line Up, Takeoff & Landing", short: "TWR" },
+  { role: "DEPARTURE", title: "Departure / TRACON", scope: "Initial Climb, Heading Vectors & Airspeed", short: "DEP" },
+  { role: "CENTER", title: "Area Control / Center", scope: "Enroute Cruise, High Altitudes & Handoffs", short: "CTR" },
 ];
 
 export const MultiplayerLobby: React.FC = () => {
@@ -48,6 +51,9 @@ export const MultiplayerLobby: React.FC = () => {
   const [joinRole, setJoinRole] = useState<ControllerRole | "AUTO">("AUTO");
   const [chatDraft, setChatDraft] = useState("");
   const [copied, setCopied] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const [isJoining, setIsJoining] = useState(false);
+  const [isStartingSession, setIsStartingSession] = useState(false);
 
   const isHost = Boolean(roomState && roomState.hostPlayerId === playerId);
   const connectedPlayerCount = roomState
@@ -56,7 +62,7 @@ export const MultiplayerLobby: React.FC = () => {
         return Boolean(s.playerId && s.connected);
       }).length
     : 0;
-  const aiSlotCount = roomState ? 3 - connectedPlayerCount : 0;
+  const aiSlotCount = roomState ? 5 - connectedPlayerCount : 0;
   const canStartSession = connectedPlayerCount >= 2;
 
   const handleCopyCode = async () => {
@@ -84,10 +90,10 @@ export const MultiplayerLobby: React.FC = () => {
           <div>
             <div className="font-bold text-sm flex items-center gap-2">
               <Users className="w-4 h-4 text-[var(--atc-cyan)]" />
-              3-PLAYER ATC MULTIPLAYER OPERATIONS
+              ATC MULTIPLAYER CO-OP OPERATIONS (2-5 PLAYERS)
             </div>
             <p className="text-[11px] text-[var(--atc-muted)]">
-              Ground + Tower + Departure shared authoritative room · Unclaimed seats run AI backup
+              Delivery + Ground + Tower + Departure + Center shared room · Min 2 players to start · Unclaimed seats run AI backup
             </p>
           </div>
         </div>
@@ -118,7 +124,7 @@ export const MultiplayerLobby: React.FC = () => {
             <div className="p-5 rounded-xl border border-[var(--atc-border)] bg-[var(--atc-panel)] space-y-3">
               <h2 className="font-bold text-sm">Create New Control Room</h2>
               <p className="text-xs text-[var(--atc-muted)]">
-                Host an authoritative 3-player ATC session at{" "}
+                Host an authoritative 2-5 player ATC session at{" "}
                 <strong className="font-mono text-[var(--atc-text)]">
                   {selectedAirportRecord?.icao ?? "VIDP"}
                 </strong>{" "}
@@ -135,44 +141,59 @@ export const MultiplayerLobby: React.FC = () => {
               </div>
               <div>
                 <label className="text-[10px] uppercase text-[var(--atc-muted)] block mb-1">Your Starting Role</label>
-                <div className="grid grid-cols-3 gap-1.5">
+                <div className="grid grid-cols-5 gap-1">
                   {ROLES.map((r) => (
                     <button
                       key={r.role}
                       type="button"
                       onClick={() => setHostRole(r.role)}
-                      className={`py-1.5 rounded text-[11px] font-mono font-bold border transition-colors ${
+                      className={`py-1.5 rounded text-[10px] font-mono font-bold border transition-colors ${
                         hostRole === r.role
                           ? "bg-[var(--atc-accent-bg)] text-[var(--atc-accent-text)] border-[var(--atc-accent-border)]"
                           : "bg-[var(--atc-surface)] text-[var(--atc-muted)] border-[var(--atc-border)] hover:text-[var(--atc-text)]"
                       }`}
                     >
-                      {r.role === "DEPARTURE" ? "DEP/APP" : r.role}
+                      {r.short}
                     </button>
                   ))}
                 </div>
               </div>
               <button
-                onClick={() =>
-                  void createMultiplayerRoom({
-                    airportIcao: selectedAirportRecord?.icao ?? "VIDP",
-                    scenarioId: "MEDIUM",
-                    difficulty: "STANDARD",
-                    preferredRole: hostRole,
-                  })
-                }
-                disabled={!isOnline}
-                className="w-full py-2.5 rounded-lg bg-[var(--atc-accent)] text-stone-950 font-bold text-xs flex items-center justify-center gap-2 disabled:opacity-45"
+                onClick={async () => {
+                  if (isCreating) return;
+                  setIsCreating(true);
+                  try {
+                    await createMultiplayerRoom({
+                      airportIcao: selectedAirportRecord?.icao ?? "VIDP",
+                      scenarioId: "MEDIUM",
+                      difficulty: "STANDARD",
+                      preferredRole: hostRole,
+                    });
+                  } finally {
+                    setIsCreating(false);
+                  }
+                }}
+                disabled={!isOnline || isCreating}
+                className="w-full py-2.5 rounded-lg bg-[var(--atc-accent)] text-stone-950 font-bold text-xs flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
               >
-                <Users className="w-4 h-4" />
-                Host Room as {hostRole === "DEPARTURE" ? "DEP" : hostRole} ({selectedAirportRecord?.icao ?? "VIDP"})
+                {isCreating ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Creating Room &amp; Entering Lobby...</span>
+                  </>
+                ) : (
+                  <>
+                    <Users className="w-4 h-4" />
+                    <span>Host Room as {hostRole} ({selectedAirportRecord?.icao ?? "VIDP"})</span>
+                  </>
+                )}
               </button>
             </div>
 
             <div className="p-5 rounded-xl border border-[var(--atc-border)] bg-[var(--atc-panel)] space-y-3">
               <h2 className="font-bold text-sm">Join Room by Code</h2>
               <p className="text-xs text-[var(--atc-muted)]">
-                Enter the 6-character code shared by your host (min 2 players to start; 3rd role runs AI).
+                Enter the 6-character code shared by your host (min 2 players to start; unclaimed roles run AI backup).
               </p>
               <div>
                 <label className="text-[10px] uppercase text-[var(--atc-muted)] block mb-1">Your Callsign</label>
@@ -190,8 +211,10 @@ export const MultiplayerLobby: React.FC = () => {
                   value={joinCode}
                   onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && joinCode.trim() && isOnline) {
+                    if (e.key === "Enter" && joinCode.trim() && isOnline && !isJoining) {
+                      setIsJoining(true);
                       joinMultiplayerRoom(joinCode, joinRole === "AUTO" ? undefined : joinRole);
+                      setTimeout(() => setIsJoining(false), 2000);
                     }
                   }}
                   placeholder="e.g. A7K92M"
@@ -201,29 +224,41 @@ export const MultiplayerLobby: React.FC = () => {
               </div>
               <div>
                 <label className="text-[10px] uppercase text-[var(--atc-muted)] block mb-1">Preferred Role</label>
-                <div className="grid grid-cols-4 gap-1">
-                  {(["AUTO", "GROUND", "TOWER", "DEPARTURE"] as const).map((r) => (
+                <div className="grid grid-cols-6 gap-1">
+                  {(["AUTO", "DELIVERY", "GROUND", "TOWER", "DEPARTURE", "CENTER"] as const).map((r) => (
                     <button
                       key={r}
                       type="button"
                       onClick={() => setJoinRole(r)}
-                      className={`py-1.5 rounded text-[10px] font-mono font-bold border transition-colors ${
+                      className={`py-1.5 rounded text-[9px] font-mono font-bold border transition-colors ${
                         joinRole === r
                           ? "bg-[var(--atc-cyan-bg)] text-[var(--atc-cyan)] border-[var(--atc-cyan-border)]"
                           : "bg-[var(--atc-surface)] text-[var(--atc-muted)] border-[var(--atc-border)] hover:text-[var(--atc-text)]"
                       }`}
                     >
-                      {r === "DEPARTURE" ? "DEP" : r}
+                      {r === "DELIVERY" ? "DEL" : r === "DEPARTURE" ? "DEP" : r === "CENTER" ? "CTR" : r === "GROUND" ? "GND" : r === "TOWER" ? "TWR" : "AUTO"}
                     </button>
                   ))}
                 </div>
               </div>
               <button
-                onClick={() => joinCode && joinMultiplayerRoom(joinCode, joinRole === "AUTO" ? undefined : joinRole)}
-                disabled={!joinCode.trim() || !isOnline}
-                className="w-full py-2.5 rounded-lg bg-[var(--atc-cyan-bg)] text-[var(--atc-cyan)] border border-[var(--atc-cyan-border)] font-bold text-xs disabled:opacity-45"
+                onClick={() => {
+                  if (!joinCode.trim() || !isOnline || isJoining) return;
+                  setIsJoining(true);
+                  joinMultiplayerRoom(joinCode, joinRole === "AUTO" ? undefined : joinRole);
+                  setTimeout(() => setIsJoining(false), 2000);
+                }}
+                disabled={!joinCode.trim() || !isOnline || isJoining}
+                className="w-full py-2.5 rounded-lg bg-[var(--atc-cyan-bg)] text-[var(--atc-cyan)] border border-[var(--atc-cyan-border)] font-bold text-xs disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
               >
-                Join Session
+                {isJoining ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Connecting to Room...</span>
+                  </>
+                ) : (
+                  <span>Join Session</span>
+                )}
               </button>
             </div>
           </div>
@@ -295,9 +330,9 @@ export const MultiplayerLobby: React.FC = () => {
                 </div>
               </div>
 
-              {/* Three Role Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                {ROLES.map(({ role, title, scope }) => {
+              {/* All 5 Role Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
+                {ROLES.map(({ role, title, scope, short }) => {
                   const slot = roomState.slots[role];
                   const isMine = slot.playerId === playerId;
                   const occupiedByOther = Boolean(slot.playerId && slot.playerId !== playerId);
@@ -305,43 +340,48 @@ export const MultiplayerLobby: React.FC = () => {
                   return (
                     <div
                       key={role}
-                      className={`p-4 rounded-xl border flex flex-col justify-between gap-3 ${
+                      className={`p-3.5 rounded-xl border flex flex-col justify-between gap-2.5 transition-all ${
                         isMine
-                          ? "border-[var(--atc-accent-border)] bg-[var(--atc-accent-soft)]"
-                          : "border-[var(--atc-border)] bg-[var(--atc-panel)]"
+                          ? "border-[var(--atc-accent-border)] bg-[var(--atc-accent-soft)] ring-2 ring-[var(--atc-accent)]/50 shadow-md"
+                          : "border-[var(--atc-border)] bg-[var(--atc-panel)] hover:border-[var(--atc-border-strong)]"
                       }`}
                     >
                       <div>
                         <div className="flex items-center justify-between">
-                          <span className="font-mono font-bold text-xs tracking-wider">{role}</span>
+                          <span className="font-mono font-bold text-xs tracking-wider flex items-center gap-1">
+                            <span className="px-1 py-0.2 rounded bg-[var(--atc-surface)] border border-[var(--atc-border)] text-[9px]">
+                              {short}
+                            </span>
+                            {role}
+                          </span>
                           {slot.playerId ? (
                             slot.connected ? (
-                              <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] border border-[var(--atc-emerald-border)]">
-                                <UserCheck className="w-3 h-3" /> Human
+                              <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] border border-[var(--atc-emerald-border)] font-semibold">
+                                <UserCheck className="w-2.5 h-2.5" /> Human
                               </span>
                             ) : (
-                              <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-[var(--atc-amber-bg)] text-[var(--atc-amber)] border border-[var(--atc-amber-border)]">
-                                <Bot className="w-3 h-3" /> Disconnected (AI)
+                              <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded bg-[var(--atc-amber-bg)] text-[var(--atc-amber)] border border-[var(--atc-amber-border)] font-semibold">
+                                <Bot className="w-2.5 h-2.5" /> Disconnected (AI)
                               </span>
                             )
                           ) : (
-                            <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-[var(--atc-cyan-bg)] text-[var(--atc-cyan)] border border-[var(--atc-cyan-border)]">
-                              <Bot className="w-3 h-3" /> AI Automated
+                            <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded bg-[var(--atc-cyan-bg)] text-[var(--atc-cyan)] border border-[var(--atc-cyan-border)] font-semibold">
+                              <Bot className="w-2.5 h-2.5" /> AI Automated
                             </span>
                           )}
                         </div>
-                        <h3 className="font-semibold text-sm mt-1">{title}</h3>
-                        <p className="text-[11px] text-[var(--atc-muted)] mt-0.5">{scope}</p>
+                        <h3 className="font-semibold text-xs mt-1.5 leading-snug">{title}</h3>
+                        <p className="text-[10px] text-[var(--atc-muted)] mt-0.5 leading-tight">{scope}</p>
                       </div>
 
-                      <div className="space-y-2 pt-2 border-t border-[var(--atc-border)]">
-                        <div className="text-xs font-medium truncate">
+                      <div className="space-y-1.5 pt-2 border-t border-[var(--atc-border)]">
+                        <div className="text-[11px] font-medium truncate">
                           {slot.playerId ? slot.playerName : "Autonomous Controller"}
                         </div>
                         {isMine ? (
                           <button
                             onClick={() => setMultiplayerReady(!slot.ready)}
-                            className={`w-full py-1.5 rounded text-xs font-semibold border flex items-center justify-center gap-1 ${
+                            className={`w-full py-1.5 rounded text-xs font-semibold border flex items-center justify-center gap-1 cursor-pointer transition-colors ${
                               slot.ready
                                 ? "bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] border-[var(--atc-emerald-border)]"
                                 : "bg-[var(--atc-surface)] text-[var(--atc-text)] border-[var(--atc-border-strong)]"
@@ -359,7 +399,7 @@ export const MultiplayerLobby: React.FC = () => {
                                 ? `${role} is already taken by ${slot.playerName}`
                                 : `Switch to ${role}`
                             }
-                            className="w-full py-1.5 rounded text-xs font-semibold border border-[var(--atc-border-strong)] bg-[var(--atc-surface)] hover:border-[var(--atc-accent-border)] disabled:opacity-55 disabled:cursor-not-allowed flex items-center justify-center gap-1"
+                            className="w-full py-1.5 rounded text-xs font-semibold border border-[var(--atc-border-strong)] bg-[var(--atc-surface)] hover:border-[var(--atc-accent-border)] disabled:opacity-55 disabled:cursor-not-allowed flex items-center justify-center gap-1 cursor-pointer transition-colors"
                           >
                             {occupiedByOther && slot.connected ? (
                               <>
@@ -384,7 +424,7 @@ export const MultiplayerLobby: React.FC = () => {
                   <span>
                     Crew:{" "}
                     <strong className="font-mono text-[var(--atc-text)]">
-                      {connectedPlayerCount}/3 Humans
+                      {connectedPlayerCount}/5 Humans
                     </strong>{" "}
                     ({aiSlotCount} AI Backup) · Your Position:{" "}
                     <strong className="font-mono text-[var(--atc-text)]">{assignedRole ?? "Unassigned"}</strong>
@@ -394,7 +434,7 @@ export const MultiplayerLobby: React.FC = () => {
                 {roomState.status === "ACTIVE" ? (
                   <button
                     onClick={() => setAppMode("SIMULATION")}
-                    className="px-4 py-2 rounded-lg bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] border border-[var(--atc-emerald-border)] font-bold text-xs flex items-center gap-1.5"
+                    className="px-4 py-2 rounded-lg bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] border border-[var(--atc-emerald-border)] font-bold text-xs flex items-center gap-1.5 cursor-pointer"
                   >
                     <Play className="w-4 h-4" />
                     Re-enter Active Control Scope
@@ -402,18 +442,33 @@ export const MultiplayerLobby: React.FC = () => {
                 ) : isHost ? (
                   <div className="flex flex-col items-end gap-1">
                     <button
-                      onClick={startMultiplayerRoom}
-                      disabled={!canStartSession}
-                      className="px-5 py-2.5 rounded-lg bg-[var(--atc-accent)] text-stone-950 font-bold text-xs flex items-center gap-1.5 disabled:opacity-45 disabled:cursor-not-allowed"
+                      onClick={() => {
+                        if (!canStartSession || isStartingSession) return;
+                        setIsStartingSession(true);
+                        startMultiplayerRoom();
+                      }}
+                      disabled={!canStartSession || isStartingSession}
+                      className="px-5 py-2.5 rounded-lg bg-[var(--atc-accent)] text-stone-950 font-bold text-xs flex items-center gap-2 disabled:opacity-45 disabled:cursor-not-allowed shadow-sm cursor-pointer"
                     >
-                      <Play className="w-4 h-4" />
-                      {canStartSession
-                        ? "Start Multiplayer ATC Session"
-                        : `Waiting for Player 2 (${connectedPlayerCount}/2 min)`}
+                      {isStartingSession ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Starting Session &amp; Synchronizing Scope...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-4 h-4 fill-current" />
+                          <span>
+                            {canStartSession
+                              ? "Start Multiplayer ATC Session"
+                              : `Waiting for Player 2 (${connectedPlayerCount}/2 min)`}
+                          </span>
+                        </>
+                      )}
                     </button>
                     {!canStartSession && (
                       <span className="text-[10px] text-[var(--atc-amber)] font-mono">
-                        At least 2 human players required (remaining seat auto-fills with AI)
+                        At least 2 human players required (unclaimed roles auto-fill with AI)
                       </span>
                     )}
                   </div>

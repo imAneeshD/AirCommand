@@ -87,7 +87,7 @@ export class ScoringService {
     const roleScores = {} as Record<ControllerRole, RoleScoreMetrics>;
     let roleSum = 0;
 
-    for (const role of ["GROUND", "TOWER", "DEPARTURE"] as const) {
+    for (const role of ["DELIVERY", "GROUND", "TOWER", "DEPARTURE", "CENTER"] as const) {
       const clears = tracker.roleClearances[role];
       const accurate = tracker.roleAccurate[role];
       const hoDone = tracker.roleHandoffsDone[role];
