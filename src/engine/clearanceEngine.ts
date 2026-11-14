@@ -59,8 +59,6 @@ export function createClearanceObject(
 ): ATCClearance {
   const isSingleRoleBrowser =
     typeof window !== "undefined" &&
-    state.config.activePlayerStation !== "ALL" &&
-    params.issuedBy === "PLAYER" &&
     !params.immediate;
 
   const delay = params.immediate ? 0 : state.config.readbackDelaySeconds;

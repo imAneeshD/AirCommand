@@ -610,6 +610,16 @@ export function findBlockingTrafficAhead(
     ) {
       continue;
     }
+
+    // If we are actively crossing a runway, we have surface priority to clear the runway!
+    // A stationary aircraft waiting at the hold-short line outside the runway must never freeze us on the active runway.
+    if (
+      aircraft.state === "CROSSING_RUNWAY" &&
+      (other.state === "HOLDING_SHORT" || other.state === "HOLD_POSITION")
+    ) {
+      continue;
+    }
+
     const dx = other.x - aircraft.x;
     const dy = other.y - aircraft.y;
     const dist = Math.hypot(dx, dy);

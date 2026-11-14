@@ -176,6 +176,7 @@ interface QueuedSpeechItem {
   forceLocal?: boolean;
   isSecondary?: boolean;
   onFinish?: () => void;
+  clickType?: "PILOT" | "ATC" | "ERROR" | "ALERT";
 }
 
 function makeSoftClipCurve(drive = 2.4): Float32Array<ArrayBuffer> {
@@ -572,7 +573,8 @@ class RadioAudioEngine {
     roleOrIsPilot: boolean | "CONTROLLER" | "PILOT",
     speakerKey = "DEFAULT",
     priority = false,
-    onFinish?: () => void
+    onFinish?: () => void,
+    clickType?: "PILOT" | "ATC" | "ERROR" | "ALERT"
   ): void {
     if (
       !this.voiceEnabled ||
@@ -626,6 +628,7 @@ class RadioAudioEngine {
       priority,
       isSecondary,
       onFinish,
+      clickType: clickType ?? (role === "CONTROLLER" ? "ATC" : "PILOT"),
     });
     this.drainQueue();
   }
@@ -739,12 +742,15 @@ class RadioAudioEngine {
         }
         this.resolveSpeechDone();
         this.notify();
-        const interGap = !this.syncMode ? 25 : 120;
+        const interGap = !this.syncMode ? 320 : 380;
         window.setTimeout(() => this.drainQueue(), interGap);
       };
 
       utter.onstart = () => {
         if (this.speechToken !== myToken) return;
+        if (item.clickType) {
+          this.playRadioClick(item.clickType);
+        }
         const burstLevel =
           !this.syncMode && item.isSecondary
             ? 0.02
