@@ -20,6 +20,7 @@ import {
   spawnRandomTraffic,
   stepSimulation,
   switchPlayerStation,
+  transitionScenarioSimulation,
 } from "../engine/simulation.ts";
 import { apiClient, MultiplayerWsClient } from "../services/apiClient.ts";
 import type {
@@ -621,6 +622,9 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
   setAppMode: (mode) => {
     radioAudio.stopAllSpeech();
     speechPtt.cancel();
+    if (mode === "SIMULATION") {
+      get().sim.paused = false;
+    }
     set({ appMode: mode, showAirportSelector: mode === "GLOBAL_MAP" });
   },
   isOnline: typeof navigator === "undefined" ? true : navigator.onLine,
@@ -900,13 +904,9 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
     if (!shouldEnable) {
       set({ liveTrafficLoading: true });
       radioAudio.stopAllSpeech();
-      const customLayout = sim.airport;
-      const scen = sim.scenarioId ?? "NORMAL_OPS";
-      const station = sim.config.activePlayerStation;
 
-      // Pure simulated scenario traffic with automatic traffic generation
-      const freshSim = createScenarioSimulation(scen, station, sim.airport.icao, customLayout, { randomize: true });
-      freshSim.liveSnapshotMeta = {
+      // Seamlessly disable live ADS-B sync while keeping all active aircraft and simulation clock intact
+      sim.liveSnapshotMeta = {
         airportIcao: sim.airport.icao,
         fetchedAtMs: Date.now(),
         convertedCount: 0,
@@ -917,16 +917,15 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
         lastSyncStatus: "OFFLINE",
         cachedTracks: [],
       };
-      freshSim.config.autoSpawnTraffic = true;
+      sim.config.autoSpawnTraffic = sim.scenarioId !== "SANDBOX";
 
       set({
-        sim: freshSim,
-        tickVersion: 0,
         liveTrafficLoading: false,
+        tickVersion: get().tickVersion + 1,
         lastFeedback: {
           ok: true,
-          text: `Live traffic turned OFF at ${sim.airport.icao}. Switched to simulated traffic operations.`,
-          at: 0,
+          text: `Live traffic turned OFF at ${sim.airport.icao}. Operations continuing from current traffic state.`,
+          at: sim.time,
         },
       });
       return;
@@ -1504,7 +1503,7 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
     switchPlayerStation(sim, role);
     set((s) => ({
       tickVersion: s.tickVersion + 1,
-      camera: getPresetCameraForStation(role, sim.airport),
+      camera: s.camera,
       lastFeedback: {
         ok: true,
         text:
@@ -1524,76 +1523,62 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
   },
 
   loadScenario: (scenarioId) => {
-    const { sim, selectedAirportRecord, selectedAirportGeoJson, roomState } = get();
+    const { sim, roomState } = get();
     if (roomState && roomState.status === "ACTIVE") return;
     radioAudio.stopAllSpeech();
     saveSelectedScenarioId(scenarioId);
 
-    const customLayout =
-      selectedAirportRecord && selectedAirportRecord.icao === sim.airport.icao
-        ? convertAirportBundleToLayout({
-            ...selectedAirportRecord,
-            geoJson: selectedAirportGeoJson ?? selectedAirportRecord.geoJson,
-          })
-        : !LEGACY_IDS.has(sim.airport.id)
-        ? sim.airport
-        : undefined;
+    // Seamlessly transition the active simulation to the new traffic scenario/model
+    // without wiping active aircraft, without resetting simulation time, and preserving telemetry
+    transitionScenarioSimulation(sim, scenarioId);
 
-    if (
-      sim.liveSnapshotMeta?.cachedTracks &&
-      sim.liveSnapshotMeta.cachedTracks.length > 0 &&
-      selectedAirportRecord
-    ) {
-      const conv = convertLiveTracksToSimulation({
-        airportRecord: selectedAirportRecord,
-        customLayout,
-        tracks: sim.liveSnapshotMeta.cachedTracks,
-        activeStation: sim.config.activePlayerStation,
-        scenarioId,
-        fetchedAtMs: sim.liveSnapshotMeta.fetchedAtMs,
-      });
-      set({
-        sim: conv.sim,
-        tickVersion: 0,
-        lastSpokenRadioId: null,
-        camera: getPresetCameraForStation(conv.sim.config.activePlayerStation, conv.sim.airport),
-        hoverPreviewRoute: null,
-        lastFeedback: {
-          ok: true,
-          text: `Filtered traffic to ${scenarioId} (${conv.convertedCount} flights) at ${conv.sim.airport.icao}.`,
-          at: 0,
-        },
-      });
-      return;
-    }
+    const mins = Math.floor(sim.time / 60);
+    const secs = Math.floor(sim.time % 60);
+    const timeStr = `T+${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 
-    const fresh = createScenarioSimulation(
-      scenarioId,
-      sim.config.activePlayerStation,
-      sim.airport.id,
-      customLayout,
-      { randomize: true }
-    );
-    set({
-      sim: fresh,
-      tickVersion: 0,
-      lastSpokenRadioId: null,
-      camera: getPresetCameraForStation(fresh.config.activePlayerStation, fresh.airport),
-      hoverPreviewRoute: null,
+    set((s) => ({
+      tickVersion: s.tickVersion + 1,
       lastFeedback: {
         ok: true,
-        text: `Loaded scenario: ${scenarioId} at ${fresh.airport.icao}.`,
-        at: 0,
+        text: `Scenario transitioned to ${scenarioId} — operations continuing at ${sim.airport.icao} (${timeStr}).`,
+        at: sim.time,
       },
-    });
+    }));
   },
 
   selectAndSaveAirport: (airportId, scenarioId, initialRole = "ALL") => {
-    const { sim } = get();
+    const { sim, hasActiveSession } = get();
     radioAudio.stopAllSpeech();
     saveSelectedAirportId(airportId);
     const scen = scenarioId ?? sim.scenarioId;
     saveSelectedScenarioId(scen);
+
+    // If user is already running this airport, don't restart — resume seamlessly from current state!
+    if (hasActiveSession && (airportId === sim.airport.id || airportId === sim.airport.icao)) {
+      if (initialRole && initialRole !== sim.config.activePlayerStation) {
+        switchPlayerStation(sim, initialRole);
+      }
+      if (scen && scen !== sim.scenarioId) {
+        transitionScenarioSimulation(sim, scen);
+      }
+      sim.paused = false;
+      const mins = Math.floor(sim.time / 60);
+      const secs = Math.floor(sim.time % 60);
+      const timeStr = `T+${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+      set((s) => ({
+        appMode: "SIMULATION",
+        showAirportSelector: false,
+        tickVersion: s.tickVersion + 1,
+        lastFeedback: {
+          ok: true,
+          text: `Resumed session at ${sim.airport.name} (${sim.airport.icao}) in ${
+            initialRole === "ALL" ? "ALL AUTO" : initialRole
+          } mode (${timeStr}).`,
+          at: sim.time,
+        },
+      }));
+      return;
+    }
 
     if (!LEGACY_IDS.has(airportId)) {
       const bundled = offlineDb.getBundledFallbackAirport(airportId);
