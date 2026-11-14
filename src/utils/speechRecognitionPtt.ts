@@ -45,6 +45,7 @@ class SpeechRecognitionPttController {
   private active = false;
   private lastTranscript = "";
   private finalized = false;
+  private stopTimeout: ReturnType<typeof setTimeout> | null = null;
   private callbacks: PttCallbacks = {};
 
   public isListening(): boolean {
@@ -64,6 +65,11 @@ class SpeechRecognitionPttController {
       return false;
     }
 
+    if (this.stopTimeout) {
+      clearTimeout(this.stopTimeout);
+      this.stopTimeout = null;
+    }
+
     if (this.active && this.recognition) return true;
 
     this.callbacks = callbacks;
@@ -72,10 +78,12 @@ class SpeechRecognitionPttController {
 
     try {
       const rec = new Ctor();
-      rec.lang = "en-US";
+      // Detect browser language (e.g. en-IN, en-GB, en-US) for natural accent capture
+      const navLang = (typeof navigator !== "undefined" && navigator.language) || "en-US";
+      rec.lang = navLang.toLowerCase().startsWith("en") ? navLang : "en-US";
       rec.continuous = true;
       rec.interimResults = true;
-      rec.maxAlternatives = 1;
+      rec.maxAlternatives = 3;
 
       rec.onresult = (ev) => {
         const parts: string[] = [];
@@ -106,6 +114,10 @@ class SpeechRecognitionPttController {
 
       rec.onend = () => {
         this.active = false;
+        if (this.stopTimeout) {
+          clearTimeout(this.stopTimeout);
+          this.stopTimeout = null;
+        }
         if (!this.finalized) {
           this.finalized = true;
           this.callbacks.onFinal?.(this.lastTranscript.trim());
@@ -124,13 +136,12 @@ class SpeechRecognitionPttController {
   }
 
   /**
-   * Stops recording and returns the captured transcript immediately.
-   * Calls onFinal(transcript) synchronously so release triggers instant execution.
+   * Stops recording gracefully, allowing the speech engine to finish decoding the final audio
+   * and delivering the complete transcript to onFinal.
    */
   public stop(): string {
     const transcript = this.lastTranscript.trim();
     const rec = this.recognition;
-    this.recognition = null;
     this.active = false;
 
     if (rec) {
@@ -139,9 +150,19 @@ class SpeechRecognitionPttController {
       } catch {
         // Safe ignore
       }
-    }
 
-    if (!this.finalized) {
+      // Safety timeout: if onend does not fire within 400ms, finalize immediately with last transcript
+      if (!this.finalized && !this.stopTimeout) {
+        this.stopTimeout = setTimeout(() => {
+          this.stopTimeout = null;
+          if (!this.finalized) {
+            this.finalized = true;
+            this.recognition = null;
+            this.callbacks.onFinal?.(this.lastTranscript.trim());
+          }
+        }, 400);
+      }
+    } else if (!this.finalized) {
       this.finalized = true;
       this.callbacks.onFinal?.(transcript);
     }

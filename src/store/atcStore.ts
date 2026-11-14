@@ -233,7 +233,7 @@ interface AtcStore {
   issueClearance: (
     cmd: Omit<ClearanceCommandInput, "controller"> & { controller?: ControllerRole },
     override?: boolean
-  ) => void;
+  ) => { ok: boolean; reason?: string };
   armReadbackError: (aircraftId: string) => void;
   causeRadioFailure: (aircraftId: string) => void;
   causeEmergency: (
@@ -1658,14 +1658,15 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
     if (roomState && roomState.status === "ACTIVE") {
       if (!assignedRole) {
         radioAudio.playRadioClick("ERROR");
+        const msg = "No multiplayer controller role assigned.";
         set({
           lastFeedback: {
             ok: false,
-            text: "No multiplayer controller role assigned.",
+            text: msg,
             at: sim.time,
           },
         });
-        return;
+        return { ok: false, reason: msg };
       }
       ensureWsClient(set, get).sendCommand(
         roomState.roomCode,
@@ -1677,7 +1678,7 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
         },
         override
       );
-      return;
+      return { ok: true };
     }
 
     const fallbackCtrl: ControllerRole =
@@ -1687,6 +1688,7 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
     const controller: ControllerRole = cmd.controller ?? fallbackCtrl;
 
     if (
+      !override &&
       sim.config.activePlayerStation !== "ALL" &&
       sim.config.autoManageOtherStations &&
       controller !== sim.config.activePlayerStation &&
@@ -1698,7 +1700,17 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
         tickVersion: s.tickVersion + 1,
         lastFeedback: { ok: false, text: msg, at: sim.time },
       }));
-      return;
+      return { ok: false, reason: msg };
+    }
+
+    // When override is true (e.g. from Voice PTT command across stations),
+    // automatically sync the active station to the commanded controller so the UI deck opens
+    if (
+      override &&
+      sim.config.activePlayerStation !== "ALL" &&
+      controller !== sim.config.activePlayerStation
+    ) {
+      sim.config.activePlayerStation = controller;
     }
 
     const movementTypes = new Set(["PUSHBACK", "TAXI", "CROSS_RUNWAY", "LINE_UP", "TAKEOFF"]);
@@ -1744,6 +1756,8 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
       lastSpokenRadioId: sim.radioLog[sim.radioLog.length - 1]?.id ?? s.lastSpokenRadioId,
       lastFeedback: { ok: res.ok, text: res.reason, at: sim.time },
     }));
+
+    return { ok: res.ok, reason: res.reason };
   },
 
   armReadbackError: (aircraftId) => {
