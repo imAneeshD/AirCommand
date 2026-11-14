@@ -575,7 +575,12 @@ export function isRunwayOccupied(
     if (!ac) continue;
     if (
       ac.state === "COMPLETED_DEPARTURE" ||
-      ac.state === "COMPLETED_ARRIVAL"
+      ac.state === "COMPLETED_ARRIVAL" ||
+      ac.state === "AT_GATE" ||
+      ac.state === "PUSHBACK_APPROVED" ||
+      ac.state === "PUSHING_BACK" ||
+      ac.state === "PUSHBACK_COMPLETE" ||
+      ac.state === "HOLDING_SHORT"
     ) {
       continue;
     }
@@ -583,9 +588,10 @@ export function isRunwayOccupied(
     const along = alongRunwayNm(rwy, ac.x, ac.y);
     const cross = crossTrackRunwayNm(rwy, ac.x, ac.y);
 
+    const maxPavementCross = Math.min(0.024, Math.max(rwy.widthNm * 0.65, 0.016));
     const onSurfaceBounds =
       ac.altitude <= simulation.airport.elevationFt + 60 &&
-      Math.abs(cross) < 0.045 &&
+      Math.abs(cross) <= maxPavementCross &&
       along >= -0.04 &&
       along <= rwy.lengthNm + 0.04;
 
