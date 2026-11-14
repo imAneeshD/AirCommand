@@ -32,9 +32,11 @@ const STATIONS: Array<{
   label: string;
   freq: string;
 }> = [
+  { role: "DELIVERY", code: "CD", label: "DEL", freq: "121.75" },
   { role: "GROUND", code: "G", label: "GND", freq: "121.90" },
-  { role: "TOWER", code: "T", label: "TWR", freq: "118.70" },
-  { role: "DEPARTURE", code: "D", label: "DEP", freq: "124.35" },
+  { role: "TOWER", code: "T", label: "TWR", freq: "119.10" },
+  { role: "DEPARTURE", code: "D", label: "DEP", freq: "124.70" },
+  { role: "CENTER", code: "C", label: "CTR", freq: "127.50" },
   { role: "ALL", code: "ALL", label: "AUTO", freq: "ALL" },
 ];
 
@@ -103,9 +105,11 @@ export const TopBar: React.FC = () => {
   }, [settingsOpen]);
 
   const pendingCounts: Record<ControllerRole, number> = {
+    DELIVERY: 0,
     GROUND: 0,
     TOWER: 0,
     DEPARTURE: 0,
+    CENTER: 0,
   };
 
   for (const id of sim.aircraftOrder) {
@@ -156,7 +160,7 @@ export const TopBar: React.FC = () => {
             const isAll = st.role === "ALL";
             const mpLocked = isMpActive && assignedRole !== null && st.role !== assignedRole;
             const count = isAll
-              ? pendingCounts.GROUND + pendingCounts.TOWER + pendingCounts.DEPARTURE
+              ? Object.values(pendingCounts).reduce((a, b) => a + b, 0)
               : pendingCounts[st.role as ControllerRole];
             return (
               <button

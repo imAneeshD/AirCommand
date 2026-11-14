@@ -1,6 +1,6 @@
 export type AirportId = string;
 
-export type ControllerRole = "GROUND" | "TOWER" | "DEPARTURE";
+export type ControllerRole = "DELIVERY" | "GROUND" | "TOWER" | "DEPARTURE" | "CENTER";
 
 export type PlayerRoleMode = ControllerRole | "ALL";
 
@@ -41,6 +41,7 @@ export type AircraftState =
   | "CRASHED";
 
 export type ClearanceType =
+  | "IFR_CLEARANCE"
   | "PUSHBACK"
   | "TAXI"
   | "HOLD_SHORT"
@@ -133,6 +134,7 @@ export type LightGunSignal =
   | "FLASHING_RED";
 
 export type PilotRequestType =
+  | "IFR_CLEARANCE"
   | "PUSHBACK"
   | "TAXI"
   | "CROSS_RUNWAY"
@@ -159,6 +161,30 @@ export interface PilotRequest {
 
 export type FlightKind = "DEPARTURE" | "ARRIVAL";
 
+export type IfrClearanceStatus = "PENDING" | "CLEARED";
+
+export interface IfrFlightPlan {
+  callsign: string;
+  aircraftType: string;
+  equipmentSuffix: string; // e.g. "/L", "/G", "/A"
+  tasKt: number; // e.g. 440 (T440)
+  departureIcao: string;
+  departureName?: string;
+  proposedDepartureTimeZ: string; // e.g. "P2121" or "2121Z"
+  destinationIcao: string;
+  destinationName?: string;
+  route: string; // e.g. "KSDL … KLAS"
+  sidFix?: string;
+  requestedAltitude: string; // e.g. "FL340" or "pending"
+  assignedAltitude?: string; // e.g. "5000 ft" (initial climb) or "FL340"
+  assignedBeacon: string; // "—" when pending, or 4-digit squawk e.g. "4215"
+  departureFrequency: string; // e.g. "124.70"
+  clearanceStatus: IfrClearanceStatus;
+  clearanceIssuedAt?: number;
+  crewNotes: string; // e.g. "new first officer on the radios, captain occasionally corrects"
+  remarks?: string;
+}
+
 export interface Aircraft {
   id: string;
   callsign: string;
@@ -170,6 +196,7 @@ export interface Aircraft {
   isMilitary?: boolean;
   flightKind: FlightKind;
   squawk: string;
+  flightPlan?: IfrFlightPlan;
   originIcao?: string;
   originName?: string;
   destinationIcao?: string;
@@ -395,9 +422,11 @@ export interface SafetyIncident {
 }
 
 export interface StationControlConfig {
+  DELIVERY: "PLAYER" | "AUTONOMOUS";
   GROUND: "PLAYER" | "AUTONOMOUS";
   TOWER: "PLAYER" | "AUTONOMOUS";
   DEPARTURE: "PLAYER" | "AUTONOMOUS";
+  CENTER: "PLAYER" | "AUTONOMOUS";
 }
 
 export type ScenarioId =

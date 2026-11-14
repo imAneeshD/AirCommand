@@ -1,4 +1,4 @@
-import type { Aircraft, AirportId, AirportLayout } from "../types/atc.ts";
+import type { Aircraft, AirportId, AirportLayout, IfrFlightPlan } from "../types/atc.ts";
 
 export type AirframeStyle =
   | "NARROW_BOEING"
@@ -1224,5 +1224,75 @@ export function getResolvedAircraftDetails(ac: Aircraft, airport: AirportLayout)
     cruiseFlightLevel: ac.cruiseFlightLevel ?? fallback.cruiseFlightLevel,
     soulsOnBoard: ac.soulsOnBoard ?? fallback.soulsOnBoard,
     fuelRemainingPct: ac.fuelRemainingPct ?? fallback.fuelRemainingPct,
+  };
+}
+
+const CREW_NOTES_POOL = [
+  "new first officer on the radios, captain occasionally corrects",
+  "experienced line captain, crisp standard ICAO readbacks",
+  "corporate charter crew, polite and expeditious",
+  "international flight crew, methodical standard phraseology",
+  "student pilot solo, hesitant cadence",
+  "senior captain flying, smooth readbacks",
+  "check ride in progress, standard readbacks",
+  "regional commuter crew, snappy responses",
+];
+
+export function generateIfrFlightPlan(
+  ac: Pick<Aircraft, "callsign" | "aircraftType" | "flightKind" | "targetRunway" | "originIcao" | "originName" | "destinationIcao" | "destinationName" | "assignedDepartureFix" | "squawk">,
+  airport: AirportLayout
+): IfrFlightPlan {
+  const h = hashCallsign(ac.callsign);
+  const spec = getAircraftTypeSpec(ac.aircraftType);
+  const fallback = deriveFlightMetadata(ac.callsign, ac.flightKind, airport, ac.aircraftType);
+
+  const originIcao = ac.originIcao ?? fallback.originIcao;
+  const originName = ac.originName ?? fallback.originName;
+  const destinationIcao = ac.destinationIcao ?? fallback.destinationIcao;
+  const destinationName = ac.destinationName ?? fallback.destinationName;
+
+  // Equipment suffix: GNSS/RVSM/Mode S transponder
+  const isGaOrTurboprop = spec.bodyClass === "Piston" || spec.bodyClass === "Turboprop";
+  const equipmentSuffix = isGaOrTurboprop ? "/G" : "/L";
+
+  // True Airspeed calculation
+  const parsedSpeedMatch = /\b(\d{2,3})\s*kt/i.exec(spec.cruiseSpeed ?? "");
+  const tasKt = parsedSpeedMatch ? Number(parsedSpeedMatch[1]) : (spec.bodyClass === "Piston" ? 125 : 440);
+
+  // Realistic Proposed departure time (Zulu), formatted as P-time (e.g. P2121 or P2115)
+  const hour = (14 + (h % 9)).toString().padStart(2, "0");
+  const minute = (Math.floor((h % 60) / 5) * 5).toString().padStart(2, "0");
+  const proposedDepartureTimeZ = `P${hour}${minute}`;
+
+  // Route Corridor
+  const sid = ac.assignedDepartureFix ?? airport.departureFixIds?.[0] ?? "";
+  const route = sid ? `${originIcao} … ${sid} … ${destinationIcao}` : `${originIcao} … ${destinationIcao}`;
+
+  const depFreq = airport.frequencies?.find(
+    (f) => f.type === "DEP" || (f.description ?? "").toLowerCase().includes("dep")
+  )?.frequencyMhz?.toFixed(2) ?? "124.70";
+
+  const crewNotes = CREW_NOTES_POOL[h % CREW_NOTES_POOL.length];
+  const isCleared = ac.flightKind === "ARRIVAL";
+
+  return {
+    callsign: ac.callsign,
+    aircraftType: ac.aircraftType,
+    equipmentSuffix,
+    tasKt,
+    departureIcao: originIcao,
+    departureName: originName,
+    proposedDepartureTimeZ,
+    destinationIcao,
+    destinationName,
+    route,
+    sidFix: sid || undefined,
+    requestedAltitude: isCleared ? (fallback.cruiseFlightLevel || "FL340") : "pending",
+    assignedAltitude: isCleared ? fallback.cruiseFlightLevel : undefined,
+    assignedBeacon: isCleared ? (ac.squawk || "4215") : "—",
+    departureFrequency: depFreq,
+    clearanceStatus: isCleared ? "CLEARED" : "PENDING",
+    crewNotes,
+    remarks: isCleared ? "Flight plan filed & radar identified" : "not issued this to the clearance",
   };
 }

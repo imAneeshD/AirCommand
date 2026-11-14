@@ -20,33 +20,41 @@ function advance(state: ReturnType<typeof createBaseSimulation>, seconds: number
 test("Role switching sets single active player role while other roles automate, and ALL mode automates everything", () => {
   const s = createBaseSimulation("NORMAL_OPS", "GROUND");
   assert.deepEqual(s.config.stationControl, {
+    DELIVERY: "AUTONOMOUS",
     GROUND: "PLAYER",
     TOWER: "AUTONOMOUS",
     DEPARTURE: "AUTONOMOUS",
+    CENTER: "AUTONOMOUS",
   });
 
   switchPlayerStation(s, "TOWER");
   assert.equal(s.config.activePlayerStation, "TOWER");
   assert.deepEqual(s.config.stationControl, {
+    DELIVERY: "AUTONOMOUS",
     GROUND: "AUTONOMOUS",
     TOWER: "PLAYER",
     DEPARTURE: "AUTONOMOUS",
+    CENTER: "AUTONOMOUS",
   });
 
   switchPlayerStation(s, "DEPARTURE");
   assert.equal(s.config.activePlayerStation, "DEPARTURE");
   assert.deepEqual(s.config.stationControl, {
+    DELIVERY: "AUTONOMOUS",
     GROUND: "AUTONOMOUS",
     TOWER: "AUTONOMOUS",
     DEPARTURE: "PLAYER",
+    CENTER: "AUTONOMOUS",
   });
 
   switchPlayerStation(s, "ALL");
   assert.equal(s.config.activePlayerStation, "ALL");
   assert.deepEqual(s.config.stationControl, {
+    DELIVERY: "AUTONOMOUS",
     GROUND: "AUTONOMOUS",
     TOWER: "AUTONOMOUS",
     DEPARTURE: "AUTONOMOUS",
+    CENTER: "AUTONOMOUS",
   });
 });
 

@@ -1,3 +1,4 @@
+import { hashCallsign } from "../data/aircraftCatalog.ts";
 import {
   alongRunwayNm,
   findRouteAlongTaxiways,
@@ -48,10 +49,12 @@ export function controllerCallsign(
   flightKind?: FlightKind
 ): string {
   const prefix = airport?.controllerPrefix ?? "Asteria";
-  if (role === "ACC") {
-    return `${prefix} Control`;
+  if (role === "ACC" || role === "CENTER") {
+    return `${prefix} Center`;
   }
   switch (role) {
+    case "DELIVERY":
+      return `${prefix} Clearance`;
     case "GROUND":
       return `${prefix} Ground`;
     case "TOWER":
@@ -66,13 +69,16 @@ export function controllerFrequency(
   airport?: SimulationState["airport"],
   flightKind?: FlightKind
 ): string {
-  if (role === "ACC") {
+  if (role === "ACC" || role === "CENTER") {
     return "127.50";
   }
   if (airport?.frequencies && airport.frequencies.length > 0) {
     const match = airport.frequencies.find((f) => {
       const t = (f.type ?? "").toUpperCase();
       const d = (f.description ?? "").toLowerCase();
+      if (role === "DELIVERY") {
+        return t === "DEL" || t === "CD" || d.includes("clearance") || d.includes("delivery");
+      }
       if (role === "GROUND") {
         return t === "GND" || d.includes("ground");
       }
@@ -93,13 +99,18 @@ export function controllerFrequency(
     }
   }
 
-  switch (role) {
+  switch (role as string) {
+    case "DELIVERY":
+      return "121.75";
     case "GROUND":
       return "121.90";
     case "TOWER":
       return "118.70";
     case "DEPARTURE":
       return flightKind === "ARRIVAL" ? "124.35" : "120.30";
+    case "CENTER":
+    default:
+      return "127.50";
   }
 }
 
@@ -112,6 +123,13 @@ function formatRunwayOrAltitudeError(
     return other ?? state.airport.runways[rwy]?.oppositeId ?? rwy;
   };
   switch (clearance.type) {
+    case "IFR_CLEARANCE": {
+      const sq = (clearance.parameters.squawk as string) ?? "4215";
+      const wrongSq = String((Number(sq) + 111) % 7777).padStart(4, "0");
+      return {
+        errorText: `Cleared to destination via SID, climb maintain 5000, squawk ${wrongSq}, ${clearance.parameters.spokenCallsign ?? ""}`.trim(),
+      };
+    }
     case "ALTITUDE": {
       const target = Number(clearance.parameters.altitude ?? 5000);
       const wrong = target >= 5000 ? target - 2000 : target + 2000;
@@ -301,6 +319,22 @@ export function submitClearanceDecision(
         phraseology = `[TOWER LIGHT GUN → ${aircraft.callsign}] ${signal.replace("_", " ")}`;
         expectedReadback = `[WING ROCK / VISUAL ACK] ${aircraft.callsign}`;
       }
+      break;
+    }
+
+    case "IFR_CLEARANCE": {
+      const dest = aircraft.destinationName ?? aircraft.destinationIcao ?? "destination";
+      const sid = aircraft.assignedDepartureFix ?? state.airport.departureFixIds?.[0] ?? "departure";
+      const alt = (params.altitude as number | string) ?? 5000;
+      const depFreq = controllerFrequency("DEPARTURE", state.airport, "DEPARTURE");
+      const squawk = aircraft.squawk || String(2100 + (hashCallsign(aircraft.callsign) % 800)).padStart(4, "0");
+      params.sid = sid;
+      params.altitude = alt;
+      params.depFreq = depFreq;
+      params.squawk = squawk;
+      params.destination = dest;
+      phraseology = `${aircraft.spokenCallsign}, cleared to ${dest} via ${sid} departure, climb and maintain ${alt} feet, departure frequency ${depFreq}, squawk ${squawk}.`;
+      expectedReadback = `Cleared to ${dest} via ${sid}, climb maintain ${alt}, departure ${depFreq}, squawk ${squawk}, ${aircraft.spokenCallsign}.`;
       break;
     }
 
@@ -898,6 +932,9 @@ function applyClearanceImmediateEffects(
       }
       break;
     }
+    case "IFR_CLEARANCE":
+      break;
+
     case "PUSHBACK": {
       if (clearance.parameters.stepBack) {
         applyAcknowledgedClearance(state, aircraft, clearance);
@@ -1015,6 +1052,25 @@ function applyAcknowledgedClearance(
   aircraft.readbackErrorClearanceId = undefined;
 
   switch (clearance.type) {
+    case "IFR_CLEARANCE": {
+      if (aircraft.pendingRequest?.type === "IFR_CLEARANCE") {
+        aircraft.pendingRequest.resolved = true;
+        aircraft.pendingRequest = null;
+      }
+      const squawk = (clearance.parameters.squawk as string) ?? aircraft.squawk;
+      aircraft.squawk = squawk;
+      if (aircraft.flightPlan) {
+        aircraft.flightPlan.clearanceStatus = "CLEARED";
+        aircraft.flightPlan.assignedBeacon = squawk;
+        aircraft.flightPlan.clearanceIssuedAt = state.time;
+        if (clearance.parameters.altitude) {
+          aircraft.flightPlan.assignedAltitude = `${clearance.parameters.altitude} ft`;
+        }
+        aircraft.flightPlan.remarks = "Cleared via SID, ready for push and start";
+      }
+      break;
+    }
+
     case "PUSHBACK": {
       if (aircraft.pendingRequest?.type === "PUSHBACK") {
         aircraft.pendingRequest.resolved = true;

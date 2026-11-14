@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   CheckCircle,
   Crosshair,
+  FileText,
   GripVertical,
   Layers,
   LayoutGrid,
@@ -15,6 +16,7 @@ import {
   Radio,
   ShieldAlert,
 } from "lucide-react";
+import { IfrFlightPlanModal } from "./IfrFlightPlanModal.tsx";
 import { getActiveClearances, getPendingReadbackClearances } from "../engine/clearanceEngine.ts";
 import { getAircraftPhaseLabel } from "../engine/simulation.ts";
 import { canAircraftMove } from "../engine/validationEngine.ts";
@@ -65,6 +67,12 @@ function stateBadgeStyle(ac: Aircraft): string {
 
 function controllerBadge(ctrl: ControllerRole, flightKind?: FlightKind): { letter: string; cls: string; title: string } {
   switch (ctrl) {
+    case "DELIVERY":
+      return {
+        letter: "CD",
+        title: "Clearance Delivery",
+        cls: "bg-purple-950/70 text-purple-300 border-purple-700/60",
+      };
     case "GROUND":
       return {
         letter: "G",
@@ -89,6 +97,12 @@ function controllerBadge(ctrl: ControllerRole, flightKind?: FlightKind): { lette
             title: "Departure Control (DEP)",
             cls: "bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] border-[var(--atc-emerald-border)]",
           };
+    case "CENTER":
+      return {
+        letter: "C",
+        title: "Area Control / Center",
+        cls: "bg-indigo-950/70 text-indigo-300 border-indigo-700/60",
+      };
   }
 }
 
@@ -119,6 +133,7 @@ export const FlightStripRack: React.FC = () => {
     } catch {}
   };
 
+  const [selectedFlightPlanAcId, setSelectedFlightPlanAcId] = useState<string | null>(null);
   const [dragOverRole, setDragOverRole] = useState<ControllerRole | null>(null);
   const [filter, setFilter] = useState<StripFilter>(
     sim.config.activePlayerStation === "ALL" ? "ALL" : "STATION"
@@ -171,9 +186,11 @@ export const FlightStripRack: React.FC = () => {
   });
 
   const workloadCounts: Record<ControllerRole, number> = {
+    DELIVERY: activeFlights.filter((a) => a.controller === "DELIVERY").length,
     GROUND: activeFlights.filter((a) => a.controller === "GROUND").length,
     TOWER: activeFlights.filter((a) => a.controller === "TOWER").length,
     DEPARTURE: activeFlights.filter((a) => a.controller === "DEPARTURE").length,
+    CENTER: activeFlights.filter((a) => a.controller === "CENTER").length,
   };
 
   const urgentCount = activeFlights.filter(
@@ -209,6 +226,8 @@ export const FlightStripRack: React.FC = () => {
     const hasReq = Boolean(ac.pendingRequest && !ac.pendingRequest.resolved);
     const isCalling = activeCallerIds.has(ac.id);
     const ho = pendingHandoffsByAcId.get(ac.id);
+    const fp = ac.flightPlan;
+    const isCleared = fp ? fp.clearanceStatus === "CLEARED" : ac.flightKind === "ARRIVAL";
 
     return (
       <div
@@ -306,6 +325,36 @@ export const FlightStripRack: React.FC = () => {
           >
             {formatAltitudeReadout(ac, sim.airport.elevationFt).strip} • {Math.round(ac.speed)}kt
           </span>
+        </div>
+
+        {/* IFR Flight Plan Quick Bar */}
+        <div className="mt-1 flex items-center justify-between gap-1 text-[10px] font-mono">
+          <div className="flex items-center gap-1.5 truncate">
+            <span
+              className={`px-1 py-0.2 rounded text-[8px] font-bold border ${
+                isCleared
+                  ? "bg-emerald-950/60 text-emerald-400 border-emerald-700/60"
+                  : "bg-amber-950/60 text-amber-400 border-amber-700/60 animate-pulse"
+              }`}
+            >
+              {isCleared ? "CLEARED" : "PENDING"}
+            </span>
+            <span className="text-[var(--atc-text)] truncate font-semibold">
+              {ac.aircraftType}{fp?.equipmentSuffix ?? "/L"} → {fp?.destinationIcao ?? ac.destinationIcao ?? "DEST"} · {fp?.proposedDepartureTimeZ ?? "P2121"}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setSelectedFlightPlanAcId(ac.id);
+            }}
+            title="Inspect full IFR Flight Plan details"
+            className="px-1.5 py-0.5 rounded border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] hover:border-[var(--atc-accent)] text-[9px] font-mono text-[var(--atc-text-secondary)] hover:text-[var(--atc-accent-text)] flex items-center gap-1 shrink-0 transition-colors cursor-pointer"
+          >
+            <FileText className="w-2.5 h-2.5" />
+            PLAN
+          </button>
         </div>
 
         <div className="mt-1.5 flex items-center justify-between gap-1">
@@ -407,6 +456,8 @@ export const FlightStripRack: React.FC = () => {
   const renderMinimalStrip = (ac: Aircraft) => {
     const isSelected = sim.selectedAircraftId === ac.id;
     const isCalling = activeCallerIds.has(ac.id);
+    const fp = ac.flightPlan;
+    const isCleared = fp ? fp.clearanceStatus === "CLEARED" : ac.flightKind === "ARRIVAL";
 
     return (
       <div
@@ -443,6 +494,10 @@ export const FlightStripRack: React.FC = () => {
                 SEL
               </span>
             )}
+            <span
+              className={`w-2 h-2 rounded-full ${isCleared ? "bg-emerald-400" : "bg-amber-400"}`}
+              title={isCleared ? "IFR Cleared" : "Clearance Pending"}
+            />
             <span className="text-[9px] font-mono text-[var(--atc-muted)]">
               {ac.aircraftType}
             </span>
@@ -498,15 +553,17 @@ export const FlightStripRack: React.FC = () => {
   }
 
   const kanbanRoles: Array<{ role: ControllerRole; label: string; short: string; colorCls: string }> = [
+    { role: "DELIVERY", label: "DELIVERY", short: "DEL", colorCls: "text-purple-400" },
     { role: "GROUND", label: "GROUND", short: "GND", colorCls: "text-[var(--atc-amber)]" },
     { role: "TOWER", label: "TOWER", short: "TWR", colorCls: "text-[var(--atc-cyan)]" },
     { role: "DEPARTURE", label: "DEP / APP", short: "DEP", colorCls: "text-[var(--atc-emerald)]" },
+    { role: "CENTER", label: "CENTER", short: "CTR", colorCls: "text-indigo-400" },
   ];
 
   return (
     <aside
       className={`${
-        viewMode === "KANBAN" ? "w-[560px] xl:w-[640px]" : "w-72 xl:w-[300px]"
+        viewMode === "KANBAN" ? "w-[760px] xl:w-[900px]" : "w-72 xl:w-[300px]"
       } bg-[var(--atc-panel)] border-r border-[var(--atc-border)] flex flex-col shrink-0 min-h-0 p-2.5 gap-2.5 overflow-hidden transition-all duration-200`}
     >
       {/* Flight Strips Accordion */}
@@ -744,7 +801,7 @@ export const FlightStripRack: React.FC = () => {
         className="shrink-0"
       >
         <div className="space-y-2 text-[11px] font-mono">
-          {(["GROUND", "TOWER", "DEPARTURE"] as const).map((role) => {
+          {(["DELIVERY", "GROUND", "TOWER", "DEPARTURE", "CENTER"] as const).map((role) => {
             const count = workloadCounts[role];
             const pct = Math.min(100, Math.round((count / Math.max(4, activeFlights.length)) * 100));
             const isAuto = sim.config.stationControl[role] === "AUTONOMOUS";
@@ -752,7 +809,13 @@ export const FlightStripRack: React.FC = () => {
               <div key={role} className="space-y-1">
                 <div className="flex items-center justify-between text-[10px]">
                   <span className="font-semibold text-[var(--atc-text)] flex items-center gap-1.5">
-                    {role === "DEPARTURE" ? "Departure" : role[0] + role.slice(1).toLowerCase()}
+                    {role === "DELIVERY"
+                      ? "Clearance"
+                      : role === "DEPARTURE"
+                      ? "Departure"
+                      : role === "CENTER"
+                      ? "Center"
+                      : role[0] + role.slice(1).toLowerCase()}
                     <span className="text-[8px] px-1 rounded bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] text-[var(--atc-muted)]">
                       {isAuto ? "AI" : "YOU"}
                     </span>
@@ -770,6 +833,14 @@ export const FlightStripRack: React.FC = () => {
           })}
         </div>
       </Accordion>
+
+      {/* Interactive IFR Flight Plan Modal */}
+      {selectedFlightPlanAcId && (
+        <IfrFlightPlanModal
+          aircraft={sim.aircraft[selectedFlightPlanAcId] ?? null}
+          onClose={() => setSelectedFlightPlanAcId(null)}
+        />
+      )}
     </aside>
   );
 };

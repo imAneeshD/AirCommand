@@ -276,9 +276,11 @@ test("Single active role with other roles autonomous: auto controllers progress 
   sim.config.activePlayerStation = "TOWER";
   sim.config.autoManageOtherStations = true;
   sim.config.stationControl = {
+    DELIVERY: "AUTONOMOUS",
     GROUND: "AUTONOMOUS",
     TOWER: "PLAYER",
     DEPARTURE: "AUTONOMOUS",
+    CENTER: "AUTONOMOUS",
   };
 
   // 1. Inbound arrival under auto DEPARTURE should be handed off to Tower proactively when in approach range
@@ -301,9 +303,11 @@ test("Single active role with other roles autonomous: auto controllers progress 
   // 2. Test holding short departure with auto Tower
   sim.config.activePlayerStation = "GROUND";
   sim.config.stationControl = {
+    DELIVERY: "AUTONOMOUS",
     GROUND: "PLAYER",
     TOWER: "AUTONOMOUS",
     DEPARTURE: "AUTONOMOUS",
+    CENTER: "AUTONOMOUS",
   };
 
   const dep = Object.values(sim.aircraft).find((a) => a.flightKind === "DEPARTURE")!;
