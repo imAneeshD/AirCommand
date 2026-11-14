@@ -22,7 +22,7 @@ import { getActiveClearances, getPendingReadbackClearances } from "../engine/cle
 import { getAircraftPhaseLabel } from "../engine/simulation.ts";
 import { canAircraftMove } from "../engine/validationEngine.ts";
 import { useAtcStore } from "../store/atcStore.ts";
-import type { Aircraft, ControllerRole, FlightKind } from "../types/atc.ts";
+import type { Aircraft, ControllerRole, FlightKind, PilotRequest } from "../types/atc.ts";
 import { formatAltitudeReadout } from "../utils/telemetry.ts";
 import { getDeadlockedAircraftIds } from "../utils/groundConflict.ts";
 import { radioAudio } from "../utils/radioAudio.ts";
@@ -71,6 +71,38 @@ function stateBadgeStyle(ac: Aircraft): string {
     return "bg-[var(--atc-amber-bg)] text-[var(--atc-amber)] border-[var(--atc-amber-border)]";
   }
   return "bg-[var(--atc-surface-alt)] text-[var(--atc-text-secondary)] border-[var(--atc-border)]";
+}
+
+function formatPilotRequestLabel(req: PilotRequest, ac: Aircraft): string {
+  switch (req.type) {
+    case "APPROACH_CLEARANCE":
+      return `ILS ${req.runway ?? ac.targetRunway}`;
+    case "APPROACH_VECTORS":
+      return `VECTORS ${req.runway ?? ac.targetRunway}`;
+    case "RUNWAY_CHANGE":
+      return `RWY ${req.runway ?? ac.targetRunway}`;
+    case "TAXI":
+    case "GATE_TAXI":
+      return ac.flightKind === "ARRIVAL"
+        ? `TAXI ${ac.gateId ? `GATE ${ac.gateId}` : "APRON"}`
+        : `TAXI RWY ${ac.targetRunway}`;
+    case "PUSHBACK":
+      return "PUSHBACK";
+    case "TAKEOFF":
+      return `T/O ${ac.targetRunway}`;
+    case "LANDING":
+      return `LAND ${req.runway ?? ac.assignedApproach ?? ac.targetRunway}`;
+    case "CROSS_RUNWAY":
+      return `CROSS ${req.runway ?? ac.holdingAtRunway ?? ac.targetRunway}`;
+    case "IFR_CLEARANCE":
+      return "IFR CLEARANCE";
+    case "CLIMB_HIGHER":
+      return "CLIMB HIGHER";
+    case "HANDOFF":
+      return "HANDOFF";
+    default:
+      return req.type;
+  }
 }
 
 function controllerBadge(ctrl: ControllerRole, flightKind?: FlightKind): { letter: string; cls: string; title: string } {
@@ -219,99 +251,168 @@ export const FlightStripRack: React.FC = () => {
     const req = ac.pendingRequest;
     if (!req) return;
 
+    // Immediately focus aircraft and resolve request for instantaneous UI feedback
+    focusAircraft(ac.id);
+    req.resolved = true;
+
+    if (req.type === "APPROACH_CLEARANCE") {
+      issueClearance(
+        {
+          aircraftId: ac.id,
+          controller: ac.controller,
+          type: "APPROACH",
+          parameters: { runway: req.runway ?? ac.assignedApproach ?? ac.targetRunway },
+        },
+        true
+      );
+      return;
+    }
+
     if (req.type === "RUNWAY_CHANGE" && req.runway) {
-      issueClearance({
-        aircraftId: ac.id,
-        controller: ac.controller,
-        type: ac.flightKind === "ARRIVAL" ? "APPROACH" : "TAXI",
-        parameters: { runway: req.runway },
-      });
+      issueClearance(
+        {
+          aircraftId: ac.id,
+          controller: ac.controller,
+          type: ac.flightKind === "ARRIVAL" ? "APPROACH" : "TAXI",
+          parameters: { runway: req.runway },
+        },
+        true
+      );
       return;
     }
 
     if (req.type === "TAXI" || req.type === "GATE_TAXI") {
-      issueClearance({
-        aircraftId: ac.id,
-        controller: ac.controller,
-        type: "TAXI",
-        parameters: ac.flightKind === "ARRIVAL" ? { gate: ac.gateId } : { runway: ac.targetRunway },
-      });
+      issueClearance(
+        {
+          aircraftId: ac.id,
+          controller: ac.controller,
+          type: "TAXI",
+          parameters: ac.flightKind === "ARRIVAL" ? { gate: ac.gateId } : { runway: ac.targetRunway },
+        },
+        true
+      );
       return;
     }
 
     if (req.type === "PUSHBACK") {
-      issueClearance({
-        aircraftId: ac.id,
-        controller: ac.controller,
-        type: "PUSHBACK",
-        parameters: { pushbackDirection: "TAXIWAY_A" },
-      });
+      issueClearance(
+        {
+          aircraftId: ac.id,
+          controller: ac.controller,
+          type: "PUSHBACK",
+          parameters: { pushbackDirection: "TAXIWAY_A" },
+        },
+        true
+      );
       return;
     }
 
     if (req.type === "TAKEOFF") {
-      issueClearance({
-        aircraftId: ac.id,
-        controller: ac.controller,
-        type: "TAKEOFF",
-        parameters: { runway: ac.targetRunway },
-      });
+      issueClearance(
+        {
+          aircraftId: ac.id,
+          controller: ac.controller,
+          type: "TAKEOFF",
+          parameters: { runway: ac.targetRunway },
+        },
+        true
+      );
       return;
     }
 
     if (req.type === "LANDING") {
-      issueClearance({
-        aircraftId: ac.id,
-        controller: ac.controller,
-        type: "LAND",
-        parameters: { runway: ac.assignedApproach ?? ac.targetRunway },
-      });
+      issueClearance(
+        {
+          aircraftId: ac.id,
+          controller: ac.controller,
+          type: "LAND",
+          parameters: { runway: ac.assignedApproach ?? ac.targetRunway },
+        },
+        true
+      );
       return;
     }
 
     if (req.type === "CROSS_RUNWAY") {
-      issueClearance({
-        aircraftId: ac.id,
-        controller: ac.controller,
-        type: "CROSS_RUNWAY",
-        parameters: { runway: ac.holdingAtRunway ?? ac.targetRunway },
-      });
+      issueClearance(
+        {
+          aircraftId: ac.id,
+          controller: ac.controller,
+          type: "CROSS_RUNWAY",
+          parameters: { runway: ac.holdingAtRunway ?? ac.targetRunway },
+        },
+        true
+      );
       return;
     }
 
     if (req.type === "IFR_CLEARANCE") {
-      issueClearance({
-        aircraftId: ac.id,
-        controller: "DELIVERY",
-        type: "IFR_CLEARANCE",
-        parameters: {
-          altitude: 5000,
+      issueClearance(
+        {
+          aircraftId: ac.id,
+          controller: "DELIVERY",
+          type: "IFR_CLEARANCE",
+          parameters: {
+            altitude: 5000,
+          },
         },
-      });
+        true
+      );
       return;
     }
 
     if (req.type === "CLIMB_HIGHER") {
-      issueClearance({
-        aircraftId: ac.id,
-        controller: ac.controller,
-        type: "ALTITUDE",
-        parameters: { altitude: Math.min(10000, (ac.assignedAltitude ?? 3000) + 2000) },
-      });
+      issueClearance(
+        {
+          aircraftId: ac.id,
+          controller: ac.controller,
+          type: "ALTITUDE",
+          parameters: { altitude: Math.min(10000, (ac.assignedAltitude ?? 3000) + 2000) },
+        },
+        true
+      );
       return;
     }
 
     if (req.type === "APPROACH_VECTORS") {
-      issueClearance({
-        aircraftId: ac.id,
-        controller: ac.controller,
-        type: "HEADING",
-        parameters: { heading: ac.heading },
-      });
+      issueClearance(
+        {
+          aircraftId: ac.id,
+          controller: ac.controller,
+          type: "HEADING",
+          parameters: { heading: ac.heading },
+        },
+        true
+      );
       return;
     }
 
-    focusAircraft(ac.id);
+    if (req.type === "HANDOFF") {
+      const targetCtrl: ControllerRole =
+        ac.controller === "DELIVERY"
+          ? "GROUND"
+          : ac.controller === "GROUND"
+          ? "TOWER"
+          : ac.controller === "TOWER"
+          ? ac.flightKind === "ARRIVAL"
+            ? "GROUND"
+            : "DEPARTURE"
+          : ac.controller === "DEPARTURE"
+          ? ac.flightKind === "ARRIVAL"
+            ? "TOWER"
+            : "CENTER"
+          : "TOWER";
+      issueClearance(
+        {
+          aircraftId: ac.id,
+          controller: ac.controller,
+          type: "HANDOFF",
+          parameters: { targetController: targetCtrl },
+        },
+        true
+      );
+      return;
+    }
   };
 
   const handleDropToColumn = (e: React.DragEvent, targetRole: ControllerRole) => {
@@ -520,12 +621,7 @@ export const FlightStripRack: React.FC = () => {
             <span className="flex items-center gap-1.5 font-mono text-[10px] font-bold text-[var(--atc-amber)] truncate">
               <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-[var(--atc-amber)]" />
               <span className="truncate">
-                REQ: {ac.pendingRequest.type}
-                {ac.pendingRequest.runway
-                  ? ` ${ac.pendingRequest.runway}`
-                  : ac.holdingAtRunway
-                  ? ` (${ac.holdingAtRunway})`
-                  : ""}
+                REQ: {formatPilotRequestLabel(ac.pendingRequest, ac)}
               </span>
             </span>
             <button

@@ -15,7 +15,7 @@ test("Runway Lineup: aircraft in TAKEOFF_CLEARED aligns strictly forward onto ce
   const ac = createDepartureAircraft(state, {
     callsign: "QTR963",
     spokenCallsign: "Qatar 963",
-    gateId: "1",
+    gateId: "A1",
     targetRunway: "09R",
     aircraftType: "B77W",
   });
@@ -88,7 +88,7 @@ test("Mid-runway entry: aircraft does not pull backward even if past mid-runway"
   const ac = createDepartureAircraft(state, {
     callsign: "UAE916",
     spokenCallsign: "Emirates 916",
-    gateId: "2",
+    gateId: "A2",
     targetRunway: "09R",
     aircraftType: "A388",
   });
