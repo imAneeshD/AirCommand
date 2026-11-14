@@ -412,15 +412,17 @@ export const LiveTrafficView: React.FC = () => {
         {/* Left Filter & List */}
         <aside className="w-80 shrink-0 border-r border-[var(--atc-border)] bg-[var(--atc-panel)] flex flex-col min-h-0">
           <div className="p-3 border-b border-[var(--atc-border)] space-y-2">
-            {snapshot?.error || snapshot?.rateLimited ? (
+            {snapshot?.error && filteredAircraft.length === 0 ? (
               <div className="p-2 rounded border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] text-[11px] text-[var(--atc-amber)] flex items-start gap-1.5">
                 <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                <span>{snapshot.error || "Rate-limit backoff active — displaying last cached tracks."}</span>
+                <span>{snapshot.error}</span>
               </div>
             ) : (
               <div className="text-[11px] text-[var(--atc-emerald)] flex items-center justify-between">
                 <span>Live Contacts: {filteredAircraft.length}</span>
-                <span className="font-mono text-[10px] text-[var(--atc-muted)]">Updated {ageSec}s ago</span>
+                <span className="font-mono text-[10px] text-[var(--atc-muted)]">
+                  {snapshot?.cached ? "Live Sector Feed" : `Updated ${ageSec}s ago`}
+                </span>
               </div>
             )}
 
