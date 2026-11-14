@@ -1159,8 +1159,7 @@ function applyAcknowledgedClearance(
       }
       if (
         aircraft.state === "HOLDING_SHORT" &&
-        aircraft.holdingAtRunway === rwy &&
-        aircraft.holdingShortReason === "CROSSING_REQUIRED"
+        (!aircraft.holdingAtRunway || aircraft.holdingAtRunway === rwy)
       ) {
         aircraft.holdingAtRunway = undefined;
         aircraft.holdingShortReason = undefined;

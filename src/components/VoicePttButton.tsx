@@ -35,7 +35,7 @@ export const VoicePttButton: React.FC = () => {
     toastTimerRef.current = window.setTimeout(() => {
       setToast(null);
       toastTimerRef.current = null;
-    }, 4000);
+    }, 3000);
   }, []);
 
   const executeTranscript = useCallback(
@@ -211,7 +211,13 @@ export const VoicePttButton: React.FC = () => {
 
       {(listening || toast) && (
         <div
+          onClick={() => {
+            if (!listening && toast) setToast(null);
+          }}
+          title={!listening ? "Click to dismiss" : undefined}
           className={`absolute right-0 top-full mt-2 w-80 z-50 p-2.5 rounded-lg border-2 shadow-2xl text-[12px] font-mono select-none ${
+            !listening && toast ? "cursor-pointer transition-opacity hover:opacity-90" : ""
+          } ${
             listening
               ? "bg-slate-950 border-red-500 text-white shadow-red-950/60"
               : toast?.ok

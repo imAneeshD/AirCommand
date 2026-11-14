@@ -235,7 +235,10 @@ function runAutonomousGround(state: SimulationState): void {
     }
 
     if (ac.state === "HOLDING_SHORT") {
-      if (ac.holdingShortReason === "CROSSING_REQUIRED" && ac.holdingAtRunway) {
+      if (
+        (ac.holdingShortReason === "CROSSING_REQUIRED" && ac.holdingAtRunway) ||
+        (ac.holdingAtRunway && ac.holdingAtRunway !== ac.targetRunway)
+      ) {
         const rwy = ac.holdingAtRunway;
         const safeToCross =
           !isRunwayActiveForTakeoffOrCrossing(state, rwy, ac.id) &&
@@ -255,7 +258,7 @@ function runAutonomousGround(state: SimulationState): void {
       } else if (
         ac.holdingShortReason === "DEPARTURE_RUNWAY" ||
         ac.holdingAtRunway === ac.targetRunway ||
-        (!ac.holdingShortReason && ac.flightKind === "DEPARTURE")
+        (!ac.holdingShortReason && ac.flightKind === "DEPARTURE" && !ac.holdingAtRunway)
       ) {
         submitClearanceDecision(
           state,
@@ -492,7 +495,32 @@ function runAutonomousTower(state: SimulationState): void {
       continue;
     }
 
-    // Priority 4: Departures at runway threshold holding short
+    // Priority 4: Intermediate runway crossing under Tower
+    if (
+      ac.state === "HOLDING_SHORT" &&
+      ac.holdingAtRunway &&
+      ac.holdingAtRunway !== ac.targetRunway
+    ) {
+      const rwy = ac.holdingAtRunway;
+      const safeToCross =
+        !isRunwayActiveForTakeoffOrCrossing(state, rwy, ac.id) &&
+        !isFinalApproachCrowded(state, rwy, 3.2, ac.id);
+      if (safeToCross) {
+        submitClearanceDecision(
+          state,
+          {
+            aircraftId: ac.id,
+            controller: "TOWER",
+            type: "CROSS_RUNWAY",
+            parameters: { runway: rwy },
+          },
+          "AUTONOMOUS"
+        );
+      }
+      continue;
+    }
+
+    // Priority 5: Departures at runway threshold holding short
     if (
       ac.flightKind === "DEPARTURE" &&
       ac.state === "HOLDING_SHORT" &&

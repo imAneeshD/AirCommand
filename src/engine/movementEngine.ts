@@ -338,14 +338,19 @@ export function updateAircraftMovement(
           ac.currentNodeId = nextNode.id;
           ac.routeStepIndex += 1;
 
-          // If we just finished crossing a runway onto the opposite hold-short node,
+          // If we just finished crossing a runway onto the opposite side,
           // consume that single crossing clearance and return to TAXIING if more route left.
           if (
-            curNode.runwayId &&
-            nextNode.kind === "HOLD_SHORT" &&
-            nextNode.holdShortForRunway === curNode.runwayId
+            ac.state === "CROSSING_RUNWAY" &&
+            (curNode.runwayId || crossingRwy) &&
+            !nextNode.runwayId
           ) {
-            ac.crossRunwayCleared[curNode.runwayId] = false;
+            if (curNode.runwayId) {
+              ac.crossRunwayCleared[curNode.runwayId] = false;
+            }
+            if (crossingRwy) {
+              ac.crossRunwayCleared[crossingRwy] = false;
+            }
             completeClearancesOfType(ac, "CROSS_RUNWAY");
             if (ac.routeStepIndex < route.length - 1) {
               ac.state = "TAXIING";

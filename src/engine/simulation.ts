@@ -2,6 +2,7 @@ import { deriveFlightMetadata, generateIfrFlightPlan } from "../data/aircraftCat
 import {
   createAirportById,
   runwayPoint,
+  runwaySpokenName,
 } from "../data/asteriaAirport.ts";
 import type {
   Aircraft,
@@ -19,7 +20,7 @@ import type {
 import { updateAircraftStates } from "./aircraftEngine.ts";
 import { runAutonomousControllers } from "./autonomousControllers.ts";
 import { nextId } from "./clearanceEngine.ts";
-import { addRadioMessage, processPilotReadbacks } from "./decisionEngine.ts";
+import { addRadioMessage, controllerCallsign, processPilotReadbacks } from "./decisionEngine.ts";
 import { updateAircraftMovement } from "./movementEngine.ts";
 
 export const AIRLINES: Array<{ code: string; spoken: string; name: string; types: string[] }> = [
@@ -1575,9 +1576,18 @@ export function spawnRandomTraffic(
       : state.scenarioId === "LIGHT"
       ? 5
       : state.scenarioId === "HEAVY" || state.scenarioId === "RUSH_HOUR"
-      ? 13
+      ? 14
       : 11;
   if (activeCount >= maxTraffic) return null;
+
+  const activeArrivals = state.aircraftOrder.filter((id) => {
+    const a = state.aircraft[id];
+    return a && a.flightKind === "ARRIVAL" && a.state !== "COMPLETED_ARRIVAL";
+  }).length;
+  const activeDepartures = state.aircraftOrder.filter((id) => {
+    const a = state.aircraft[id];
+    return a && a.flightKind === "DEPARTURE" && a.state !== "COMPLETED_DEPARTURE";
+  }).length;
 
   const chooseKind: FlightKind =
     kind ??
@@ -1589,6 +1599,10 @@ export function spawnRandomTraffic(
       ? state.nextIdCounter % 4 === 0
         ? "ARRIVAL"
         : "DEPARTURE"
+      : activeArrivals === 0
+      ? "ARRIVAL"
+      : activeArrivals < activeDepartures
+      ? "ARRIVAL"
       : state.nextIdCounter % 2 === 0
       ? "DEPARTURE"
       : "ARRIVAL");
@@ -1660,6 +1674,14 @@ export function spawnRandomTraffic(
     gateId,
     state: "APPROACH",
     controller: "DEPARTURE",
+  });
+  addRadioMessage(state, {
+    sender: callsign,
+    recipient: controllerCallsign("DEPARTURE", state.airport, "ARRIVAL"),
+    controller: "DEPARTURE",
+    aircraftId: callsign,
+    category: "PILOT_REQUEST",
+    text: `${controllerCallsign("DEPARTURE", state.airport, "ARRIVAL")}, ${spokenCallsign}, inbound descending through 4,200 for runway ${runwaySpokenName(rwy)}, with information Alpha.`,
   });
   updateAircraftStates(state);
   return ac;

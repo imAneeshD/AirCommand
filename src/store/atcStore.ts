@@ -293,13 +293,10 @@ function dispatchRadioMessagesAudio(
     spokenRadioMsgIds.add(msg.id);
 
     if (msg.category === "READBACK_ERROR") {
-      radioAudio.playRadioClick("ERROR");
-      radioAudio.speakRadio(msg.text, "PILOT", msg.aircraftId ?? msg.sender, true);
+      radioAudio.speakRadio(msg.text, "PILOT", msg.aircraftId ?? msg.sender, true, undefined, "ERROR");
     } else if (msg.category === "EMERGENCY") {
-      radioAudio.playRadioClick("ALERT");
-      radioAudio.speakRadio(msg.text, "PILOT", msg.aircraftId ?? msg.sender, true);
+      radioAudio.speakRadio(msg.text, "PILOT", msg.aircraftId ?? msg.sender, true, undefined, "ALERT");
     } else if (msg.category === "PILOT_READBACK") {
-      radioAudio.playRadioClick("PILOT");
       const ac = msg.aircraftId ? sim.aircraft[msg.aircraftId] : undefined;
       radioAudio.speakRadio(msg.text, "PILOT", msg.aircraftId ?? msg.sender, true, () => {
         if (ac) {
@@ -307,25 +304,22 @@ function dispatchRadioMessagesAudio(
         }
         if (onUpdate) onUpdate();
         else useAtcStore.setState((s) => ({ tickVersion: s.tickVersion + 1 }));
-      });
+      }, "PILOT");
     } else if (msg.category === "PILOT_REQUEST") {
-      radioAudio.playRadioClick("PILOT");
-      radioAudio.speakRadio(msg.text, "PILOT", msg.aircraftId ?? msg.sender, false);
+      radioAudio.speakRadio(msg.text, "PILOT", msg.aircraftId ?? msg.sender, false, undefined, "PILOT");
     } else if (msg.category === "ATC_CLEARANCE") {
-      radioAudio.playRadioClick("ATC");
-
       const ac = msg.aircraftId ? sim.aircraft[msg.aircraftId] : undefined;
       const clr = ac?.clearances.find((c) => c.syncGated && c.lifecycle === "READBACK_PENDING");
 
-      if (clr && sim.config.activePlayerStation !== "ALL" && ac) {
-        // Single role mode: speak ATC command synchronously. When controller finishes speaking,
-        // release the sync gate so processPilotReadbacks naturally generates the single pilot readback!
+      if (clr && ac) {
+        // Speak ATC command synchronously: when controller finishes speaking,
+        // release the sync gate so the pilot reads back AFTER the controller!
         radioAudio.speakRadio(msg.text, "CONTROLLER", msg.controller, true, () => {
           clr.syncGated = false;
           clr.readbackDueAt = sim.time;
           if (onUpdate) onUpdate();
           else useAtcStore.setState((s) => ({ tickVersion: s.tickVersion + 1 }));
-        });
+        }, "ATC");
       } else {
         radioAudio.speakRadio(msg.text, "CONTROLLER", msg.controller, true, () => {
           // If no pending pilot readback to follow, release aircraft voice gate upon ATC speech completion
@@ -334,7 +328,7 @@ function dispatchRadioMessagesAudio(
             if (onUpdate) onUpdate();
             else useAtcStore.setState((s) => ({ tickVersion: s.tickVersion + 1 }));
           }
-        });
+        }, "ATC");
       }
     }
   }
