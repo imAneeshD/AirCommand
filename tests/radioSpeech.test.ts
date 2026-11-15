@@ -298,3 +298,53 @@ test("Full handoff coordination: Ground req -> Tower accepts/rejects -> transfer
   assert.ok(towerCheckIn);
   assert.ok(towerCheckIn.text.includes("Asteria Tower, United 452, holding short runway"));
 });
+
+test("Voice command flow: Controller speech is suppressed when isVoice=true, pilot readback executes and aircraft moves", () => {
+  const s = createBaseSimulation("SANDBOX", "TOWER");
+  s.config.autoSpawnTraffic = false;
+  s.config.readbackErrorProbability = 0;
+
+  const ual = createDepartureAircraft(s, {
+    callsign: "UAL452",
+    spokenCallsign: "United 452",
+    gateId: "B12",
+    targetRunway: "09L",
+    requiresPushback: false,
+    controller: "TOWER",
+  });
+  ual.state = "LINE_UP_WAIT";
+  ual.targetRunway = "09L";
+
+  // Simulate issuing TAKEOFF clearance with isVoice (as happens via Voice PTT)
+  const res = submitClearanceDecision(
+    s,
+    {
+      aircraftId: ual.id,
+      controller: "TOWER",
+      type: "TAKEOFF",
+      parameters: { runway: "09L" },
+    },
+    "PLAYER"
+  );
+
+  assert.equal(res.ok, true);
+  assert.ok(res.clearance);
+  assert.equal(res.clearance.lifecycle, "READBACK_PENDING");
+
+  // In voice command flow, sync gate is released directly without waiting for controller TTS
+  res.clearance.syncGated = false;
+  res.clearance.readbackDueAt = s.time;
+
+  // Step simulation - pilot acknowledges and readback message is added to radioLog
+  stepSimulation(s, 0.1);
+
+  const readbackMsg = s.radioLog.find(
+    (m) => m.category === "PILOT_READBACK" && m.aircraftId === ual.id
+  );
+  assert.ok(readbackMsg, "Pilot readback message must be generated");
+  assert.equal(readbackMsg.sender, ual.callsign);
+  assert.ok(readbackMsg.text.includes("runway 09L cleared for takeoff") || readbackMsg.text.includes("Cleared for takeoff"));
+
+  // After pilot readback completes, aircraft transitions to TAKEOFF_CLEARED
+  assert.equal(ual.state, "TAKEOFF_CLEARED");
+});

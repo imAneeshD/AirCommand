@@ -136,7 +136,9 @@ export const VoicePttButton: React.FC = () => {
         return;
       }
       selectAircraft(parsed.aircraftId);
-      const res = issueClearance(parsed.command, true);
+      // Pass isVoice = true so simulator does NOT repeat controller clearance out loud,
+      // but processes it internally and immediately triggers the pilot's reply/readback.
+      const res = issueClearance(parsed.command, true, true);
       if (res && !res.ok) {
         showToast(false, res.reason || "Clearance rejected by ATC rules");
       } else {

@@ -238,7 +238,8 @@ interface AtcStore {
   setTimeScale: (scale: 1 | 2 | 4) => void;
   issueClearance: (
     cmd: Omit<ClearanceCommandInput, "controller"> & { controller?: ControllerRole },
-    override?: boolean
+    override?: boolean,
+    isVoice?: boolean
   ) => { ok: boolean; reason?: string };
   armReadbackError: (aircraftId: string) => void;
   causeRadioFailure: (aircraftId: string) => void;
@@ -281,7 +282,8 @@ const spokenRadioMsgIds = new Set<string>();
 function dispatchRadioMessagesAudio(
   sim: SimulationState,
   messages: SimulationState["radioLog"],
-  onUpdate?: () => void
+  onUpdate?: () => void,
+  skipAtcClearanceSpeech = false
 ): void {
   // Sync radio audio mode: single role mode is synchronous, ALL mode is async with ducking
   radioAudio.syncMode = sim.config.activePlayerStation !== "ALL";
@@ -314,24 +316,39 @@ function dispatchRadioMessagesAudio(
       const ac = msg.aircraftId ? sim.aircraft[msg.aircraftId] : undefined;
       const clr = ac?.clearances.find((c) => c.syncGated && c.lifecycle === "READBACK_PENDING");
 
-      if (clr && ac) {
-        // Speak ATC command synchronously: when controller finishes speaking,
-        // release the sync gate so the pilot reads back AFTER the controller!
-        radioAudio.speakRadio(msg.text, "CONTROLLER", msg.controller, true, () => {
+      if (skipAtcClearanceSpeech) {
+        // Voice command was spoken directly by the human user — do NOT repeat controller speech out loud!
+        // Release the sync gate immediately so the pilot reads back directly from the aircraft.
+        if (clr && ac) {
           clr.syncGated = false;
           clr.readbackDueAt = sim.time;
           if (onUpdate) onUpdate();
           else useAtcStore.setState((s) => ({ tickVersion: s.tickVersion + 1 }));
-        }, "ATC");
+        } else if (ac) {
+          ac.voiceGated = false;
+          if (onUpdate) onUpdate();
+          else useAtcStore.setState((s) => ({ tickVersion: s.tickVersion + 1 }));
+        }
       } else {
-        radioAudio.speakRadio(msg.text, "CONTROLLER", msg.controller, true, () => {
-          // If no pending pilot readback to follow, release aircraft voice gate upon ATC speech completion
-          if (ac && (!clr || clr.lifecycle !== "READBACK_PENDING")) {
-            ac.voiceGated = false;
+        if (clr && ac) {
+          // Speak ATC command synchronously: when controller finishes speaking,
+          // release the sync gate so the pilot reads back AFTER the controller!
+          radioAudio.speakRadio(msg.text, "CONTROLLER", msg.controller, true, () => {
+            clr.syncGated = false;
+            clr.readbackDueAt = sim.time;
             if (onUpdate) onUpdate();
             else useAtcStore.setState((s) => ({ tickVersion: s.tickVersion + 1 }));
-          }
-        }, "ATC");
+          }, "ATC");
+        } else {
+          radioAudio.speakRadio(msg.text, "CONTROLLER", msg.controller, true, () => {
+            // If no pending pilot readback to follow, release aircraft voice gate upon ATC speech completion
+            if (ac && (!clr || clr.lifecycle !== "READBACK_PENDING")) {
+              ac.voiceGated = false;
+              if (onUpdate) onUpdate();
+              else useAtcStore.setState((s) => ({ tickVersion: s.tickVersion + 1 }));
+            }
+          }, "ATC");
+        }
       }
     }
   }
@@ -1698,7 +1715,7 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
     set((s) => ({ tickVersion: s.tickVersion + 1 }));
   },
 
-  issueClearance: (cmd, override = false) => {
+  issueClearance: (cmd, override = false, isVoice = false) => {
     const { sim, roomState, assignedRole } = get();
     const ac = sim.aircraft[cmd.aircraftId];
 
@@ -1792,9 +1809,14 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
 
     if (res.ok) {
       const newMessages = collectNewMessagesSince(sim.radioLog, prevLastMsg);
-      dispatchRadioMessagesAudio(sim, newMessages, () => {
-        set((s) => ({ tickVersion: s.tickVersion + 1 }));
-      });
+      dispatchRadioMessagesAudio(
+        sim,
+        newMessages,
+        () => {
+          set((s) => ({ tickVersion: s.tickVersion + 1 }));
+        },
+        isVoice
+      );
     } else {
       radioAudio.playRadioClick("ERROR");
     }
