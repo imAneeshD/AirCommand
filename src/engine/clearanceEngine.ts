@@ -58,6 +58,7 @@ export function createClearanceObject(
   }
 ): ATCClearance {
   const isSingleRoleBrowser =
+    state.config.activePlayerStation !== "ALL" &&
     typeof window !== "undefined" &&
     !params.immediate;
 
@@ -148,10 +149,14 @@ export function supersedeClearancesForNewInstruction(
     case "HEADING":
       supersedeTypes.add("HEADING");
       supersedeTypes.add("DIRECT");
+      supersedeTypes.add("APPROACH");
+      supersedeTypes.add("LAND");
       break;
     case "DIRECT":
       supersedeTypes.add("HEADING");
       supersedeTypes.add("DIRECT");
+      supersedeTypes.add("APPROACH");
+      supersedeTypes.add("LAND");
       break;
     case "ALTITUDE":
       supersedeTypes.add("ALTITUDE");

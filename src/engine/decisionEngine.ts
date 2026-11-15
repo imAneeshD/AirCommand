@@ -1262,13 +1262,17 @@ function applyAcknowledgedClearance(
       aircraft.assignedTurnDirection =
         (clearance.parameters.turnDirection as "LEFT" | "RIGHT" | "NEAREST") ?? "NEAREST";
       aircraft.assignedDirectFix = null;
+      // Breaking off approach / go-around to fly ATC radar vectors
       if (
-        (aircraft.state === "GO_AROUND" || aircraft.state === "MISSED_APPROACH") &&
-        aircraft.altitude >= state.airport.elevationFt + 800
+        aircraft.state === "FINAL" ||
+        aircraft.state === "CLEARED_TO_LAND" ||
+        aircraft.state === "GO_AROUND" ||
+        aircraft.state === "MISSED_APPROACH"
       ) {
         aircraft.state = "APPROACH";
         aircraft.stateEnteredAt = state.time;
         aircraft.minimumsGoAroundTriggered = false;
+        aircraft.assignedApproach = null;
       }
       if (aircraft.pendingRequest?.type === "APPROACH_VECTORS") {
         aircraft.pendingRequest.resolved = true;
@@ -1278,6 +1282,15 @@ function applyAcknowledgedClearance(
 
     case "ALTITUDE": {
       aircraft.assignedAltitude = Number(clearance.parameters.altitude);
+      // If on final approach and given a climb or level-off instruction, break glideslope dive
+      if (
+        (aircraft.state === "FINAL" || aircraft.state === "CLEARED_TO_LAND") &&
+        aircraft.assignedAltitude > state.airport.elevationFt + 500
+      ) {
+        aircraft.state = "APPROACH";
+        aircraft.stateEnteredAt = state.time;
+        aircraft.assignedApproach = null;
+      }
       if (aircraft.pendingRequest?.type === "CLIMB_HIGHER") {
         aircraft.pendingRequest.resolved = true;
       }
@@ -1291,13 +1304,17 @@ function applyAcknowledgedClearance(
 
     case "DIRECT": {
       aircraft.assignedDirectFix = String(clearance.parameters.fixId);
+      aircraft.assignedHeading = null;
       if (
-        (aircraft.state === "GO_AROUND" || aircraft.state === "MISSED_APPROACH") &&
-        aircraft.altitude >= state.airport.elevationFt + 800
+        aircraft.state === "FINAL" ||
+        aircraft.state === "CLEARED_TO_LAND" ||
+        aircraft.state === "GO_AROUND" ||
+        aircraft.state === "MISSED_APPROACH"
       ) {
         aircraft.state = "APPROACH";
         aircraft.stateEnteredAt = state.time;
         aircraft.minimumsGoAroundTriggered = false;
+        aircraft.assignedApproach = null;
       }
       if (aircraft.pendingRequest?.type === "APPROACH_VECTORS") {
         aircraft.pendingRequest.resolved = true;

@@ -621,37 +621,8 @@ function integrateAirborneFlight(
   const rwyId = ac.assignedApproach ?? ac.targetRunway;
   const rwy = state.airport.runways[rwyId];
 
-  // 1. Lateral Guidance (Strictly clearance-gated)
+  // 1. Lateral Guidance (Strictly clearance-gated: manual ATC heading vector takes absolute precedence)
   if (
-    ac.state === "CLEARED_TO_LAND" ||
-    ac.state === "LANDING" ||
-    (ac.state === "FINAL" && ac.assignedApproach)
-  ) {
-    // ILS Localizer tracking onto runway centerline along rwy.heading
-    const crossErr = crossTrackRunwayNm(rwy, ac.x, ac.y);
-    const interceptAngle = Math.max(-28, Math.min(28, crossErr * 55));
-    const desiredHdg = normalizeHeading(rwy.heading + interceptAngle);
-    ac.heading = turnTowardHeading(ac.heading, desiredHdg, 8 * dt, "NEAREST");
-  } else if (
-    ac.assignedDirectFix &&
-    canAircraftExecuteAction(ac, "DIRECT_FIX", state).allowed
-  ) {
-    const fix = state.airport.fixes[ac.assignedDirectFix];
-    if (fix) {
-      const dist = Math.hypot(fix.x - ac.x, fix.y - ac.y);
-      if (dist < 1.2 && ac.flightKind === "DEPARTURE") {
-        // Departure fix reached! Proceed outbound en route instead of circling around the waypoint
-        ac.assignedDirectFix = null;
-        ac.assignedHeading = ac.heading;
-        ac.state = "CRUISE_OUTBOUND";
-      } else if (dist < 1.1 && ac.assignedApproach && fix.kind === "IAF") {
-        ac.heading = turnTowardHeading(ac.heading, rwy.heading, 4.5 * dt, "NEAREST");
-      } else {
-        const targetHdg = bearingDeg(ac.x, ac.y, fix.x, fix.y);
-        ac.heading = turnTowardHeading(ac.heading, targetHdg, 4 * dt, "NEAREST");
-      }
-    }
-  } else if (
     ac.assignedHeading !== null &&
     canAircraftExecuteAction(ac, "CHANGE_HEADING", state).allowed
   ) {
@@ -667,6 +638,36 @@ function integrateAirborneFlight(
       }
     }
   } else if (
+    ac.assignedDirectFix &&
+    canAircraftExecuteAction(ac, "DIRECT_FIX", state).allowed
+  ) {
+    const fix = state.airport.fixes[ac.assignedDirectFix];
+    if (fix) {
+      const dist = Math.hypot(fix.x - ac.x, fix.y - ac.y);
+      if (dist < 1.2 && ac.flightKind === "DEPARTURE") {
+        // Departure fix reached! Proceed outbound en route instead of circling around the waypoint
+        ac.assignedDirectFix = null;
+        ac.assignedHeading = ac.heading;
+        ac.state = "CRUISE_OUTBOUND";
+      } else if (dist < 1.1 && ac.assignedApproach && fix.kind === "IAF") {
+        ac.heading = turnTowardHeading(ac.heading, rwy?.heading ?? ac.heading, 4.5 * dt, "NEAREST");
+      } else {
+        const targetHdg = bearingDeg(ac.x, ac.y, fix.x, fix.y);
+        ac.heading = turnTowardHeading(ac.heading, targetHdg, 4 * dt, "NEAREST");
+      }
+    }
+  } else if (
+    rwy &&
+    (ac.state === "CLEARED_TO_LAND" ||
+      ac.state === "LANDING" ||
+      (ac.state === "FINAL" && ac.assignedApproach))
+  ) {
+    // ILS Localizer tracking onto runway centerline along rwy.heading
+    const crossErr = crossTrackRunwayNm(rwy, ac.x, ac.y);
+    const interceptAngle = Math.max(-28, Math.min(28, crossErr * 55));
+    const desiredHdg = normalizeHeading(rwy.heading + interceptAngle);
+    ac.heading = turnTowardHeading(ac.heading, desiredHdg, 8 * dt, "NEAREST");
+  } else if (
     ac.flightKind === "DEPARTURE" &&
     (ac.state === "CLIMB" || ac.state === "CRUISE_OUTBOUND")
   ) {
@@ -680,11 +681,11 @@ function integrateAirborneFlight(
   ) {
     const missedFix = state.airport.fixes["MISSED"];
     const agl = Math.max(0, ac.altitude - elev);
-    if (ac.state === "GO_AROUND" && agl < 1200) {
+    if (ac.state === "GO_AROUND" && agl < 800) {
       // Initial straight-out TOGA climb on runway centerline
       const gaHdg = rwy?.heading ?? ac.heading;
       ac.heading = turnTowardHeading(ac.heading, gaHdg, 4 * dt, "NEAREST");
-    } else if (missedFix && ac.state === "MISSED_APPROACH" && agl < 1800) {
+    } else if (missedFix && ac.state === "MISSED_APPROACH" && agl < 1500) {
       const tgtHdg = bearingDeg(ac.x, ac.y, missedFix.x, missedFix.y);
       ac.heading = turnTowardHeading(ac.heading, tgtHdg, 4 * dt, "NEAREST");
     } else {
@@ -699,11 +700,17 @@ function integrateAirborneFlight(
     }
   }
 
-  // Intercept and lock onto ILS localizer when returning on approach
+  // Intercept and lock onto ILS localizer when returning on approach (only when approach authorized and no manual vector)
   if (ac.flightKind === "ARRIVAL" && ac.state === "APPROACH" && rwy) {
     const alongApp = alongRunwayNm(rwy, ac.x, ac.y);
     const crossApp = crossTrackRunwayNm(rwy, ac.x, ac.y);
+    const isApproachAuthorized =
+      canAircraftExecuteAction(ac, "FLY_APPROACH", state).allowed ||
+      canAircraftExecuteAction(ac, "LAND", state).allowed ||
+      ac.assignedApproach === rwy.id;
     if (
+      isApproachAuthorized &&
+      ac.assignedHeading === null &&
       alongApp >= -12.0 &&
       alongApp <= -0.8 &&
       Math.abs(crossApp) <= 0.45 &&
