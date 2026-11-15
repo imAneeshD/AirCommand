@@ -233,7 +233,7 @@ export const RadioVoiceMenu: React.FC = () => {
                 return;
               }
               selectAircraft(parsed.aircraftId);
-              issueClearance(parsed.command);
+              issueClearance(parsed.command, false, true);
               setPhraseStatus(`Sent: ${parsed.summary}`);
               setPhraseInput("");
             }}
