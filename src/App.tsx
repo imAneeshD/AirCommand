@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { AirportGeometryEditor } from "./components/AirportGeometryEditor.tsx";
 import { ClearanceControlDeck } from "./components/ClearanceControlDeck.tsx";
 import { FlightStripRack } from "./components/FlightStripRack.tsx";
@@ -36,6 +36,12 @@ export function App() {
   const setMobileTab = useAtcStore((s) => s.setMobileTab);
   const sim = useAtcStore((s) => s.sim);
   const selectAircraft = useAtcStore((s) => s.selectAircraft);
+
+  const [mobileSheetExpanded, setMobileSheetExpanded] = useState(false);
+
+  useEffect(() => {
+    setMobileSheetExpanded(false);
+  }, [mobileTab]);
 
   // Sync data-theme attribute onto <html>
   useEffect(() => {
@@ -182,59 +188,89 @@ export function App() {
 
           {/* MOBILE PHONE / TABLET WORKSPACE LAYOUT (< 1024px, flex lg:hidden) */}
           <div className="flex lg:hidden flex-1 min-h-0 relative overflow-hidden flex-col h-full w-full">
-            {/* Base Radar Scope Canvas (always mounted for camera/tile continuity) */}
-            <div className={`w-full h-full flex flex-col flex-1 min-h-0 ${mobileTab === "RADAR" ? "flex" : "hidden"}`}>
+            {/* Base Radar Scope Canvas: Always mounted & always visible */}
+            <div className="w-full h-full flex flex-col flex-1 min-h-0">
               <RadarScopeCanvas />
             </div>
 
-            {/* Mobile Flight Strips View */}
-            {mobileTab === "STRIPS" && (
-              <div className="w-full h-full flex flex-col bg-[var(--atc-panel)] overflow-hidden">
-                <MobileViewHeader
-                  title="FLIGHT STRIPS"
-                  subtitle={`${sim.aircraftOrder.length} Flights Active`}
-                  onClose={() => setMobileTab("RADAR")}
-                />
-                <FlightStripRack
-                  mobileMode={true}
-                  onSelectAndClear={() => setMobileTab("CLEARANCE")}
-                />
+            {/* Slide-Up Bottom Sheet for Panels (Clearances, Strips, Radio) — Map stays visible above! */}
+            {mobileTab !== "RADAR" && (
+              <div
+                className={`absolute bottom-[58px] inset-x-0 z-30 flex flex-col bg-[var(--atc-panel)] border-t border-[var(--atc-border)] rounded-t-2xl shadow-2xl overflow-hidden transition-all duration-200 animate-in slide-in-from-bottom ${
+                  mobileSheetExpanded ? "h-[85vh] max-h-[88vh]" : "h-[54vh] max-h-[58vh]"
+                }`}
+              >
+                {/* Pull handle / tap toggle */}
+                <div
+                  onClick={() => setMobileSheetExpanded((prev: boolean) => !prev)}
+                  className="w-full pt-2 pb-1 flex justify-center bg-[var(--atc-surface)] cursor-pointer hover:bg-[var(--atc-surface-alt)] transition-colors select-none"
+                  title={mobileSheetExpanded ? "Collapse sheet (show more map)" : "Expand sheet"}
+                >
+                  <div className="w-10 h-1 bg-[var(--atc-border-strong)] rounded-full opacity-60" />
+                </div>
+
+                {/* Mobile Clearance Deck View */}
+                {mobileTab === "CLEARANCE" && (
+                  <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                    <MobileViewHeader
+                      title={
+                        sim.selectedAircraftId && sim.aircraft[sim.selectedAircraftId]
+                          ? `CLEARANCES · ${sim.aircraft[sim.selectedAircraftId].callsign}`
+                          : "CLEARANCES"
+                      }
+                      subtitle={
+                        sim.selectedAircraftId && sim.aircraft[sim.selectedAircraftId]
+                          ? `${sim.aircraft[sim.selectedAircraftId].aircraftType} • ${sim.aircraft[sim.selectedAircraftId].state.replace(/_/g, " ")}`
+                          : "Select an aircraft to issue commands"
+                      }
+                      onClose={() => setMobileTab("RADAR")}
+                      isExpanded={mobileSheetExpanded}
+                      onToggleExpand={() => setMobileSheetExpanded((prev: boolean) => !prev)}
+                    />
+                    <div className="flex-1 min-h-0 overflow-y-auto">
+                      <ClearanceControlDeck mobileMode={true} />
+                    </div>
+                  </div>
+                )}
+
+                {/* Mobile Flight Strips View */}
+                {mobileTab === "STRIPS" && (
+                  <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                    <MobileViewHeader
+                      title="FLIGHT STRIPS"
+                      subtitle={`${sim.aircraftOrder.length} Flights Active`}
+                      onClose={() => setMobileTab("RADAR")}
+                      isExpanded={mobileSheetExpanded}
+                      onToggleExpand={() => setMobileSheetExpanded((prev: boolean) => !prev)}
+                    />
+                    <div className="flex-1 min-h-0 overflow-y-auto">
+                      <FlightStripRack
+                        mobileMode={true}
+                        onSelectAndClear={() => setMobileTab("CLEARANCE")}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Mobile Radio & Event Log View */}
+                {mobileTab === "COMMS" && (
+                  <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                    <MobileViewHeader
+                      title="RADIO & EVENT LOG"
+                      subtitle={`${sim.radioLog.length} Transmissions`}
+                      onClose={() => setMobileTab("RADAR")}
+                      isExpanded={mobileSheetExpanded}
+                      onToggleExpand={() => setMobileSheetExpanded((prev: boolean) => !prev)}
+                    />
+                    <div className="flex-1 min-h-0 overflow-y-auto">
+                      <RadioCommsLog mobileMode={true} />
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
-            {/* Mobile Clearance Deck View */}
-            {mobileTab === "CLEARANCE" && (
-              <div className="w-full h-full flex flex-col bg-[var(--atc-panel)] overflow-hidden">
-                <MobileViewHeader
-                  title={
-                    sim.selectedAircraftId && sim.aircraft[sim.selectedAircraftId]
-                      ? `CLEARANCES · ${sim.aircraft[sim.selectedAircraftId].callsign}`
-                      : "CLEARANCES"
-                  }
-                  subtitle={
-                    sim.selectedAircraftId && sim.aircraft[sim.selectedAircraftId]
-                      ? `${sim.aircraft[sim.selectedAircraftId].aircraftType} • ${sim.aircraft[sim.selectedAircraftId].state.replace(/_/g, " ")}`
-                      : "Select an aircraft to issue commands"
-                  }
-                  onClose={() => setMobileTab("RADAR")}
-                />
-                <ClearanceControlDeck mobileMode={true} />
-              </div>
-            )}
-
-            {/* Mobile Radio & Event Log View */}
-            {mobileTab === "COMMS" && (
-              <div className="w-full h-full flex flex-col bg-[var(--atc-panel)] overflow-hidden">
-                <MobileViewHeader
-                  title="RADIO & EVENT LOG"
-                  subtitle={`${sim.radioLog.length} Transmissions`}
-                  onClose={() => setMobileTab("RADAR")}
-                />
-                <RadioCommsLog mobileMode={true} />
-              </div>
-            )}
-
-            {/* Floating Quick Action Card on Radar View when aircraft is selected */}
+            {/* Floating Quick Action Card on Radar View when aircraft is selected and no sheet is open */}
             {mobileTab === "RADAR" &&
               sim.selectedAircraftId &&
               sim.aircraft[sim.selectedAircraftId] && (
