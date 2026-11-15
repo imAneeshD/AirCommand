@@ -3,6 +3,7 @@ import { AirportGeometryEditor } from "./components/AirportGeometryEditor.tsx";
 import { ClearanceControlDeck } from "./components/ClearanceControlDeck.tsx";
 import { FlightStripRack } from "./components/FlightStripRack.tsx";
 import { GlobalAirportMap } from "./components/GlobalAirportMap.tsx";
+import { LandingPage } from "./components/LandingPage.tsx";
 import { LiveTrafficView } from "./components/LiveTrafficView.tsx";
 import { MultiplayerLobby } from "./components/MultiplayerLobby.tsx";
 import { PostSessionModal } from "./components/PostSessionModal.tsx";
@@ -151,6 +152,7 @@ export function App() {
 
   return (
     <div data-theme={theme} className="h-screen w-screen bg-[var(--atc-bg)] text-[var(--atc-text)] transition-colors overflow-hidden">
+      {appMode === "LANDING" && <LandingPage />}
       {appMode === "GLOBAL_MAP" && <GlobalAirportMap />}
       {appMode === "LIVE_OBSERVATION" && <LiveTrafficView />}
       {appMode === "AIRPORT_EDITOR" && <AirportGeometryEditor />}

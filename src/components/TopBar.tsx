@@ -4,6 +4,7 @@ import {
   ChevronDown,
   Flag,
   Globe2,
+  Home,
   Lock,
   Moon,
   PanelBottom,
@@ -125,7 +126,17 @@ export const TopBar: React.FC = () => {
   return (
     <header className="min-h-[50px] bg-[var(--atc-panel)] border-b border-[var(--atc-border)] px-3 py-1.5 flex items-center justify-between gap-3 shrink-0 select-none transition-colors">
       {/* LEFT SECTION: Operational Identity & Station Switcher */}
-      <div className="flex items-center gap-2.5 shrink-0">
+      <div className="flex items-center gap-2 shrink-0">
+        {/* Return to Landing Page */}
+        <button
+          onClick={() => setAppMode("LANDING")}
+          title="Return to Landing Page & Airport Catalog"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface)] hover:bg-[var(--atc-surface-alt)] hover:border-[var(--atc-accent-border)] transition-all shadow-sm group cursor-pointer text-xs font-mono font-bold text-[var(--atc-text)]"
+        >
+          <Home className="w-3.5 h-3.5 text-[var(--atc-accent)]" />
+          <span className="hidden xl:inline text-[11px] font-mono tracking-wider">HOME</span>
+        </button>
+
         {/* Unified Airport Badge + Quick Switcher */}
         <button
           onClick={openAirportSelector}
