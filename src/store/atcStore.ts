@@ -97,6 +97,9 @@ export function getPresetCameraForStation(
       maxY = Math.max(maxY, r.thresholdY, r.endY);
     }
   }
+  const hasRunways = Boolean(layout && Object.keys(layout.runways).length > 0);
+  const midX = hasRunways ? (minX + maxX) / 2 : 0.02;
+  const midY = hasRunways ? (minY + maxY) / 2 : 0.01;
   const span = layout ? Math.max(0.7, maxX - minX, maxY - minY) : 1.4;
   const scaleFactor = span > 1.8 ? 1.5 / span : 1;
 
@@ -104,34 +107,34 @@ export function getPresetCameraForStation(
     case "DELIVERY":
     case "GROUND":
       return {
-        centerX: 0.02,
-        centerY: 0.02,
-        pixelsPerNm: Math.max(90, Math.round(300 * scaleFactor)),
+        centerX: midX,
+        centerY: midY,
+        pixelsPerNm: Math.max(90, Math.round(260 * scaleFactor)),
       };
     case "TOWER":
       return {
-        centerX: -0.05,
-        centerY: 0.01,
-        pixelsPerNm: Math.max(70, Math.round(220 * scaleFactor)),
+        centerX: midX,
+        centerY: midY,
+        pixelsPerNm: Math.max(70, Math.round(190 * scaleFactor)),
       };
     case "DEPARTURE":
       return {
-        centerX: -0.25,
-        centerY: 0,
+        centerX: midX,
+        centerY: midY,
         pixelsPerNm: Math.max(24, Math.round(36 * scaleFactor)),
       };
     case "CENTER":
       return {
-        centerX: 0,
-        centerY: 0,
+        centerX: midX,
+        centerY: midY,
         pixelsPerNm: Math.max(16, Math.round(20 * scaleFactor)),
       };
     case "ALL":
     default:
       return {
-        centerX: 0.02,
-        centerY: 0.01,
-        pixelsPerNm: Math.max(75, Math.round(230 * scaleFactor)),
+        centerX: midX,
+        centerY: midY,
+        pixelsPerNm: Math.max(65, Math.round(180 * scaleFactor)),
       };
   }
 }

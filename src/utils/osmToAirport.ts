@@ -798,7 +798,7 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
   const taxiwayNodes = Object.values(nodes).filter((n) => n.kind === "TAXIWAY");
   const realTerminals = terminalBuildings.filter((t) => t.kind === "TERMINAL");
   const realHangars = terminalBuildings.filter((t) => t.kind === "HANGAR");
-  const MAX_AIRPORT_GATES = 64;
+  const MAX_AIRPORT_GATES = 256;
 
   const gatesCreatedPerTerminal = new Map<AirportTerminalBuilding, number>();
   realTerminals.forEach((t) => gatesCreatedPerTerminal.set(t, 0));
@@ -890,13 +890,17 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
     const pt = latLonToLocalNm(lat, lon, record.lat, record.lon);
     if (isTooCloseToAnyRunway(pt.x, pt.y)) return false;
 
-    let ref = String(gf.properties.ref ?? gf.properties.name ?? `G${fallbackIdx + 1}`)
+    let baseRef = String(gf.properties.ref ?? gf.properties.name ?? `G${fallbackIdx + 1}`)
       .toUpperCase()
       .replace(/[^A-Z0-9]/g, "");
-    if (!ref || usedGateNames.has(ref)) {
-      ref = `G${fallbackIdx + 1}`;
+    if (!baseRef) {
+      baseRef = `G${fallbackIdx + 1}`;
     }
-    if (usedGateNames.has(ref)) return false;
+    let ref = baseRef;
+    let dupSuffix = 2;
+    while (usedGateNames.has(ref)) {
+      ref = `${baseRef}_${dupSuffix++}`;
+    }
 
     let nearestTw = taxiwayNodes[0];
     let minD = Infinity;
@@ -961,31 +965,18 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
         }
       }
 
-      const maxPerTerm = Math.max(8, Math.floor((MAX_AIRPORT_GATES - 12) / Math.max(1, realTerminals.length)));
-
-      // Allocate gates for each terminal, sampling evenly across its length/concourses
+      // Allocate real OSM gates for each terminal
       realTerminals.forEach((term) => {
         const gList = termMap.get(term)!;
-        if (gList.length <= maxPerTerm) {
-          gList.forEach((g) => {
-            if (wirePointGate(g, gateIds.length)) {
-              gatesCreatedPerTerminal.set(term, (gatesCreatedPerTerminal.get(term) || 0) + 1);
-            }
-          });
-        } else {
-          const step = gList.length / maxPerTerm;
-          for (let i = 0; i < maxPerTerm; i++) {
-            const idx = Math.floor(i * step);
-            if (wirePointGate(gList[idx], gateIds.length)) {
-              gatesCreatedPerTerminal.set(term, (gatesCreatedPerTerminal.get(term) || 0) + 1);
-            }
+        gList.forEach((g) => {
+          if (gateIds.length < MAX_AIRPORT_GATES && wirePointGate(g, gateIds.length)) {
+            gatesCreatedPerTerminal.set(term, (gatesCreatedPerTerminal.get(term) || 0) + 1);
           }
-        }
+        });
       });
 
       // Allocate unassigned (cargo, remote, GA aprons)
-      const maxUnassigned = Math.min(14, MAX_AIRPORT_GATES - gateIds.length);
-      for (let i = 0; i < unassignedGates.length && gateIds.length < MAX_AIRPORT_GATES && i < maxUnassigned; i++) {
+      for (let i = 0; i < unassignedGates.length && gateIds.length < MAX_AIRPORT_GATES; i++) {
         wirePointGate(unassignedGates[i], gateIds.length);
       }
 

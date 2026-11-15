@@ -161,7 +161,7 @@ export function drawGeoreferencedTilesToCanvas(opts: {
   const y1 = Math.floor(maxTy);
 
   // Guard against extreme zoom-out over hundreds of tiles
-  if ((x1 - x0 + 1) * (y1 - y0 + 1) > 48) return;
+  if ((x1 - x0 + 1) * (y1 - y0 + 1) > 120) return;
 
   const nmPerDegLat = 60;
   const worldToScreen = (wx: number, wy: number): [number, number] => {
