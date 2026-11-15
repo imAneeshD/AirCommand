@@ -774,7 +774,7 @@ test("Real bundled OpenStreetMap VIDP GeoJSON converts to connected curved airpo
     });
 
     assert.ok(layout.runwayIds.length >= 4, `Expected >= 4 runways at VIDP, got ${layout.runwayIds.length}`);
-    assert.ok(layout.gateIds.length >= 20, `Expected >= 20 real gates/stands at VIDP, got ${layout.gateIds.length}`);
+    assert.ok(layout.gateIds.length >= 40, `Expected >= 40 real gates/stands at VIDP, got ${layout.gateIds.length}`);
     assert.ok((layout.taxiwayChains?.length ?? 0) >= 50, "Expected rich curved taxiway chains");
     assert.ok((layout.visualTaxiways?.length ?? 0) >= 50, "Expected lossless visualTaxiways for VIDP");
     const totalVisualVertices = (layout.visualTaxiways ?? []).reduce((sum, seg) => sum + seg.points.length, 0);
@@ -803,6 +803,47 @@ test("Real bundled OpenStreetMap VIDP GeoJSON converts to connected curved airpo
       stepSimulation(sim, 0.5);
     }
     assert.ok(sim.time >= 14.5);
+  } finally {
+    env.cleanup();
+  }
+});
+
+test("Multi-terminal gate distribution: distributes gates across all concourses and ensures no passenger terminal has zero gates", () => {
+  const env = createTempTestEnv();
+  try {
+    const vidp = env.airportService.getAirport("VIDP")!;
+    const osmPackPath = path.join(process.cwd(), "public", "data", "osm", "VIDP.geojson");
+    const geoJson = JSON.parse(fs.readFileSync(osmPackPath, "utf8")) as AirportGeoJsonCollection;
+    const layout = convertAirportBundleToLayout({
+      ...vidp,
+      dataQuality: "Imported",
+      hasOsmGeometry: true,
+      geoJson,
+    });
+
+    assert.ok(layout.gateIds.length >= 40, `Expected at least 40 gates at VIDP, got ${layout.gateIds.length}`);
+
+    // Verify gates exist near Terminal 3 and Terminal 1
+    const t3Gates = layout.gateIds.filter((id) => {
+      const n = layout.nodes[`GATE_${id}`];
+      return n && n.x < -0.2;
+    });
+    const t1Gates = layout.gateIds.filter((id) => {
+      const n = layout.nodes[`GATE_${id}`];
+      return n && n.x > 0.4;
+    });
+    assert.ok(t3Gates.length >= 10, `Expected gates at Terminal 3, got ${t3Gates.length}`);
+    assert.ok(t1Gates.length >= 4, `Expected gates at Terminal 1, got ${t1Gates.length}`);
+
+    // Verify every gate has valid pushback spot and apron edge
+    for (const gid of layout.gateIds) {
+      const gNode = layout.nodes[`GATE_${gid}`];
+      const pbNode = layout.nodes[`PB_${gid}`];
+      assert.ok(gNode, `Gate node GATE_${gid} must exist`);
+      assert.ok(pbNode, `Pushback spot PB_${gid} must exist`);
+      const connectedEdge = layout.edges.some((e) => e.from === `GATE_${gid}` && e.to === `PB_${gid}`);
+      assert.ok(connectedEdge, `Edge from GATE_${gid} to PB_${gid} must exist`);
+    }
   } finally {
     env.cleanup();
   }

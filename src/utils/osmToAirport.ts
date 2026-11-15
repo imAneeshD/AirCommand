@@ -4,6 +4,7 @@ import {
   runwayPoint,
 } from "../data/asteriaAirport.ts";
 import type {
+  AirportGeoJsonFeature,
   AirportLayout,
   AirportRecord,
   AirportTaxiwayChain,
@@ -795,6 +796,12 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
   const gateIds: string[] = [];
   const usedGateNames = new Set<string>();
   const taxiwayNodes = Object.values(nodes).filter((n) => n.kind === "TAXIWAY");
+  const realTerminals = terminalBuildings.filter((t) => t.kind === "TERMINAL");
+  const realHangars = terminalBuildings.filter((t) => t.kind === "HANGAR");
+  const MAX_AIRPORT_GATES = 64;
+
+  const gatesCreatedPerTerminal = new Map<AirportTerminalBuilding, number>();
+  realTerminals.forEach((t) => gatesCreatedPerTerminal.set(t, 0));
 
   // Helper to test if a coordinate encroaches inside any runway safety corridor
   const isTooCloseToAnyRunway = (px: number, py: number, marginNm = 0.075): boolean => {
@@ -877,100 +884,178 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
     gateIds.push(gateId);
   };
 
+  const wirePointGate = (gf: AirportGeoJsonFeature, fallbackIdx: number): boolean => {
+    if (gateIds.length >= MAX_AIRPORT_GATES) return false;
+    const [lon, lat] = gf.geometry.coordinates as [number, number];
+    const pt = latLonToLocalNm(lat, lon, record.lat, record.lon);
+    if (isTooCloseToAnyRunway(pt.x, pt.y)) return false;
+
+    let ref = String(gf.properties.ref ?? gf.properties.name ?? `G${fallbackIdx + 1}`)
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, "");
+    if (!ref || usedGateNames.has(ref)) {
+      ref = `G${fallbackIdx + 1}`;
+    }
+    if (usedGateNames.has(ref)) return false;
+
+    let nearestTw = taxiwayNodes[0];
+    let minD = Infinity;
+    for (const tw of taxiwayNodes) {
+      const d = Math.hypot(tw.x - pt.x, tw.y - pt.y);
+      if (d < minD) {
+        minD = d;
+        nearestTw = tw;
+      }
+    }
+    if (minD > 0.45) return false;
+
+    usedGateNames.add(ref);
+    const dx = nearestTw.x - pt.x;
+    const dy = nearestTw.y - pt.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const pushDist = Math.min(0.045, Math.max(0.018, d * 0.45));
+    attachGateToNearestTaxiway(
+      ref,
+      pt.x,
+      pt.y,
+      pt.x + (dx / d) * pushDist,
+      pt.y + (dy / d) * pushDist
+    );
+    return true;
+  };
+
   // Wire real OSM point gates if present in dataset
   if (osmGates.length > 0 && taxiwayNodes.length > 0) {
-    for (let i = 0; i < Math.min(24, osmGates.length); i++) {
-      const gf = osmGates[i];
-      const [lon, lat] = gf.geometry.coordinates as [number, number];
-      const pt = latLonToLocalNm(lat, lon, record.lat, record.lon);
-      if (isTooCloseToAnyRunway(pt.x, pt.y)) continue;
+    if (realTerminals.length > 0) {
+      // Group gates by nearest terminal building to guarantee balanced distribution across all concourses
+      const termMap = new Map<AirportTerminalBuilding, AirportGeoJsonFeature[]>();
+      realTerminals.forEach((t) => termMap.set(t, []));
+      const unassignedGates: AirportGeoJsonFeature[] = [];
 
-      let ref = String(gf.properties.ref ?? `G${i + 1}`).toUpperCase().replace(/[^A-Z0-9]/g, "");
-      if (!ref || usedGateNames.has(ref)) {
-        ref = `G${i + 1}`;
-      }
-      if (usedGateNames.has(ref)) continue;
-      usedGateNames.add(ref);
+      for (const g of osmGates) {
+        const [lon, lat] = g.geometry.coordinates as [number, number];
+        const pt = latLonToLocalNm(lat, lon, record.lat, record.lon);
 
-      let nearestTw = taxiwayNodes[0];
-      let minD = Infinity;
-      for (const tw of taxiwayNodes) {
-        const d = Math.hypot(tw.x - pt.x, tw.y - pt.y);
-        if (d < minD) {
-          minD = d;
-          nearestTw = tw;
+        let bestTerm: AirportTerminalBuilding | null = null;
+        let bestDist = Infinity;
+        for (const term of realTerminals) {
+          let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+          for (const p of term.polygon) {
+            if (p.x < minX) minX = p.x;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.y > maxY) maxY = p.y;
+          }
+          const dx = Math.max(0, minX - pt.x, pt.x - maxX);
+          const dy = Math.max(0, minY - pt.y, pt.y - maxY);
+          const d = Math.hypot(dx, dy);
+          if (d < 0.28 && d < bestDist) {
+            bestDist = d;
+            bestTerm = term;
+          }
+        }
+        if (bestTerm) {
+          termMap.get(bestTerm)!.push(g);
+        } else {
+          unassignedGates.push(g);
         }
       }
-      const dx = nearestTw.x - pt.x;
-      const dy = nearestTw.y - pt.y;
-      const d = Math.hypot(dx, dy) || 1;
-      const pushDist = Math.min(0.045, Math.max(0.018, d * 0.45));
-      attachGateToNearestTaxiway(
-        ref,
-        pt.x,
-        pt.y,
-        pt.x + (dx / d) * pushDist,
-        pt.y + (dy / d) * pushDist
-      );
+
+      const maxPerTerm = Math.max(8, Math.floor((MAX_AIRPORT_GATES - 12) / Math.max(1, realTerminals.length)));
+
+      // Allocate gates for each terminal, sampling evenly across its length/concourses
+      realTerminals.forEach((term) => {
+        const gList = termMap.get(term)!;
+        if (gList.length <= maxPerTerm) {
+          gList.forEach((g) => {
+            if (wirePointGate(g, gateIds.length)) {
+              gatesCreatedPerTerminal.set(term, (gatesCreatedPerTerminal.get(term) || 0) + 1);
+            }
+          });
+        } else {
+          const step = gList.length / maxPerTerm;
+          for (let i = 0; i < maxPerTerm; i++) {
+            const idx = Math.floor(i * step);
+            if (wirePointGate(gList[idx], gateIds.length)) {
+              gatesCreatedPerTerminal.set(term, (gatesCreatedPerTerminal.get(term) || 0) + 1);
+            }
+          }
+        }
+      });
+
+      // Allocate unassigned (cargo, remote, GA aprons)
+      const maxUnassigned = Math.min(14, MAX_AIRPORT_GATES - gateIds.length);
+      for (let i = 0; i < unassignedGates.length && gateIds.length < MAX_AIRPORT_GATES && i < maxUnassigned; i++) {
+        wirePointGate(unassignedGates[i], gateIds.length);
+      }
+
+      // Fill any remaining capacity from remaining point gates
+      for (let i = 0; i < osmGates.length && gateIds.length < MAX_AIRPORT_GATES; i++) {
+        wirePointGate(osmGates[i], gateIds.length);
+      }
+    } else {
+      for (let i = 0; i < osmGates.length && gateIds.length < MAX_AIRPORT_GATES; i++) {
+        wirePointGate(osmGates[i], gateIds.length);
+      }
     }
   }
 
-  // If no point gates in dataset, anchor gates to real OSM terminal buildings / aprons
-  if (gateIds.length === 0) {
-    const realTerminals = terminalBuildings.filter((t) => t.kind === "TERMINAL");
-    const realHangars = terminalBuildings.filter((t) => t.kind === "HANGAR");
+  // Ensure EVERY real passenger terminal visible on the airfield has working gates
+  if (realTerminals.length > 0 && taxiwayNodes.length > 0) {
+    let gateSeq = gateIds.length + 1;
+    realTerminals.forEach((term, tIdx) => {
+      const existingCount = gatesCreatedPerTerminal.get(term) ?? 0;
+      if (existingCount >= 2) return; // Already has real point gates wired!
 
-    if (realTerminals.length > 0 && taxiwayNodes.length > 0) {
-      let gateSeq = 1;
-      const gatesPerTerminal = Math.max(2, Math.min(6, Math.floor(12 / realTerminals.length)));
+      const tcx = term.labelX ?? term.polygon[0]?.x ?? 0;
+      const tcy = term.labelY ?? term.polygon[0]?.y ?? 0;
+      const termName = term.label ?? `T${tIdx + 1}`;
+      const prefix = termName.replace(/Terminal/i, "T").replace(/[^A-Z0-9]/g, "").slice(0, 3) || `T${tIdx + 1}`;
 
-      for (let tIdx = 0; tIdx < Math.min(4, realTerminals.length); tIdx++) {
-        const term = realTerminals[tIdx];
-        const tcx = term.labelX ?? term.polygon[0]?.x ?? 0;
-        const tcy = term.labelY ?? term.polygon[0]?.y ?? 0;
-        const termName = term.label ?? `T${tIdx + 1}`;
+      const nearTw = taxiwayNodes.filter((n) => Math.hypot(n.x - tcx, n.y - tcy) < 0.35);
+      const twPool = nearTw.length > 0 ? nearTw : taxiwayNodes;
 
-        // Find taxiways in front of this terminal building
-        const nearTw = taxiwayNodes.filter((n) => Math.hypot(n.x - tcx, n.y - tcy) < 0.35);
-        const twPool = nearTw.length > 0 ? nearTw : taxiwayNodes;
+      const twCentroid = {
+        x: twPool.slice(0, 10).reduce((s, n) => s + n.x, 0) / Math.min(10, twPool.length),
+        y: twPool.slice(0, 10).reduce((s, n) => s + n.y, 0) / Math.min(10, twPool.length),
+      };
 
-        // Centroid of nearby taxiways defines the apron direction vector from terminal
-        const twCentroid = {
-          x: twPool.slice(0, 10).reduce((s, n) => s + n.x, 0) / Math.min(10, twPool.length),
-          y: twPool.slice(0, 10).reduce((s, n) => s + n.y, 0) / Math.min(10, twPool.length),
-        };
+      const vdx = twCentroid.x - tcx;
+      const vdy = twCentroid.y - tcy;
+      const vlen = Math.hypot(vdx, vdy) || 1;
+      const dirX = vdx / vlen;
+      const dirY = vdy / vlen;
+      const perpX = -dirY;
+      const perpY = dirX;
 
-        const vdx = twCentroid.x - tcx;
-        const vdy = twCentroid.y - tcy;
-        const vlen = Math.hypot(vdx, vdy) || 1;
-        const dirX = vdx / vlen;
-        const dirY = vdy / vlen;
-        const perpX = -dirY;
-        const perpY = dirX;
+      const frontDist = Math.min(0.035, Math.max(0.015, vlen * 0.4));
+      const frontX = tcx + dirX * frontDist;
+      const frontY = tcy + dirY * frontDist;
+      const gatesToCreate = 4;
 
-        // Terminal frontage point slightly offset into the apron towards taxiway
-        const frontDist = Math.min(0.035, Math.max(0.015, vlen * 0.4));
-        const frontX = tcx + dirX * frontDist;
-        const frontY = tcy + dirY * frontDist;
+      for (let gIdx = 0; gIdx < gatesToCreate; gIdx++) {
+        let gid = `${prefix}_${gIdx + 1}`;
+        if (usedGateNames.has(gid)) gid = `G${gateSeq++}`;
+        usedGateNames.add(gid);
 
-        for (let gIdx = 0; gIdx < gatesPerTerminal; gIdx++) {
-          const gid = `T${gateSeq}`;
-          gateSeq += 1;
-          const spread = (gIdx - (gatesPerTerminal - 1) / 2) * 0.022; // ~40m gate spacing
-          const gx = frontX + perpX * spread;
-          const gy = frontY + perpY * spread;
+        const spread = (gIdx - (gatesToCreate - 1) / 2) * 0.022;
+        const gx = frontX + perpX * spread;
+        const gy = frontY + perpY * spread;
+        const px = gx + dirX * 0.02;
+        const py = gy + dirY * 0.02;
 
-          const px = gx + dirX * 0.02; // Pushback into apron alley away from terminal building
-          const py = gy + dirY * 0.02;
-
-          attachGateToNearestTaxiway(gid, gx, gy, px, py);
-          const gn = nodes[`GATE_${gid}`];
-          if (gn) {
-            gn.label = `${gid} (${termName.replace(/Terminal/i, "T").trim()})`;
-          }
+        attachGateToNearestTaxiway(gid, gx, gy, px, py);
+        const gn = nodes[`GATE_${gid}`];
+        if (gn) {
+          gn.label = `${gid} (${termName.replace(/Terminal/i, "T").trim()})`;
         }
       }
-    } else if (apronPolygons.length > 0 && taxiwayNodes.length > 0) {
+    });
+  }
+
+  // Fallback if still no gates created (sparse OurAirports record)
+  if (gateIds.length === 0) {
+    if (apronPolygons.length > 0 && taxiwayNodes.length > 0) {
       let gateSeq = 1;
       for (let aIdx = 0; aIdx < Math.min(3, apronPolygons.length); aIdx++) {
         const poly = apronPolygons[aIdx];
@@ -995,7 +1080,6 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
       }
     }
 
-    // Fallback if still no gates created (sparse OurAirports record)
     if (gateIds.length === 0) {
       const avgCr = taxiwayNodes.length > 0
         ? taxiwayNodes.reduce((s, n) => s + crossTrackRunwayNm(primaryRwy, n.x, n.y), 0) / taxiwayNodes.length
@@ -1013,8 +1097,21 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
         if (gn) gn.label = i < 2 ? `${gid} (HEAVY)` : gid;
       });
     }
+  }
 
-    // Add designated Cargo and Military stands anchored near real hangars or outer apron
+  // Ensure every real-world airfield has designated Cargo and Military/Remote stands
+  const hasCargoGate = gateIds.some(
+    (g) => g.toUpperCase().includes("CARGO")
+  );
+  const hasMilGate = gateIds.some(
+    (g) =>
+      g.toUpperCase().includes("MIL") ||
+      g.toUpperCase().includes("REMOTE") ||
+      g.toUpperCase().includes("ARM") ||
+      g.toUpperCase().includes("STAND")
+  );
+
+  if (!hasCargoGate && taxiwayNodes.length > 0) {
     if (realHangars.length > 0) {
       const h1 = realHangars[0];
       const h1x = h1.labelX ?? h1.polygon[0]?.x ?? 0;
@@ -1025,17 +1122,6 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
         attachGateToNearestTaxiway(cid, gx, gy, gx + 0.015, gy + 0.015);
         const gn = nodes[`GATE_${cid}`];
         if (gn) gn.label = `CARGO ${i + 1}`;
-      });
-
-      const h2 = realHangars[Math.min(1, realHangars.length - 1)];
-      const h2x = h2.labelX ?? h2.polygon[0]?.x ?? 0;
-      const h2y = h2.labelY ?? h2.polygon[0]?.y ?? 0;
-      ["MIL_1", "MIL_2"].forEach((mid, i) => {
-        const gx = h2x + (i === 0 ? -0.015 : 0.015);
-        const gy = h2y + (i === 0 ? 0.015 : -0.015);
-        attachGateToNearestTaxiway(mid, gx, gy, gx + 0.015, gy - 0.015);
-        const gn = nodes[`GATE_${mid}`];
-        if (gn) gn.label = `MIL ${i + 1}`;
       });
     } else {
       const avgCr = taxiwayNodes.length > 0
@@ -1053,7 +1139,26 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
         const gn = nodes[`GATE_${cid}`];
         if (gn) gn.label = `CARGO ${i + 1}`;
       });
+    }
+  }
 
+  if (!hasMilGate && taxiwayNodes.length > 0) {
+    if (realHangars.length > 1) {
+      const h2 = realHangars[1];
+      const h2x = h2.labelX ?? h2.polygon[0]?.x ?? 0;
+      const h2y = h2.labelY ?? h2.polygon[0]?.y ?? 0;
+      ["MIL_1", "MIL_2"].forEach((mid, i) => {
+        const gx = h2x + (i === 0 ? -0.015 : 0.015);
+        const gy = h2y + (i === 0 ? 0.015 : -0.015);
+        attachGateToNearestTaxiway(mid, gx, gy, gx + 0.015, gy - 0.015);
+        const gn = nodes[`GATE_${mid}`];
+        if (gn) gn.label = `MIL ${i + 1}`;
+      });
+    } else {
+      const avgCr = taxiwayNodes.reduce((s, n) => s + crossTrackRunwayNm(primaryRwy, n.x, n.y), 0) / taxiwayNodes.length;
+      const rampSide = avgCr >= 0 ? 1 : -1;
+      const offset = rampSide * Math.max(0.12, Math.min(0.20, Math.abs(avgCr) || 0.15));
+      const pbOffset = offset * 0.65;
       ["MIL_1", "MIL_2"].forEach((mid, i) => {
         const along = primaryRwy.lengthNm * (0.76 + i * 0.08);
         const gp = runwayPoint(primaryRwy, along, offset);
@@ -1062,75 +1167,6 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
         const gn = nodes[`GATE_${mid}`];
         if (gn) gn.label = `MIL ${i + 1}`;
       });
-    }
-  } else {
-    // Ensure every real-world airfield has designated Cargo and Military/Remote stands
-    const hasCargoGate = gateIds.some(
-      (g) => g.toUpperCase().includes("CARGO") || g.toUpperCase().startsWith("C")
-    );
-    const hasMilGate = gateIds.some(
-      (g) =>
-        g.toUpperCase().includes("MIL") ||
-        g.toUpperCase().startsWith("M") ||
-        g.toUpperCase().includes("REMOTE") ||
-        g.toUpperCase().startsWith("R")
-    );
-
-    const realHangars = terminalBuildings.filter((t) => t.kind === "HANGAR");
-    if (!hasCargoGate && taxiwayNodes.length > 0) {
-      if (realHangars.length > 0) {
-        const h1 = realHangars[0];
-        const h1x = h1.labelX ?? h1.polygon[0]?.x ?? 0;
-        const h1y = h1.labelY ?? h1.polygon[0]?.y ?? 0;
-        ["CARGO_1", "CARGO_2"].forEach((cid, i) => {
-          const gx = h1x + (i === 0 ? -0.015 : 0.015);
-          const gy = h1y + (i === 0 ? -0.015 : 0.015);
-          attachGateToNearestTaxiway(cid, gx, gy, gx + 0.015, gy + 0.015);
-          const gn = nodes[`GATE_${cid}`];
-          if (gn) gn.label = `CARGO ${i + 1}`;
-        });
-      } else {
-        const avgCr = taxiwayNodes.reduce((s, n) => s + crossTrackRunwayNm(primaryRwy, n.x, n.y), 0) / taxiwayNodes.length;
-        const rampSide = avgCr >= 0 ? 1 : -1;
-        const offset = rampSide * Math.max(0.12, Math.min(0.20, Math.abs(avgCr) || 0.15));
-        const pbOffset = offset * 0.65;
-        ["CARGO_1", "CARGO_2"].forEach((cid, i) => {
-          const along = primaryRwy.lengthNm * (0.16 + i * 0.08);
-          const gp = runwayPoint(primaryRwy, along, offset);
-          const pb = runwayPoint(primaryRwy, along, pbOffset);
-          attachGateToNearestTaxiway(cid, gp.x, gp.y, pb.x, pb.y, rampSide >= 0);
-          const gn = nodes[`GATE_${cid}`];
-          if (gn) gn.label = `CARGO ${i + 1}`;
-        });
-      }
-    }
-
-    if (!hasMilGate && taxiwayNodes.length > 0) {
-      if (realHangars.length > 1) {
-        const h2 = realHangars[1];
-        const h2x = h2.labelX ?? h2.polygon[0]?.x ?? 0;
-        const h2y = h2.labelY ?? h2.polygon[0]?.y ?? 0;
-        ["MIL_1", "MIL_2"].forEach((mid, i) => {
-          const gx = h2x + (i === 0 ? -0.015 : 0.015);
-          const gy = h2y + (i === 0 ? 0.015 : -0.015);
-          attachGateToNearestTaxiway(mid, gx, gy, gx + 0.015, gy - 0.015);
-          const gn = nodes[`GATE_${mid}`];
-          if (gn) gn.label = `MIL ${i + 1}`;
-        });
-      } else {
-        const avgCr = taxiwayNodes.reduce((s, n) => s + crossTrackRunwayNm(primaryRwy, n.x, n.y), 0) / taxiwayNodes.length;
-        const rampSide = avgCr >= 0 ? 1 : -1;
-        const offset = rampSide * Math.max(0.12, Math.min(0.20, Math.abs(avgCr) || 0.15));
-        const pbOffset = offset * 0.65;
-        ["MIL_1", "MIL_2"].forEach((mid, i) => {
-          const along = primaryRwy.lengthNm * (0.76 + i * 0.08);
-          const gp = runwayPoint(primaryRwy, along, offset);
-          const pb = runwayPoint(primaryRwy, along, pbOffset);
-          attachGateToNearestTaxiway(mid, gp.x, gp.y, pb.x, pb.y, rampSide >= 0);
-          const gn = nodes[`GATE_${mid}`];
-          if (gn) gn.label = `MIL ${i + 1}`;
-        });
-      }
     }
   }
 
