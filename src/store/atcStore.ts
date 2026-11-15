@@ -170,7 +170,8 @@ interface AtcStore {
   launchRealAirportSimulation: (
     record: AirportRecord,
     scenarioId?: ScenarioId,
-    initialRole?: PlayerRoleMode
+    initialRole?: PlayerRoleMode,
+    switchToSimulation?: boolean
   ) => Promise<void>;
   launchSimulationFromLiveTraffic: (
     record: AirportRecord,
@@ -705,7 +706,13 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
     const bundled = offlineDb.getBundledFallbackAirport(saved);
     const cachedGeom = await offlineDb.getCachedGeometry(saved);
     if (bundled) {
-      await get().launchRealAirportSimulation(bundled, get().sim.scenarioId, get().sim.config.activePlayerStation);
+      // Background cache hydration must NEVER force redirection away from LANDING/home
+      await get().launchRealAirportSimulation(
+        bundled,
+        get().sim.scenarioId,
+        get().sim.config.activePlayerStation,
+        false
+      );
       return;
     }
     try {
@@ -720,7 +727,13 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
           pendingSync: false,
         });
       }
-      await get().launchRealAirportSimulation(detail.airport, get().sim.scenarioId, get().sim.config.activePlayerStation);
+      // Background cache hydration must NEVER force redirection away from LANDING/home
+      await get().launchRealAirportSimulation(
+        detail.airport,
+        get().sim.scenarioId,
+        get().sim.config.activePlayerStation,
+        false
+      );
     } catch {
       // Keep fallback cleanly if both cache & server unavailable
     }
@@ -789,8 +802,15 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
     return { ok: featureCount > 0, featureCount, error: resolved.error ?? undefined };
   },
 
-  launchRealAirportSimulation: async (record, scenarioId, initialRole = "ALL") => {
-    radioAudio.stopAllSpeech();
+  launchRealAirportSimulation: async (
+    record,
+    scenarioId,
+    initialRole = "ALL",
+    switchToSimulation = true
+  ) => {
+    if (switchToSimulation) {
+      radioAudio.stopAllSpeech();
+    }
     set({ airportDetailLoading: true, airportDetailError: null });
 
     const resolved = await resolveAirportBundle(record, get().isOnline, false);
@@ -848,8 +868,13 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
       } mode.`;
     }
 
+    if (!switchToSimulation) {
+      fresh.paused = true;
+    }
+
+    const currentMode = get().appMode;
     set({
-      appMode: "SIMULATION",
+      appMode: switchToSimulation ? "SIMULATION" : currentMode,
       showAirportSelector: false,
       savedAirportId: activeRecord.icao,
       hasActiveSession: true,
