@@ -117,8 +117,10 @@ export function computeDepAppGuidance(
   const cross = rwy ? crossTrackRunwayNm(rwy, ac.x, ac.y) : 0;
 
   const isGoAround = ac.state === "GO_AROUND" || ac.state === "MISSED_APPROACH";
-  // If aircraft is ahead of approach gate (past threshold or < 4 NM out without localizer align), vector downwind/base first
-  const needsPatternTurn = isGoAround || along > -4.2;
+  // Pattern turn (downwind vectoring) is ONLY needed if the aircraft has actually overflown the runway (along > 0.5)
+  // or is actively executing a missed approach / go-around. Normal inbound arrivals in front of the runway never fly backwards.
+  const hasOverflownRunway = along > 0.5;
+  const needsPatternTurn = isGoAround || hasOverflownRunway;
 
   const patternAlt = baseAlt + 2500;
   const sideSign = Math.abs(cross) >= 0.4 ? Math.sign(cross) : 1; // +1 right pattern, -1 left pattern
@@ -132,18 +134,29 @@ export function computeDepAppGuidance(
   let previewPts: Array<{ x: number; y: number }>;
 
   if (needsPatternTurn && rwy) {
-    // If abeam/ahead of airport (along > -4.5), turn cleanly toward lateral downwind gate before IAF
-    const targetGate = along > -3.0 ? downwindPt : targetPt;
+    // If abeam/past runway threshold, fly clean downwind leg before turning base/IAF
+    const targetGate = along > 0.0 ? downwindPt : targetPt;
     recHeading = bearingDeg(ac.x, ac.y, targetGate.x, targetGate.y);
     recTurnDir = sideSign < 0 ? "LEFT" : "RIGHT";
     previewPts = [
       { x: ac.x, y: ac.y },
-      ...(along > -3.0 ? [downwindPt] : []),
+      ...(along > 0.0 ? [downwindPt] : []),
       { x: targetPt.x, y: targetPt.y },
       { x: rwy.thresholdX, y: rwy.thresholdY },
     ];
+  } else if (rwy && along > -6.0) {
+    // Intermediate and final approach: track smoothly into runway threshold along localizer
+    const interceptAngle = Math.max(-28, Math.min(28, cross * 45));
+    recHeading = normalizeHeading(rwy.heading + interceptAngle);
+    recTurnDir = "NEAREST";
+    previewPts = [
+      { x: ac.x, y: ac.y },
+      { x: rwy.thresholdX, y: rwy.thresholdY },
+    ];
   } else {
+    // Inbound from afar: fly toward initial approach fix / intercept gate
     recHeading = bearingDeg(ac.x, ac.y, targetPt.x, targetPt.y);
+    recTurnDir = "NEAREST";
     previewPts = rwy
       ? [
           { x: ac.x, y: ac.y },
