@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Compass, ExternalLink, Minus, Plus, PlaneLanding, PlaneTakeoff, Radio, RotateCcw, Sparkles, Wifi, X } from "lucide-react";
+import { Compass, ExternalLink, Layers, Minus, Plus, PlaneLanding, PlaneTakeoff, Radio, RotateCcw, Sparkles, Wifi, X } from "lucide-react";
 import { getAircraftTypeSpec, getAirlineLivery } from "../data/aircraftCatalog.ts";
 import { runwayPoint } from "../data/asteriaAirport.ts";
 import { isRunwayOccupied } from "../engine/validationEngine.ts";
@@ -383,6 +383,7 @@ export const RadarScopeCanvas: React.FC = () => {
 
   const [ttsVersion, setTtsVersion] = useState(0);
   const [showLiveAdsbOverlay, setShowLiveAdsbOverlay] = useState(false);
+  const [mobileMapSheetOpen, setMobileMapSheetOpen] = useState(false);
   const [liveTracks, setLiveTracks] = useState<LiveAdsbTrack[]>([]);
   const [liveRateLimited, setLiveRateLimited] = useState(false);
   const [selectedLiveIcao24, setSelectedLiveIcao24] = useState<string | null>(null);
@@ -774,7 +775,7 @@ export const RadarScopeCanvas: React.FC = () => {
   };
 
   return (
-    <div ref={containerRef} className="relative flex-1 bg-[var(--atc-bg)] overflow-hidden min-w-0 min-h-0 transition-colors">
+    <div ref={containerRef} className="relative w-full h-full flex-1 flex flex-col bg-[var(--atc-bg)] overflow-hidden min-w-0 min-h-0 transition-colors">
       <canvas
         ref={canvasRef}
         onMouseDown={handleMouseDown}
@@ -796,8 +797,8 @@ export const RadarScopeCanvas: React.FC = () => {
         className={`w-full h-full block touch-none ${hoveredId ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"}`}
       />
 
-      {/* Top-Left Scope Mode Watermark + Live Radio Caller Voice Line */}
-      <div className="absolute top-2.5 left-3 flex flex-col items-start gap-1.5 z-10 pointer-events-none max-w-[calc(100%-7rem)]">
+      {/* Top-Left Scope Mode Watermark + Live Radio Caller Voice Line (Desktop/Tablet) */}
+      <div className="hidden lg:flex absolute top-2.5 left-3 flex-col items-start gap-1.5 z-10 pointer-events-none max-w-[calc(100%-7rem)]">
         <div className="px-2.5 py-1 rounded-md bg-[var(--atc-surface)]/92 border border-[var(--atc-border)] shadow-[var(--atc-shadow)] backdrop-blur-sm text-[11px] font-mono text-[var(--atc-text)] flex items-center gap-2">
           <Compass className="w-3.5 h-3.5 text-[var(--atc-cyan)] shrink-0" />
           <span className="font-semibold">
@@ -812,8 +813,8 @@ export const RadarScopeCanvas: React.FC = () => {
         </div>
       </div>
 
-      {/* Bottom-Left Scope Controls */}
-      <div className="absolute bottom-16 lg:bottom-3 left-2 lg:left-3 flex flex-wrap items-center gap-1.5 z-10 pointer-events-auto max-w-[calc(100%-1rem)]">
+      {/* DESKTOP Bottom-Left Scope Controls (Hidden on mobile) */}
+      <div className="hidden lg:flex absolute bottom-3 left-3 flex-wrap items-center gap-1.5 z-10 pointer-events-auto max-w-[calc(100%-1rem)]">
         <div className="flex items-center bg-[var(--atc-surface)]/95 border border-[var(--atc-border)] shadow-[var(--atc-shadow)] rounded-md p-0.5 backdrop-blur-sm">
           {(["GROUND", "TOWER", "DEPARTURE"] as const).map((role) => (
             <button
@@ -947,6 +948,168 @@ export const RadarScopeCanvas: React.FC = () => {
           </span>
         </button>
       </div>
+
+      {/* MOBILE PHONE Scope Controls (Hidden on desktop, flex lg:hidden) */}
+      {/* 1. Mobile Vertical Floating Zoom Pill (Right side) */}
+      <div className="flex lg:hidden flex-col absolute right-2.5 top-14 z-20 bg-[var(--atc-surface)]/95 backdrop-blur-md border border-[var(--atc-border)] shadow-xl rounded-xl overflow-hidden divide-y divide-[var(--atc-border)] select-none">
+        <button
+          type="button"
+          onClick={() => zoomAtPoint(1.25)}
+          title="Zoom In"
+          className="w-9 h-9 flex items-center justify-center text-[var(--atc-text)] hover:bg-[var(--atc-surface-alt)] active:bg-[var(--atc-accent-bg)] cursor-pointer"
+        >
+          <Plus className="w-4 h-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => zoomAtPoint(0.8)}
+          title="Zoom Out"
+          className="w-9 h-9 flex items-center justify-center text-[var(--atc-text)] hover:bg-[var(--atc-surface-alt)] active:bg-[var(--atc-accent-bg)] cursor-pointer"
+        >
+          <Minus className="w-4 h-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => resetCameraForStation()}
+          title="Reset View"
+          className="w-9 h-9 flex items-center justify-center text-[var(--atc-text)] hover:bg-[var(--atc-surface-alt)] active:bg-[var(--atc-accent-bg)] cursor-pointer"
+        >
+          <RotateCcw className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {/* 2. Mobile Top-Left Floating Controls: Station Presets + Map Options FAB */}
+      <div className="flex lg:hidden items-center gap-1.5 absolute left-2.5 top-2.5 z-20 select-none">
+        <div className="flex items-center bg-[var(--atc-surface)]/95 backdrop-blur-md border border-[var(--atc-border)] shadow-md rounded-lg p-0.5">
+          {(["GROUND", "TOWER", "DEPARTURE"] as const).map((role) => (
+            <button
+              key={role}
+              type="button"
+              onClick={() => resetCameraForStation(role)}
+              className="px-2 py-1 rounded text-[10px] font-mono font-bold text-[var(--atc-text-secondary)] hover:bg-[var(--atc-accent-bg)] hover:text-[var(--atc-accent-text)] transition-colors cursor-pointer"
+            >
+              {role === "GROUND" ? "GND" : role === "TOWER" ? "TWR" : "RADAR"}
+            </button>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setMobileMapSheetOpen((v) => !v)}
+          className={`px-2 py-1 rounded-lg border shadow-md font-mono text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
+            mobileMapSheetOpen || scopeLayer !== "chart" || showLiveAdsbOverlay
+              ? "bg-[var(--atc-accent-bg)] border-[var(--atc-accent-border)] text-[var(--atc-accent-text)]"
+              : "bg-[var(--atc-surface)]/95 border-[var(--atc-border)] text-[var(--atc-text)]"
+          }`}
+          title="Map Layers & Traffic Tools"
+        >
+          <Layers className="w-3.5 h-3.5" />
+          <span className="text-[9px] uppercase">{scopeLayer}</span>
+        </button>
+      </div>
+
+      {/* 3. Mobile Map Options Modal Sheet */}
+      {mobileMapSheetOpen && (
+        <div className="flex lg:hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-xs items-end justify-center p-3 animate-in fade-in duration-150">
+          <div className="w-full max-w-sm rounded-2xl bg-[var(--atc-surface)] border border-[var(--atc-border)] shadow-2xl p-4 space-y-3 font-mono text-xs">
+            <div className="flex items-center justify-between pb-2 border-b border-[var(--atc-border)]">
+              <span className="font-extrabold text-xs uppercase tracking-wider text-[var(--atc-text)]">
+                Radar Map Options
+              </span>
+              <button
+                type="button"
+                onClick={() => setMobileMapSheetOpen(false)}
+                className="p-1 rounded text-[var(--atc-muted)] hover:text-[var(--atc-text)] font-bold text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Map Layer (Satellite / Hybrid / Chart) */}
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-[var(--atc-text-secondary)] uppercase">
+                Underlay Layer
+              </label>
+              <div className="grid grid-cols-3 gap-1 bg-[var(--atc-surface-alt)] p-1 rounded-lg border border-[var(--atc-border)]">
+                {([
+                  { id: "hybrid", label: "HYBRID" },
+                  { id: "satellite", label: "SAT" },
+                  { id: "chart", label: "CHART" },
+                ] as const).map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setScopeLayer(m.id)}
+                    className={`py-1.5 text-center rounded font-bold transition-all cursor-pointer ${
+                      scopeLayer === m.id
+                        ? "bg-[var(--atc-accent)] text-slate-950 shadow-sm"
+                        : "text-[var(--atc-muted)] hover:text-[var(--atc-text)]"
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Runway Lights Toggle */}
+            <div className="flex items-center justify-between py-1 border-t border-[var(--atc-border)]">
+              <span className="text-[11px] font-bold text-[var(--atc-text)]">Runway Lights</span>
+              <button
+                type="button"
+                onClick={toggleRunwayLightsMode}
+                className="px-2.5 py-1 rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] text-[10px] font-bold"
+              >
+                {runwayLightsMode === "SHOW" ? "ALWAYS ON" : runwayLightsMode === "PLANE_ONLY" ? "PLANE ONLY" : "OFF"}
+              </button>
+            </div>
+
+            {/* Live ADS-B Overlay */}
+            {sim.airport.isRealWorld && sim.airport.lat !== undefined && (
+              <div className="flex items-center justify-between py-1 border-t border-[var(--atc-border)]">
+                <span className="text-[11px] font-bold text-[var(--atc-text)]">Live ADS-B Aircraft</span>
+                <button
+                  type="button"
+                  onClick={() => setShowLiveAdsbOverlay((v) => !v)}
+                  className={`px-2.5 py-1 rounded-md border font-bold text-[10px] ${
+                    showLiveAdsbOverlay
+                      ? "bg-sky-500/20 border-sky-400 text-sky-400"
+                      : "bg-[var(--atc-surface-alt)] border-[var(--atc-border)] text-[var(--atc-muted)]"
+                  }`}
+                >
+                  {showLiveAdsbOverlay ? `ON (${liveTracks.length})` : "OFF"}
+                </button>
+              </div>
+            )}
+
+            {/* Quick Spawn Buttons */}
+            <div className="pt-2 border-t border-[var(--atc-border)] grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  spawnFlight("DEPARTURE");
+                  setMobileMapSheetOpen(false);
+                }}
+                className="py-2 px-2.5 rounded-lg border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] text-[var(--atc-cyan)] font-bold flex items-center justify-center gap-1 cursor-pointer"
+              >
+                <PlaneTakeoff className="w-3.5 h-3.5" />
+                <span>+ SPAWN DEP</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  spawnFlight("ARRIVAL");
+                  setMobileMapSheetOpen(false);
+                }}
+                className="py-2 px-2.5 rounded-lg border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] font-bold flex items-center justify-center gap-1 cursor-pointer"
+              >
+                <PlaneLanding className="w-3.5 h-3.5" />
+                <span>+ SPAWN ARR</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Selected OpenSky Live ADS-B Target Popup Card (with real aircraft photo + metadata) */}
       {showLiveAdsbOverlay && selectedLiveTrack && (

@@ -22,7 +22,7 @@ export const MobileAircraftQuickCard: React.FC<MobileAircraftQuickCardProps> = (
   const isEmergency = aircraft.hasReadbackError || aircraft.operationMode === "EMERGENCY_OPERATION";
 
   return (
-    <div className="absolute bottom-16 inset-x-2 z-20 rounded-xl border border-[var(--atc-border-strong)] bg-[var(--atc-surface)]/95 backdrop-blur-md shadow-2xl p-2.5 space-y-2 font-mono text-xs animate-in slide-in-from-bottom-2 duration-150 select-none">
+    <div className="absolute bottom-[66px] inset-x-2.5 z-20 rounded-2xl border border-[var(--atc-border-strong)] bg-[var(--atc-surface)]/95 backdrop-blur-xl shadow-2xl p-3 space-y-2 font-mono text-xs animate-in slide-in-from-bottom-2 duration-150 select-none">
       {/* Top row: Identity & Phase */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0 flex-wrap">

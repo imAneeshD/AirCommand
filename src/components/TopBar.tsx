@@ -660,13 +660,13 @@ export const TopBar: React.FC = () => {
     </header>
 
       {/* MOBILE PHONE HEADER (flex on mobile, lg:hidden) */}
-      <header className="flex lg:hidden min-h-[46px] bg-[var(--atc-panel)] border-b border-[var(--atc-border)] px-2 py-1 items-center justify-between gap-1.5 shrink-0 select-none transition-colors">
+      <header className="flex lg:hidden h-12 bg-[var(--atc-panel)] border-b border-[var(--atc-border)] px-2.5 items-center justify-between gap-1.5 shrink-0 select-none transition-colors">
         {/* Left: Home + Airport Picker */}
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
           <button
             onClick={() => setAppMode("LANDING")}
             title="Return to Landing Page"
-            className="p-1.5 rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface)] text-[var(--atc-text)] cursor-pointer"
+            className="p-1.5 rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface)] text-[var(--atc-text)] cursor-pointer hover:bg-[var(--atc-surface-alt)]"
           >
             <Home className="w-3.5 h-3.5 text-[var(--atc-accent)]" />
           </button>
@@ -674,9 +674,9 @@ export const TopBar: React.FC = () => {
           <button
             onClick={openAirportSelector}
             title="Switch Airport"
-            className="flex items-center gap-1 px-2 py-1 rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface)] text-xs font-mono font-bold text-[var(--atc-text)] cursor-pointer"
+            className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface)] text-xs font-mono font-bold text-[var(--atc-text)] cursor-pointer hover:bg-[var(--atc-surface-alt)]"
           >
-            <Radio className="w-3 h-3 text-[var(--atc-cyan)]" />
+            <Radio className="w-3.5 h-3.5 text-[var(--atc-cyan)]" />
             <span>{sim.airport.icao}</span>
             {isLiveActive && (
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -686,15 +686,15 @@ export const TopBar: React.FC = () => {
         </div>
 
         {/* Center: Station Switcher + Play/Pause */}
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
           <button
             onClick={() => setMobileStationOpen((v) => !v)}
             title="Switch Active Controller Station"
-            className="flex items-center gap-1 px-2 py-1 rounded-md border border-[var(--atc-accent-border)] bg-[var(--atc-surface)] text-[11px] font-mono font-extrabold text-[var(--atc-text)] shadow-xs cursor-pointer"
+            className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg border border-[var(--atc-accent-border)] bg-[var(--atc-surface)] text-[11px] font-mono font-extrabold text-[var(--atc-text)] shadow-xs cursor-pointer hover:bg-[var(--atc-surface-alt)]"
           >
             <span>{currentStation.label}</span>
             {currentStationPending > 0 && (
-              <span className="px-1 rounded-full bg-amber-500 text-slate-950 text-[9px] font-bold">
+              <span className="px-1 min-w-[14px] text-center rounded-full bg-amber-500 text-slate-950 text-[9px] font-bold">
                 {currentStationPending}
               </span>
             )}
@@ -704,7 +704,7 @@ export const TopBar: React.FC = () => {
           <button
             disabled={isMpActive}
             onClick={togglePause}
-            className={`px-2 py-1 rounded-md border text-[11px] font-mono font-bold flex items-center gap-1 cursor-pointer ${
+            className={`px-2 py-1.5 rounded-lg border text-[11px] font-mono font-bold flex items-center gap-1 cursor-pointer transition-colors ${
               sim.paused
                 ? "bg-[var(--atc-surface-alt)] border-[var(--atc-border-strong)] text-[var(--atc-text)]"
                 : "bg-[var(--atc-accent)] border-[var(--atc-accent-border)] text-slate-950"
@@ -716,13 +716,13 @@ export const TopBar: React.FC = () => {
         </div>
 
         {/* Right: Voice PTT + Settings Menu */}
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
           <VoicePttButton />
 
           <button
             onClick={() => setMobileToolsOpen(true)}
             title="Open Simulation Settings & Tools"
-            className="p-1.5 rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface)] text-[var(--atc-text)] cursor-pointer"
+            className="p-1.5 rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface)] text-[var(--atc-text)] cursor-pointer hover:bg-[var(--atc-surface-alt)]"
           >
             <Settings2 className="w-4 h-4" />
           </button>

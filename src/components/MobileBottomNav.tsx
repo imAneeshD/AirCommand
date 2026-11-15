@@ -19,8 +19,7 @@ export const MobileBottomNav: React.FC = () => {
     id: MobileViewTab;
     label: string;
     icon: React.ReactNode;
-    badge?: string | number | null;
-    badgeColor?: string;
+    badge?: React.ReactNode;
   }> = [
     {
       id: "RADAR",
@@ -31,29 +30,38 @@ export const MobileBottomNav: React.FC = () => {
       id: "STRIPS",
       label: "STRIPS",
       icon: <FileText className="w-5 h-5" />,
-      badge: activeFlightsCount > 0 ? activeFlightsCount : null,
-      badgeColor: "bg-[var(--atc-surface-alt)] text-[var(--atc-cyan)] border border-[var(--atc-border)]",
+      badge:
+        activeFlightsCount > 0 ? (
+          <span className="absolute -top-1 -right-2.5 px-1 min-w-[15px] h-3.5 flex items-center justify-center text-[9px] font-mono font-bold rounded-full bg-[var(--atc-accent)] text-slate-950">
+            {activeFlightsCount}
+          </span>
+        ) : null,
     },
     {
       id: "CLEARANCE",
       label: "CLEARANCE",
       icon: <Radio className="w-5 h-5" />,
-      badge: hasUrgentAlert ? "!" : selectedAc ? selectedAc.callsign.slice(0, 4) : null,
-      badgeColor: hasUrgentAlert
-        ? "bg-red-500 text-white animate-pulse"
-        : "bg-[var(--atc-accent-bg)] text-[var(--atc-accent-text)] border border-[var(--atc-accent-border)]",
+      badge: hasUrgentAlert ? (
+        <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse absolute -top-0.5 -right-0.5 ring-2 ring-[var(--atc-surface)]" />
+      ) : selectedAc ? (
+        <span className="w-2 h-2 rounded-full bg-[var(--atc-cyan)] absolute -top-0.5 -right-0.5 ring-2 ring-[var(--atc-surface)]" />
+      ) : null,
     },
     {
       id: "COMMS",
       label: "RADIO",
       icon: <MessageSquare className="w-5 h-5" />,
-      badge: sim.incidents.length > 0 ? sim.incidents.length : null,
-      badgeColor: "bg-amber-500 text-slate-950 font-bold",
+      badge:
+        sim.incidents.length > 0 ? (
+          <span className="absolute -top-1 -right-2.5 px-1 min-w-[15px] h-3.5 flex items-center justify-center text-[9px] font-mono font-bold rounded-full bg-amber-500 text-slate-950">
+            {sim.incidents.length}
+          </span>
+        ) : null,
     },
   ];
 
   return (
-    <nav className="h-14 bg-[var(--atc-surface)]/95 backdrop-blur-md border-t border-[var(--atc-border)] flex items-stretch shrink-0 z-30 select-none shadow-lg">
+    <nav className="h-[58px] pb-1.5 pt-1 bg-[var(--atc-surface)]/95 backdrop-blur-md border-t border-[var(--atc-border)] flex items-stretch shrink-0 z-30 select-none shadow-lg">
       {tabs.map((tab) => {
         const active = mobileTab === tab.id;
         return (
@@ -70,17 +78,13 @@ export const MobileBottomNav: React.FC = () => {
             {active && (
               <span className="absolute top-0 left-4 right-4 h-0.5 bg-[var(--atc-accent)] rounded-full" />
             )}
-            <div className="relative">
+            <div className="relative flex items-center justify-center">
               {tab.icon}
-              {tab.badge !== null && tab.badge !== undefined && (
-                <span
-                  className={`absolute -top-1.5 -right-3 text-[9px] font-mono font-bold px-1 rounded-full leading-tight ${tab.badgeColor}`}
-                >
-                  {tab.badge}
-                </span>
-              )}
+              {tab.badge}
             </div>
-            <span className="text-[10px] font-mono tracking-wide">{tab.label}</span>
+            <span className="text-[10px] font-mono font-semibold tracking-tight leading-none mt-0.5">
+              {tab.label}
+            </span>
           </button>
         );
       })}

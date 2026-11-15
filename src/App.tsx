@@ -181,9 +181,9 @@ export function App() {
           </div>
 
           {/* MOBILE PHONE / TABLET WORKSPACE LAYOUT (< 1024px, flex lg:hidden) */}
-          <div className="flex lg:hidden flex-1 min-h-0 relative overflow-hidden flex-col">
+          <div className="flex lg:hidden flex-1 min-h-0 relative overflow-hidden flex-col h-full w-full">
             {/* Base Radar Scope Canvas (always mounted for camera/tile continuity) */}
-            <div className={`w-full h-full ${mobileTab === "RADAR" ? "block" : "hidden"}`}>
+            <div className={`w-full h-full flex flex-col flex-1 min-h-0 ${mobileTab === "RADAR" ? "flex" : "hidden"}`}>
               <RadarScopeCanvas />
             </div>
 
