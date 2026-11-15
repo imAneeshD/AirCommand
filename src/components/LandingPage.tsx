@@ -395,7 +395,7 @@ export const LandingPage: React.FC = () => {
   const sessionTimeFormatted = `T+${String(sessionMinutes).padStart(2, "0")}:${String(sessionSeconds).padStart(2, "0")}`;
 
   return (
-    <div className="min-h-screen w-screen bg-[var(--atc-bg)] text-[var(--atc-text)] flex flex-col overflow-y-auto selection:bg-[var(--atc-accent)] selection:text-black">
+    <div className="h-screen w-full bg-[var(--atc-bg)] text-[var(--atc-text)] flex flex-col overflow-y-auto overflow-x-hidden select-text selection:bg-[var(--atc-accent)] selection:text-black">
       {/* 1. STICKY TOP NAVIGATION BAR */}
       <header className="sticky top-0 z-40 w-full border-b border-[var(--atc-border)] bg-[var(--atc-panel)]/95 backdrop-blur-md px-4 sm:px-8 py-3 flex items-center justify-between gap-4 transition-colors">
         {/* Brand & Identity */}
