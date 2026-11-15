@@ -586,8 +586,10 @@ export function mergeLiveTracksIntoSimulation(opts: {
   for (const id of sim.aircraftOrder) {
     const ac = sim.aircraft[id];
     if (!ac) continue;
-    if (ac.icao24) byIcao.set(ac.icao24.toLowerCase(), ac);
-    byCallsign.set(ac.callsign.toUpperCase(), ac);
+    if (ac.icao24) {
+      byIcao.set(ac.icao24.toLowerCase(), ac);
+      byCallsign.set(ac.callsign.toUpperCase(), ac);
+    }
   }
 
   let updatedCount = 0;
@@ -616,29 +618,30 @@ export function mergeLiveTracksIntoSimulation(opts: {
         existing.state !== "COMPLETED_DEPARTURE" &&
         existing.state !== "CRASHED"
       ) {
+        // Do NOT overwrite existing.x and existing.y!
+        // The simulation's internal continuous physics engine (movementEngine.ts)
+        // is authoritative for active aircraft movement to prevent jarring backward snap-backs
+        // caused by delayed/lagged OpenSky ADS-B sensor updates.
+        const onPrecisionFinal = existing.state === "FINAL" || existing.state === "CLEARED_TO_LAND" || existing.state === "LANDING";
         if (
           existing.state === "APPROACH" ||
           existing.state === "CLIMB" ||
           existing.state === "CRUISE_OUTBOUND" ||
-          existing.state === "FINAL" ||
-          existing.state === "CLEARED_TO_LAND" ||
           existing.state === "GO_AROUND"
         ) {
-          existing.x = localPt.x;
-          existing.y = localPt.y;
-          if (track.baroAltFt !== null) {
+          if (track.baroAltFt !== null && !onPrecisionFinal) {
             existing.altitude = track.baroAltFt;
           }
-          if (track.groundSpeedKts !== null && track.groundSpeedKts > 50) {
+          if (track.groundSpeedKts !== null && track.groundSpeedKts > 50 && !onPrecisionFinal) {
             existing.speed = track.groundSpeedKts;
           }
-          if (track.trackDeg !== null) {
+          if (track.trackDeg !== null && !onPrecisionFinal) {
             existing.heading = track.trackDeg;
             if (existing.assignedHeading === null || Math.abs(existing.assignedHeading - existing.heading) < 15) {
               existing.assignedHeading = track.trackDeg;
             }
           }
-          if (track.verticalRateFpm !== null) {
+          if (track.verticalRateFpm !== null && !onPrecisionFinal) {
             existing.verticalSpeed = track.verticalRateFpm;
           }
         }
@@ -652,7 +655,7 @@ export function mergeLiveTracksIntoSimulation(opts: {
           existing.airline = track.operator;
         }
         if (!existing.trail) existing.trail = [];
-        existing.trail.push({ x: localPt.x, y: localPt.y });
+        existing.trail.push({ x: existing.x, y: existing.y });
         if (existing.trail.length > 25) existing.trail.shift();
         updatedCount++;
       }
