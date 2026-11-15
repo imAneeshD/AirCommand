@@ -147,7 +147,10 @@ function controllerBadge(ctrl: ControllerRole, flightKind?: FlightKind): { lette
   }
 }
 
-export const FlightStripRack: React.FC = () => {
+export const FlightStripRack: React.FC<{
+  mobileMode?: boolean;
+  onSelectAndClear?: (id: string) => void;
+}> = ({ mobileMode = false, onSelectAndClear }) => {
   const sim = useAtcStore((s) => s.sim);
   useAtcStore((s) => s.tickVersion);
   const focusAircraft = useAtcStore((s) => s.focusAircraft);
@@ -688,6 +691,26 @@ export const FlightStripRack: React.FC = () => {
             <span className="truncate">Readback: {pendingRb[pendingRb.length - 1].type}</span>
           </div>
         )}
+
+        {mobileMode && (
+          <div className="mt-2 pt-1.5 border-t border-[var(--atc-border)] flex items-center justify-between gap-2">
+            <span className="text-[10px] font-mono text-[var(--atc-muted)]">
+              {ac.state.replace(/_/g, " ")}
+            </span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                focusAircraft(ac.id);
+                onSelectAndClear?.(ac.id);
+              }}
+              className="py-1 px-2.5 rounded bg-[var(--atc-accent)] text-slate-950 font-mono font-bold text-[10px] flex items-center gap-1 cursor-pointer"
+            >
+              <span>CLEARANCES</span>
+              <ArrowRight className="w-3 h-3" />
+            </button>
+          </div>
+        )}
       </div>
     );
   };
@@ -761,7 +784,7 @@ export const FlightStripRack: React.FC = () => {
     );
   };
 
-  if (minimized) {
+  if (!mobileMode && minimized) {
     return (
       <aside
         onClick={() => togglePanelMinimized("left")}
@@ -812,9 +835,13 @@ export const FlightStripRack: React.FC = () => {
 
   return (
     <aside
-      className={`${
-        viewMode === "KANBAN" ? "w-[760px] xl:w-[900px]" : "w-72 xl:w-[300px]"
-      } bg-[var(--atc-panel)] border-r border-[var(--atc-border)] flex flex-col shrink-0 min-h-0 p-2.5 gap-2.5 overflow-hidden transition-all duration-200`}
+      className={
+        mobileMode
+          ? "w-full flex-1 flex flex-col bg-[var(--atc-panel)] min-h-0 p-2.5 gap-2.5 overflow-hidden"
+          : `${
+              viewMode === "KANBAN" ? "w-[760px] xl:w-[900px]" : "w-72 xl:w-[300px]"
+            } bg-[var(--atc-panel)] border-r border-[var(--atc-border)] flex flex-col shrink-0 min-h-0 p-2.5 gap-2.5 overflow-hidden transition-all duration-200`
+      }
     >
       {/* Flight Strips Accordion */}
       <Accordion

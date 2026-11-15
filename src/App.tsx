@@ -5,6 +5,9 @@ import { FlightStripRack } from "./components/FlightStripRack.tsx";
 import { GlobalAirportMap } from "./components/GlobalAirportMap.tsx";
 import { LandingPage } from "./components/LandingPage.tsx";
 import { LiveTrafficView } from "./components/LiveTrafficView.tsx";
+import { MobileAircraftQuickCard } from "./components/MobileAircraftQuickCard.tsx";
+import { MobileBottomNav } from "./components/MobileBottomNav.tsx";
+import { MobileViewHeader } from "./components/MobileViewHeader.tsx";
 import { MultiplayerLobby } from "./components/MultiplayerLobby.tsx";
 import { PostSessionModal } from "./components/PostSessionModal.tsx";
 import { RadarScopeCanvas } from "./components/RadarScopeCanvas.tsx";
@@ -29,6 +32,10 @@ export function App() {
   const isOnline = useAtcStore((s) => s.isOnline);
   const liveSyncEnabled = useAtcStore((s) => Boolean(s.sim.liveSnapshotMeta?.liveSyncEnabled));
   const pollLiveTraffic = useAtcStore((s) => s.pollLiveTraffic);
+  const mobileTab = useAtcStore((s) => s.mobileTab);
+  const setMobileTab = useAtcStore((s) => s.setMobileTab);
+  const sim = useAtcStore((s) => s.sim);
+  const selectAircraft = useAtcStore((s) => s.selectAircraft);
 
   // Sync data-theme attribute onto <html>
   useEffect(() => {
@@ -162,12 +169,85 @@ export function App() {
       {appMode === "SIMULATION" && (
         <div className="h-screen w-screen flex flex-col overflow-hidden">
           <TopBar />
-          <div className="flex-1 flex min-h-0 overflow-hidden">
+
+          {/* DESKTOP WORKSPACE LAYOUT (>= 1024px, lg:flex) */}
+          <div className="hidden lg:flex flex-1 min-h-0 overflow-hidden">
             <FlightStripRack />
             <RadarScopeCanvas />
             <ClearanceControlDeck />
           </div>
-          <RadioCommsLog />
+          <div className="hidden lg:block">
+            <RadioCommsLog />
+          </div>
+
+          {/* MOBILE PHONE / TABLET WORKSPACE LAYOUT (< 1024px, flex lg:hidden) */}
+          <div className="flex lg:hidden flex-1 min-h-0 relative overflow-hidden flex-col">
+            {/* Base Radar Scope Canvas (always mounted for camera/tile continuity) */}
+            <div className={`w-full h-full ${mobileTab === "RADAR" ? "block" : "hidden"}`}>
+              <RadarScopeCanvas />
+            </div>
+
+            {/* Mobile Flight Strips View */}
+            {mobileTab === "STRIPS" && (
+              <div className="w-full h-full flex flex-col bg-[var(--atc-panel)] overflow-hidden">
+                <MobileViewHeader
+                  title="FLIGHT STRIPS"
+                  subtitle={`${sim.aircraftOrder.length} Flights Active`}
+                  onClose={() => setMobileTab("RADAR")}
+                />
+                <FlightStripRack
+                  mobileMode={true}
+                  onSelectAndClear={() => setMobileTab("CLEARANCE")}
+                />
+              </div>
+            )}
+
+            {/* Mobile Clearance Deck View */}
+            {mobileTab === "CLEARANCE" && (
+              <div className="w-full h-full flex flex-col bg-[var(--atc-panel)] overflow-hidden">
+                <MobileViewHeader
+                  title={
+                    sim.selectedAircraftId && sim.aircraft[sim.selectedAircraftId]
+                      ? `CLEARANCES · ${sim.aircraft[sim.selectedAircraftId].callsign}`
+                      : "CLEARANCES"
+                  }
+                  subtitle={
+                    sim.selectedAircraftId && sim.aircraft[sim.selectedAircraftId]
+                      ? `${sim.aircraft[sim.selectedAircraftId].aircraftType} • ${sim.aircraft[sim.selectedAircraftId].state.replace(/_/g, " ")}`
+                      : "Select an aircraft to issue commands"
+                  }
+                  onClose={() => setMobileTab("RADAR")}
+                />
+                <ClearanceControlDeck mobileMode={true} />
+              </div>
+            )}
+
+            {/* Mobile Radio & Event Log View */}
+            {mobileTab === "COMMS" && (
+              <div className="w-full h-full flex flex-col bg-[var(--atc-panel)] overflow-hidden">
+                <MobileViewHeader
+                  title="RADIO & EVENT LOG"
+                  subtitle={`${sim.radioLog.length} Transmissions`}
+                  onClose={() => setMobileTab("RADAR")}
+                />
+                <RadioCommsLog mobileMode={true} />
+              </div>
+            )}
+
+            {/* Floating Quick Action Card on Radar View when aircraft is selected */}
+            {mobileTab === "RADAR" &&
+              sim.selectedAircraftId &&
+              sim.aircraft[sim.selectedAircraftId] && (
+                <MobileAircraftQuickCard
+                  aircraft={sim.aircraft[sim.selectedAircraftId]}
+                  onOpenClearances={() => setMobileTab("CLEARANCE")}
+                  onDeselect={() => selectAircraft(null)}
+                />
+              )}
+
+            {/* Mobile Bottom Navigation Bar */}
+            <MobileBottomNav />
+          </div>
         </div>
       )}
 
