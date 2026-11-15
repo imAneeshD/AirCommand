@@ -770,7 +770,7 @@ export const GlobalAirportMap: React.FC = () => {
       </header>
 
       {/* Main Split Body */}
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden pb-24 lg:pb-0">
         {/* Left Sidebar: Search, Category Filters, Results + Legacy Training Fields */}
         <aside className="w-full lg:w-[340px] shrink-0 border-b lg:border-b-0 lg:border-r border-[var(--atc-border)] bg-[var(--atc-panel)] flex flex-col min-h-0 max-h-[42vh] lg:max-h-none">
           <div className="p-3 border-b border-[var(--atc-border)] space-y-2.5">
@@ -1033,6 +1033,139 @@ export const GlobalAirportMap: React.FC = () => {
                 </div>
               </div>
 
+              {/* Simulation Launch Configuration & Actions (Moved up for instant mobile & desktop access) */}
+              <div className="p-3 rounded-lg border border-[var(--atc-accent-border)] bg-[var(--atc-surface)] space-y-2.5 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-[var(--atc-accent-text)]">
+                    Start Simulation
+                  </span>
+                  <span className="text-[10px] font-mono text-[var(--atc-muted)]">
+                    {selectedAirportRecord.icao}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] text-[var(--atc-muted)] block mb-0.5">Scenario</label>
+                    <select
+                      value={selectedScenario}
+                      onChange={(e) => setSelectedScenario(e.target.value as ScenarioId)}
+                      className="w-full px-2 py-1 text-xs rounded border border-[var(--atc-border)] bg-[var(--atc-panel)] cursor-pointer"
+                    >
+                      {SCENARIO_CHOICES.map((sc) => (
+                        <option key={sc.id} value={sc.id}>
+                          {sc.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-[var(--atc-muted)] block mb-0.5">
+                      Difficulty (MP)
+                    </label>
+                    <select
+                      value={selectedDifficulty}
+                      onChange={(e) => setSelectedDifficulty(e.target.value as DifficultyLevel)}
+                      className="w-full px-2 py-1 text-xs rounded border border-[var(--atc-border)] bg-[var(--atc-panel)] cursor-pointer"
+                    >
+                      <option value="EASY">Easy</option>
+                      <option value="STANDARD">Standard</option>
+                      <option value="CHALLENGING">Challenging</option>
+                      <option value="EXPERT">Expert</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] text-[var(--atc-muted)] block mb-1">
+                    Solo Controller Role
+                  </label>
+                  <div className="grid grid-cols-4 gap-1">
+                    {(["ALL", "GROUND", "TOWER", "DEPARTURE"] as PlayerRoleMode[]).map((r) => (
+                      <button
+                        key={r}
+                        onClick={() => setSelectedStartRole(r)}
+                        className={`py-1 text-[10px] font-semibold rounded border cursor-pointer ${
+                          selectedStartRole === r
+                            ? "bg-[var(--atc-accent-soft)] border-[var(--atc-accent-border)] text-[var(--atc-accent-text)] font-bold"
+                            : "bg-[var(--atc-panel)] border-[var(--atc-border)] text-[var(--atc-muted)]"
+                        }`}
+                      >
+                        {r === "ALL" ? "ALL AUTO" : r}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Primary Launch Action Buttons */}
+                <div className="space-y-2 pt-1">
+                  <button
+                    onClick={() =>
+                      void launchRealAirportSimulation(
+                        selectedAirportRecord,
+                        selectedScenario,
+                        selectedStartRole
+                      )
+                    }
+                    disabled={airportDetailLoading}
+                    className="w-full py-3 px-4 rounded-xl bg-[var(--atc-accent)] text-stone-950 font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 hover:brightness-105 active:scale-[0.98] transition-all cursor-pointer shadow-md shadow-amber-500/20 disabled:opacity-50"
+                  >
+                    <Plane className="w-4 h-4 fill-current" />
+                    <span>Play Solo ATC Simulation ({selectedAirportRecord.icao})</span>
+                  </button>
+
+                  <button
+                    onClick={async () => {
+                      setConvertingLive(true);
+                      const res = await launchSimulationFromLiveTraffic(
+                        selectedAirportRecord,
+                        undefined,
+                        selectedStartRole
+                      );
+                      setConvertingLive(false);
+                      if (!res.ok) {
+                        const cleanErr = res.error?.includes("JSON") || res.error?.includes("fetch")
+                          ? "Live traffic service temporarily unavailable. You can launch Normal Scenario Operations."
+                          : res.error ?? "Live service unavailable.";
+                        setStatusNote(`Live flight conversion notice for ${selectedAirportRecord.icao}: ${cleanErr}`);
+                      }
+                    }}
+                    disabled={!isOnline || airportDetailLoading || convertingLive}
+                    className="w-full py-2.5 px-3 rounded-lg border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] font-bold text-xs flex items-center justify-center gap-2 hover:brightness-105 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-45"
+                  >
+                    <Radio className="w-4 h-4" />
+                    <span>
+                      {convertingLive
+                        ? "Converting Real Live Flights..."
+                        : `Convert Live Flights → Play ATC (${selectedAirportRecord.icao})`}
+                    </span>
+                  </button>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={handleCreateMultiplayer}
+                      disabled={!isOnline || isCreatingMultiplayer}
+                      title="Start Multiplayer Session with up to 5 controller roles"
+                      className="py-2 px-2.5 rounded-lg border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] text-[var(--atc-cyan)] font-semibold text-xs flex items-center justify-center gap-1.5 disabled:opacity-45 cursor-pointer"
+                    >
+                      {isCreatingMultiplayer ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Users className="w-3.5 h-3.5" />
+                      )}
+                      <span>{isCreatingMultiplayer ? "Starting..." : "Multiplayer Co-op"}</span>
+                    </button>
+
+                    <button
+                      onClick={() => setAppMode("LIVE_OBSERVATION")}
+                      disabled={!isOnline}
+                      className="py-2 px-2.5 rounded-lg border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] font-semibold text-xs flex items-center justify-center gap-1.5 disabled:opacity-45 cursor-pointer"
+                    >
+                      <Radio className="w-3.5 h-3.5" />
+                      <span>Live ADS-B</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               {/* Infrastructure / OSM Warning or Confirmed Status */}
               {airportDetailLoading ? (
                 <div className="text-xs text-[var(--atc-cyan)] px-3 py-2 rounded border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)]">
@@ -1126,144 +1259,11 @@ export const GlobalAirportMap: React.FC = () => {
                 </div>
               </div>
 
-              {/* Simulation Launch Configuration */}
-              <div className="p-3 rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface)] space-y-2.5">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-[var(--atc-muted)]">
-                  Session Setup
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[10px] text-[var(--atc-muted)] block mb-0.5">Scenario</label>
-                    <select
-                      value={selectedScenario}
-                      onChange={(e) => setSelectedScenario(e.target.value as ScenarioId)}
-                      className="w-full px-2 py-1 text-xs rounded border border-[var(--atc-border)] bg-[var(--atc-panel)]"
-                    >
-                      {SCENARIO_CHOICES.map((sc) => (
-                        <option key={sc.id} value={sc.id}>
-                          {sc.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-[var(--atc-muted)] block mb-0.5">
-                      Difficulty (MP)
-                    </label>
-                    <select
-                      value={selectedDifficulty}
-                      onChange={(e) => setSelectedDifficulty(e.target.value as DifficultyLevel)}
-                      className="w-full px-2 py-1 text-xs rounded border border-[var(--atc-border)] bg-[var(--atc-panel)]"
-                    >
-                      <option value="EASY">Easy</option>
-                      <option value="STANDARD">Standard</option>
-                      <option value="CHALLENGING">Challenging</option>
-                      <option value="EXPERT">Expert</option>
-                    </select>
-                  </div>
-                </div>
-                <div>
-                  <label className="text-[10px] text-[var(--atc-muted)] block mb-1">
-                    Solo Controller Role
-                  </label>
-                  <div className="grid grid-cols-4 gap-1">
-                    {(["ALL", "GROUND", "TOWER", "DEPARTURE"] as PlayerRoleMode[]).map((r) => (
-                      <button
-                        key={r}
-                        onClick={() => setSelectedStartRole(r)}
-                        className={`py-1 text-[10px] font-semibold rounded border ${
-                          selectedStartRole === r
-                            ? "bg-[var(--atc-accent-soft)] border-[var(--atc-accent-border)] text-[var(--atc-accent-text)]"
-                            : "bg-[var(--atc-panel)] border-[var(--atc-border)] text-[var(--atc-muted)]"
-                        }`}
-                      >
-                        {r === "ALL" ? "ALL AUTO" : r}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Integrated Game Mode Actions */}
-              <div className="space-y-2">
-                <button
-                  onClick={() =>
-                    void launchRealAirportSimulation(
-                      selectedAirportRecord,
-                      selectedScenario,
-                      selectedStartRole
-                    )
-                  }
-                  disabled={airportDetailLoading}
-                  className="w-full py-2.5 px-3 rounded-lg bg-[var(--atc-accent)] text-stone-950 font-bold text-xs flex items-center justify-center gap-2 hover:brightness-105 disabled:opacity-50"
-                >
-                  <Plane className="w-4 h-4" />
-                  Play Solo ATC Simulation ({selectedAirportRecord.icao})
-                </button>
-
-                <button
-                  onClick={async () => {
-                    setConvertingLive(true);
-                    const res = await launchSimulationFromLiveTraffic(
-                      selectedAirportRecord,
-                      undefined,
-                      selectedStartRole
-                    );
-                    setConvertingLive(false);
-                    if (!res.ok) {
-                      const cleanErr = res.error?.includes("JSON") || res.error?.includes("fetch")
-                        ? "Live traffic service temporarily unavailable. You can launch Normal Scenario Operations below."
-                        : res.error ?? "Live service unavailable.";
-                      setStatusNote(`Live flight conversion notice for ${selectedAirportRecord.icao}: ${cleanErr}`);
-                    }
-                  }}
-                  disabled={!isOnline || airportDetailLoading || convertingLive}
-                  className="w-full py-2.5 px-3 rounded-lg border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] font-bold text-xs flex items-center justify-center gap-2 hover:brightness-105 disabled:opacity-45"
-                >
-                  <Radio className="w-4 h-4" />
-                  {convertingLive
-                    ? "Converting Real Live Flights..."
-                    : `Convert Live Flights → Play ATC (${selectedAirportRecord.icao})`}
-                </button>
-
-                <label className="flex items-center gap-2 px-2 py-1 text-[11px] text-[var(--atc-muted)] cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={seedMpWithLive}
-                    onChange={(e) => setSeedMpWithLive(e.target.checked)}
-                    className="rounded border-[var(--atc-border)]"
-                  />
-                  Seed Multiplayer Room with Live ADS-B Flights
-                </label>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={handleCreateMultiplayer}
-                    disabled={!isOnline || isCreatingMultiplayer}
-                    title="Start Multiplayer Session with up to 5 controller roles"
-                    className="py-2 px-2.5 rounded-lg border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] text-[var(--atc-cyan)] font-semibold text-xs flex items-center justify-center gap-1.5 disabled:opacity-45"
-                  >
-                    {isCreatingMultiplayer ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Users className="w-3.5 h-3.5" />
-                    )}
-                    {isCreatingMultiplayer ? "Starting..." : "Multiplayer Co-op (2-5P)"}
-                  </button>
-
-                  <button
-                    onClick={() => setAppMode("LIVE_OBSERVATION")}
-                    disabled={!isOnline}
-                    className="py-2 px-2.5 rounded-lg border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] font-semibold text-xs flex items-center justify-center gap-1.5 disabled:opacity-45"
-                  >
-                    <Radio className="w-3.5 h-3.5" />
-                    Live ADS-B
-                  </button>
-                </div>
-
+              {/* Geometry Customization Action */}
+              <div className="pt-1">
                 <button
                   onClick={() => setAppMode("AIRPORT_EDITOR")}
-                  className="w-full py-2 px-3 rounded-lg border border-[var(--atc-border-strong)] bg-[var(--atc-surface)] hover:border-[var(--atc-accent-border)] text-xs font-medium flex items-center justify-center gap-1.5"
+                  className="w-full py-2 px-3 rounded-lg border border-[var(--atc-border-strong)] bg-[var(--atc-surface)] hover:border-[var(--atc-accent-border)] text-xs font-medium flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <Edit3 className="w-3.5 h-3.5" />
                   Edit Airport Geometry (Taxiways / Gates / Hold-Shorts)
@@ -1277,6 +1277,80 @@ export const GlobalAirportMap: React.FC = () => {
           )}
         </aside>
       </div>
+
+      {/* Mobile Sticky Floating Launch Bar (Always visible on phone whenever an airport is selected) */}
+      {selectedAirportRecord && (
+        <div className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-[var(--atc-surface)]/95 backdrop-blur-md border-t border-[var(--atc-border)] p-3 shadow-2xl space-y-2 select-none animate-in slide-in-from-bottom duration-150">
+          <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="font-mono font-extrabold text-sm text-[var(--atc-accent)]">
+                {selectedAirportRecord.icao}
+              </span>
+              <span className="text-[11px] text-[var(--atc-text-secondary)] truncate max-w-[170px]">
+                {selectedAirportRecord.name}
+              </span>
+            </div>
+            <select
+              value={selectedScenario}
+              onChange={(e) => setSelectedScenario(e.target.value as ScenarioId)}
+              className="px-2 py-0.5 text-[11px] font-mono font-bold rounded border border-[var(--atc-border)] bg-[var(--atc-panel)] text-[var(--atc-text)] cursor-pointer"
+            >
+              {SCENARIO_CHOICES.map((sc) => (
+                <option key={sc.id} value={sc.id}>
+                  {sc.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() =>
+                void launchRealAirportSimulation(
+                  selectedAirportRecord,
+                  selectedScenario,
+                  selectedStartRole
+                )
+              }
+              disabled={airportDetailLoading}
+              className="flex-1 py-3 px-4 rounded-xl bg-[var(--atc-accent)] text-stone-950 font-extrabold text-sm flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-50"
+            >
+              <Plane className="w-4 h-4 fill-current shrink-0" />
+              <span>START GAME ({selectedAirportRecord.icao})</span>
+            </button>
+
+            <button
+              onClick={async () => {
+                setConvertingLive(true);
+                const res = await launchSimulationFromLiveTraffic(
+                  selectedAirportRecord,
+                  undefined,
+                  selectedStartRole
+                );
+                setConvertingLive(false);
+                if (!res.ok) {
+                  setStatusNote(`Live traffic notice for ${selectedAirportRecord.icao}: ${res.error ?? "unavailable"}`);
+                }
+              }}
+              disabled={!isOnline || airportDetailLoading || convertingLive}
+              title="Convert Live Flights -> Play ATC"
+              className="py-3 px-3.5 rounded-xl border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] font-bold text-xs flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-50 shrink-0"
+            >
+              <Radio className="w-4 h-4 shrink-0" />
+              <span>LIVE</span>
+            </button>
+
+            <button
+              onClick={handleCreateMultiplayer}
+              disabled={!isOnline || isCreatingMultiplayer}
+              title="Multiplayer room"
+              className="py-3 px-3 rounded-xl border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] text-[var(--atc-cyan)] font-bold text-xs flex items-center justify-center active:scale-[0.98] transition-all cursor-pointer disabled:opacity-50 shrink-0"
+            >
+              <Users className="w-4 h-4 shrink-0" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Starting Multiplayer Session Modal / Loading Overlay */}
       {isCreatingMultiplayer && (
