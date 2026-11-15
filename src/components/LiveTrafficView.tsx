@@ -12,6 +12,7 @@ import {
   ArrowLeft,
   Compass,
   Eye,
+  Home,
   Lock,
   Plane,
   Play,
@@ -353,7 +354,15 @@ export const LiveTrafficView: React.FC = () => {
     <div className="h-screen w-screen flex flex-col bg-[var(--atc-bg)] text-[var(--atc-text)] overflow-hidden">
       {/* Header */}
       <header className="h-14 shrink-0 border-b border-[var(--atc-border)] bg-[var(--atc-panel)] px-4 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setAppMode("LANDING")}
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-mono font-bold rounded border border-[var(--atc-border)] bg-[var(--atc-surface)] hover:border-[var(--atc-accent-border)] transition-colors cursor-pointer"
+            title="Return to Landing Page"
+          >
+            <Home className="w-3.5 h-3.5 text-[var(--atc-accent)]" />
+            <span>Home</span>
+          </button>
           <button
             onClick={() => setAppMode("GLOBAL_MAP")}
             className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded border border-[var(--atc-border)] bg-[var(--atc-surface)]"

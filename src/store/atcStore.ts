@@ -66,6 +66,7 @@ import {
 } from "../utils/storage.ts";
 
 export type AppMode =
+  | "LANDING"
   | "GLOBAL_MAP"
   | "SIMULATION"
   | "LIVE_OBSERVATION"
@@ -618,7 +619,7 @@ async function resolveAirportBundle(
 }
 
 export const useAtcStore = create<AtcStore>((set, get) => ({
-  appMode: initialSavedAirport ? "SIMULATION" : "GLOBAL_MAP",
+  appMode: "LANDING",
   setAppMode: (mode) => {
     radioAudio.stopAllSpeech();
     speechPtt.cancel();

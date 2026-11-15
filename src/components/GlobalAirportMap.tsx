@@ -12,6 +12,7 @@ import {
   Edit3,
   Filter,
   Globe2,
+  Home,
   Loader2,
   MapPin,
   Moon,
@@ -652,6 +653,14 @@ export const GlobalAirportMap: React.FC = () => {
       {/* Top Global Command Header */}
       <header className="h-14 shrink-0 border-b border-[var(--atc-border)] bg-[var(--atc-panel)] px-4 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
+          <button
+            onClick={() => setAppMode("LANDING")}
+            title="Return to Landing Page"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface)] hover:bg-[var(--atc-surface-alt)] hover:border-[var(--atc-accent-border)] text-xs font-mono font-bold text-[var(--atc-text)] transition-colors cursor-pointer shrink-0"
+          >
+            <Home className="w-3.5 h-3.5 text-[var(--atc-accent)]" />
+            <span>HOME</span>
+          </button>
           <div className="w-9 h-9 rounded-lg bg-[var(--atc-accent-bg)] border border-[var(--atc-accent-border)] flex items-center justify-center shrink-0">
             <Globe2 className="w-5 h-5 text-[var(--atc-accent)]" />
           </div>
