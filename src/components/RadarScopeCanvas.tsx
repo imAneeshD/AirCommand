@@ -2579,6 +2579,37 @@ function drawScope(
       ctx.restore();
     }
 
+    // Crashed Aircraft Debris & Fire Pulse Indicator
+    if (ac.state === "CRASHED") {
+      const pulsePhase = (nowMs % 1400) / 1400;
+      const pulseR = 10 + pulsePhase * 16;
+      const pulseAlpha = (1 - pulsePhase) * 0.8;
+      ctx.save();
+      // Outer shockwave pulse
+      ctx.strokeStyle = `rgba(239, 68, 68, ${pulseAlpha})`;
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      ctx.arc(ax, ay, pulseR, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Inner fire glow
+      ctx.fillStyle = `rgba(249, 115, 22, ${0.45 * (1 - pulsePhase)})`;
+      ctx.beginPath();
+      ctx.arc(ax, ay, 6 + pulsePhase * 5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Red wreckage X marker
+      ctx.strokeStyle = "#ef4444";
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(ax - 6, ay - 6);
+      ctx.lineTo(ax + 6, ay + 6);
+      ctx.moveTo(ax + 6, ay - 6);
+      ctx.lineTo(ax - 6, ay + 6);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     // Aircraft Symbol (rotated by world heading + chart rotation)
     ctx.save();
     ctx.translate(ax, ay);

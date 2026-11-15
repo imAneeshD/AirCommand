@@ -88,7 +88,7 @@ export function updateAircraftMovement(
 
   for (const id of state.aircraftOrder) {
     const ac = state.aircraft[id];
-    if (!ac) continue;
+    if (!ac || ac.state === "CRASHED") continue;
 
     // Auto-resume traffic yield once the yielded aircraft has passed clear
     if (ac.state === "HOLD_POSITION" && ac.yieldToAircraftId && ac.altitude <= elev + 50) {

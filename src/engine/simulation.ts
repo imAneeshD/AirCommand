@@ -8,6 +8,7 @@ import {
 import type {
   Aircraft,
   AircraftPhaseLabel,
+  AircraftState,
   AirportId,
   AirportLayout,
   ControllerRole,
@@ -18,7 +19,7 @@ import type {
   SimulationConfig,
   SimulationState,
 } from "../types/atc.ts";
-import { updateAircraftStates } from "./aircraftEngine.ts";
+import { declareAircraftCollision, declareAircraftCrash, updateAircraftStates } from "./aircraftEngine.ts";
 import { runAutonomousControllers } from "./autonomousControllers.ts";
 import { nextId } from "./clearanceEngine.ts";
 import { addRadioMessage, controllerCallsign, processPilotReadbacks } from "./decisionEngine.ts";
@@ -538,7 +539,7 @@ export function createDepartureAircraft(
     altitude: state.airport.elevationFt,
     speed: 0,
     verticalSpeed: 0,
-    gateId: opts.gateId,
+    gateId: opts.gateId ?? Object.values(state.airport.nodes).find((n) => n.kind === "GATE")?.gateId ?? "GATE_1",
     pushbackSpotId: `PB_${opts.gateId}`,
     targetRunway: opts.targetRunway,
     assignedDepartureFix:
@@ -588,8 +589,8 @@ export function createArrivalAircraft(
     altitude?: number;
     speed?: number;
     targetRunway: RunwayId;
-    gateId: string;
-    state?: "APPROACH" | "FINAL";
+    gateId?: string;
+    state?: AircraftState;
     controller?: ControllerRole;
     assignedApproach?: RunwayId | null;
     originIcao?: string;
@@ -630,7 +631,7 @@ export function createArrivalAircraft(
     altitude: opts.altitude ?? 3500,
     speed: opts.speed ?? 180,
     verticalSpeed: 0,
-    gateId: opts.gateId,
+    gateId: opts.gateId ?? Object.values(state.airport.nodes).find((n) => n.kind === "GATE")?.gateId ?? "GATE_1",
     targetRunway: opts.targetRunway,
     assignedRouteNodeIds: [],
     assignedRouteTaxiways: [],
@@ -1831,6 +1832,114 @@ function checkSeparationAndConflicts(state: SimulationState): void {
       const b = active[j];
       const dist = Math.hypot(a.x - b.x, a.y - b.y);
       const altDiff = Math.abs(a.altitude - b.altitude);
+
+      // =========================================================================
+      // 1. PHYSICAL COLLISION & CRASH DETECTION (Airborne, Runway, or Ground)
+      // =========================================================================
+      if (a.state === "CRASHED" && b.state === "CRASHED") {
+        continue;
+      }
+
+      // Existing crash site wreckage impact check
+      if (a.state === "CRASHED" && b.state !== "CRASHED") {
+        if (dist <= 0.035 && altDiff <= 45) {
+          declareAircraftCrash(
+            state,
+            b,
+            undefined,
+            `Impacted wreckage debris of ${a.callsign}`
+          );
+          continue;
+        }
+      } else if (b.state === "CRASHED" && a.state !== "CRASHED") {
+        if (dist <= 0.035 && altDiff <= 45) {
+          declareAircraftCrash(
+            state,
+            a,
+            undefined,
+            `Impacted wreckage debris of ${b.callsign}`
+          );
+          continue;
+        }
+      }
+
+      // Case A: Mid-Air Collision
+      // Both airborne (above elev + 75 ft), same altitude (altDiff <= 120 ft), and same location (dist <= 0.045 NM ~83m)
+      const isAirborneA = a.altitude > elev + 75;
+      const isAirborneB = b.altitude > elev + 75;
+      if (isAirborneA && isAirborneB && altDiff <= 120 && dist <= 0.045) {
+        declareAircraftCollision(
+          state,
+          a,
+          b,
+          "MID_AIR",
+          `Mid-air collision at ${Math.round((a.altitude + b.altitude) / 2)} ft`
+        );
+        continue;
+      }
+
+      // Case B: Runway Collision
+      // At least one aircraft on/over active runway surface, both at low altitude, dist <= 0.035 NM (~65m), altDiff <= 45 ft
+      const isRunwayA =
+        a.state === "TAKEOFF_ROLL" ||
+        a.state === "LINE_UP_WAIT" ||
+        a.state === "LANDING" ||
+        a.state === "TOUCHDOWN" ||
+        a.state === "ROLLOUT" ||
+        a.state === "STOPPED_ON_RUNWAY";
+      const isRunwayB =
+        b.state === "TAKEOFF_ROLL" ||
+        b.state === "LINE_UP_WAIT" ||
+        b.state === "LANDING" ||
+        b.state === "TOUCHDOWN" ||
+        b.state === "ROLLOUT" ||
+        b.state === "STOPPED_ON_RUNWAY";
+      const isLowA = a.altitude <= elev + 45;
+      const isLowB = b.altitude <= elev + 45;
+
+      if ((isRunwayA || isRunwayB) && isLowA && isLowB && altDiff <= 45 && dist <= 0.035) {
+        const rwy =
+          (a.targetRunway && state.airport.runways[a.targetRunway]) ||
+          (b.targetRunway && state.airport.runways[b.targetRunway]) ||
+          Object.values(state.airport.runways)[0];
+        declareAircraftCollision(
+          state,
+          a,
+          b,
+          "RUNWAY",
+          `Runway collision on ${rwy?.id ?? "runway"}`,
+          rwy
+        );
+        continue;
+      }
+
+      // Case C: Ground / Taxiway / Apron Collision
+      // Both aircraft on surface (<= elev + 25 ft), dist <= 0.024 NM (~44m), and not both peacefully parked at gate
+      const isSurfaceA = a.altitude <= elev + 25;
+      const isSurfaceB = b.altitude <= elev + 25;
+      const bothParkedAtGate =
+        a.state === "AT_GATE" &&
+        b.state === "AT_GATE" &&
+        a.speed === 0 &&
+        b.speed === 0 &&
+        a.gateId !== b.gateId;
+
+      if (isSurfaceA && isSurfaceB && !bothParkedAtGate && altDiff <= 25 && dist <= 0.024) {
+        if (a.speed > 0 || b.speed > 0 || a.state !== "AT_GATE" || b.state !== "AT_GATE") {
+          declareAircraftCollision(
+            state,
+            a,
+            b,
+            "GROUND",
+            `Ground taxiway impact between ${a.callsign} and ${b.callsign}`
+          );
+          continue;
+        }
+      }
+
+      // =========================================================================
+      // 2. WARNINGS & PROXIMITY CONFLICT VIOLATIONS (Pre-crash near-miss zones)
+      // =========================================================================
 
       // Airborne separation (< 1.5 NM lateral AND < 800 ft vertical above 400 ft AGL)
       if (a.altitude > elev + 400 && b.altitude > elev + 400) {

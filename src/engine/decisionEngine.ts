@@ -1795,7 +1795,7 @@ export function dispatchCrashRescue(
   } else {
     ac.crashDetails.arffDispatched = true;
   }
-  const rwyId = ac.crashDetails.runwayId;
+  const rwyId = ac.crashDetails.runwayId ?? ac.targetRunway ?? "09R";
   addRadioMessage(state, {
     sender: "TOWER",
     recipient: "ARFF_DISPATCH",

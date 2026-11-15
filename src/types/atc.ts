@@ -213,7 +213,7 @@ export interface Aircraft {
   emergencyType: EmergencyType;
   crashDetails?: {
     time: number;
-    runwayId: RunwayId;
+    runwayId?: RunwayId;
     reason: string;
     arffDispatched: boolean;
     runwayHalted: boolean;
