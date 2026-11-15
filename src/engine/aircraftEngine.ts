@@ -55,6 +55,77 @@ export function declareAircraftCrash(
   });
 }
 
+export function declareAircraftCollision(
+  state: SimulationState,
+  a: Aircraft,
+  b: Aircraft,
+  collisionType: "MID_AIR" | "RUNWAY" | "GROUND",
+  reason: string,
+  rwy?: RunwaySpec
+): void {
+  const elev = state.airport.elevationFt;
+  const collisionAlt = Math.max(elev, Math.round((a.altitude + b.altitude) / 2));
+  const rwyId = rwy?.id ?? a.targetRunway ?? b.targetRunway ?? "09R";
+
+  // Position wreckage at collision midpoint
+  const midX = (a.x + b.x) / 2;
+  const midY = (a.y + b.y) / 2;
+
+  for (const ac of [a, b]) {
+    ac.state = "CRASHED";
+    ac.speed = 0;
+    ac.verticalSpeed = 0;
+    ac.x = midX;
+    ac.y = midY;
+    ac.altitude = elev;
+    ac.operationMode = "EMERGENCY_OPERATION";
+    ac.emergencyType = "CRASH";
+    ac.squawk = "7700";
+    ac.crashDetails = {
+      time: state.time,
+      runwayId: collisionType === "RUNWAY" ? rwyId : undefined,
+      reason: `${collisionType === "MID_AIR" ? "Mid-air collision" : collisionType === "RUNWAY" ? "Runway collision" : "Ground collision"} between ${a.callsign} and ${b.callsign}`,
+      arffDispatched: false,
+      runwayHalted: collisionType === "RUNWAY",
+      medicalRequested: false,
+    };
+  }
+
+  state.metrics.safetyScore = Math.max(0, state.metrics.safetyScore - 50);
+
+  const incidentCode =
+    collisionType === "MID_AIR"
+      ? "CRASH_MID_AIR_COLLISION"
+      : collisionType === "RUNWAY"
+      ? "CRASH_RUNWAY_COLLISION"
+      : "CRASH_GROUND_COLLISION";
+
+  state.incidents.push({
+    id: nextId(state, "inc"),
+    timestamp: state.time,
+    severity: "CRITICAL",
+    code: incidentCode,
+    message: `COLLISION DISASTER (${collisionType}): ${a.callsign} and ${b.callsign} collided! (${reason})`,
+    aircraftIds: [a.id, b.id],
+  });
+
+  const broadcastMsg =
+    collisionType === "MID_AIR"
+      ? `MAYDAY MAYDAY MAYDAY! Mid-air collision between ${a.callsign} and ${b.callsign} at ${collisionAlt} ft! Both aircraft down, search and rescue activated!`
+      : collisionType === "RUNWAY"
+      ? `CRASH ALARM! High-speed collision on runway ${runwaySpokenName(rwyId)} between ${a.callsign} and ${b.callsign}! Runway closed, crash fire rescue responding!`
+      : `GROUND EMERGENCY! Collision on taxiway between ${a.callsign} and ${b.callsign}! Operations halted, fire & rescue responding!`;
+
+  addRadioMessage(state, {
+    sender: "TOWER",
+    recipient: "ALL_STATIONS",
+    controller: "TOWER",
+    aircraftId: a.id,
+    category: "EMERGENCY",
+    text: broadcastMsg,
+  });
+}
+
 function issuePilotRequestIfNeeded(
   state: SimulationState,
   ac: Aircraft,
