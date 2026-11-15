@@ -341,6 +341,25 @@ export const RadarScopeCanvas: React.FC = () => {
     moved: boolean;
   }>({ active: false, startX: 0, startY: 0, origCenterX: 0, origCenterY: 0, moved: false });
 
+  const touchRef = useRef<{
+    startX: number;
+    startY: number;
+    origCenterX: number;
+    origCenterY: number;
+    moved: boolean;
+    isPinch: boolean;
+    pinchDist: number;
+    pinchMidWorld?: { x: number; y: number };
+  }>({
+    startX: 0,
+    startY: 0,
+    origCenterX: 0,
+    origCenterY: 0,
+    moved: false,
+    isPinch: false,
+    pinchDist: 0,
+  });
+
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [scopeLayer, setScopeLayer] = useState<ScopeBasemapLayer>("hybrid");
   const [runwayLightsMode, setRunwayLightsMode] = useState<RunwayLightsMode>(() => {
@@ -647,6 +666,113 @@ export const RadarScopeCanvas: React.FC = () => {
     zoomAtPoint(factor, world.x, world.y);
   };
 
+  const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (e.touches.length === 1) {
+      const t = e.touches[0];
+      const sx = t.clientX - rect.left;
+      const sy = t.clientY - rect.top;
+      touchRef.current = {
+        startX: sx,
+        startY: sy,
+        origCenterX: camera.centerX,
+        origCenterY: camera.centerY,
+        moved: false,
+        isPinch: false,
+        pinchDist: 0,
+      };
+    } else if (e.touches.length >= 2) {
+      const t0 = e.touches[0];
+      const t1 = e.touches[1];
+      const sx0 = t0.clientX - rect.left;
+      const sy0 = t0.clientY - rect.top;
+      const sx1 = t1.clientX - rect.left;
+      const sy1 = t1.clientY - rect.top;
+      const dist = Math.hypot(sx1 - sx0, sy1 - sy0);
+      const midSx = (sx0 + sx1) / 2;
+      const midSy = (sy0 + sy1) / 2;
+      touchRef.current = {
+        startX: midSx,
+        startY: midSy,
+        origCenterX: camera.centerX,
+        origCenterY: camera.centerY,
+        moved: true,
+        isPinch: true,
+        pinchDist: dist,
+        pinchMidWorld: screenToWorld(midSx, midSy),
+      };
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (e.touches.length === 1 && !touchRef.current.isPinch) {
+      const t = e.touches[0];
+      const sx = t.clientX - rect.left;
+      const sy = t.clientY - rect.top;
+      const dxScreen = sx - touchRef.current.startX;
+      const dyScreen = sy - touchRef.current.startY;
+      if (Math.hypot(dxScreen, dyScreen) > 6) {
+        touchRef.current.moved = true;
+      }
+      if (touchRef.current.moved) {
+        const ux = -dxScreen / camera.pixelsPerNm;
+        const uy = -dyScreen / camera.pixelsPerNm;
+        const cos = Math.cos(rotRad);
+        const sin = Math.sin(rotRad);
+        setCamera({
+          centerX: touchRef.current.origCenterX + (ux * cos + uy * sin),
+          centerY: touchRef.current.origCenterY - (-ux * sin + uy * cos),
+        });
+      }
+    } else if (e.touches.length >= 2) {
+      const t0 = e.touches[0];
+      const t1 = e.touches[1];
+      const sx0 = t0.clientX - rect.left;
+      const sy0 = t0.clientY - rect.top;
+      const sx1 = t1.clientX - rect.left;
+      const sy1 = t1.clientY - rect.top;
+      const dist = Math.hypot(sx1 - sx0, sy1 - sy0);
+      if (touchRef.current.pinchDist > 10 && dist > 10) {
+        const factor = dist / touchRef.current.pinchDist;
+        if (Math.abs(factor - 1) > 0.015) {
+          const midWorld = touchRef.current.pinchMidWorld;
+          zoomAtPoint(factor, midWorld?.x, midWorld?.y);
+          touchRef.current.pinchDist = dist;
+        }
+      }
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (!touchRef.current.isPinch && !touchRef.current.moved) {
+      const sx = touchRef.current.startX;
+      const sy = touchRef.current.startY;
+      const hitId = findAircraftAtScreen(sx, sy);
+      if (hitId) {
+        selectAircraft(hitId);
+        setSelectedLiveIcao24(null);
+      } else if (showLiveAdsbOverlay && liveTrackHitsRef.current.length > 0) {
+        let bestHex: string | null = null;
+        let bestDist = 24;
+        for (const h of liveTrackHitsRef.current) {
+          const d = Math.hypot(h.x - sx, h.y - sy);
+          if (d < bestDist) {
+            bestDist = d;
+            bestHex = h.icao24;
+          }
+        }
+        setSelectedLiveIcao24(bestHex);
+      } else {
+        selectAircraft(null);
+      }
+    }
+    if (e.touches.length === 0) {
+      touchRef.current.isPinch = false;
+      touchRef.current.moved = false;
+    }
+  };
+
   return (
     <div ref={containerRef} className="relative flex-1 bg-[var(--atc-bg)] overflow-hidden min-w-0 min-h-0 transition-colors">
       <canvas
@@ -658,9 +784,16 @@ export const RadarScopeCanvas: React.FC = () => {
           dragRef.current.active = false;
           setHoveredId(null);
         }}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={() => {
+          touchRef.current.isPinch = false;
+          touchRef.current.moved = false;
+        }}
         onContextMenu={(e) => e.preventDefault()}
         onWheel={handleWheel}
-        className={`w-full h-full block ${hoveredId ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"}`}
+        className={`w-full h-full block touch-none ${hoveredId ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"}`}
       />
 
       {/* Top-Left Scope Mode Watermark + Live Radio Caller Voice Line */}
@@ -680,7 +813,7 @@ export const RadarScopeCanvas: React.FC = () => {
       </div>
 
       {/* Bottom-Left Scope Controls */}
-      <div className="absolute bottom-3 left-3 flex flex-wrap items-center gap-1.5">
+      <div className="absolute bottom-16 lg:bottom-3 left-2 lg:left-3 flex flex-wrap items-center gap-1.5 z-10 pointer-events-auto max-w-[calc(100%-1rem)]">
         <div className="flex items-center bg-[var(--atc-surface)]/95 border border-[var(--atc-border)] shadow-[var(--atc-shadow)] rounded-md p-0.5 backdrop-blur-sm">
           {(["GROUND", "TOWER", "DEPARTURE"] as const).map((role) => (
             <button

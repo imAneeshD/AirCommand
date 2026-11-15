@@ -73,6 +73,8 @@ export type AppMode =
   | "AIRPORT_EDITOR"
   | "MULTIPLAYER_LOBBY";
 
+export type MobileViewTab = "RADAR" | "STRIPS" | "CLEARANCE" | "COMMS";
+
 export interface CameraState {
   centerX: number;
   centerY: number;
@@ -155,6 +157,8 @@ interface AtcStore {
   theme: ThemeMode;
   setTheme: (theme: ThemeMode) => void;
   toggleTheme: () => void;
+  mobileTab: MobileViewTab;
+  setMobileTab: (tab: MobileViewTab) => void;
   minimizedPanels: MinimizedPanelsState;
   togglePanelMinimized: (panel: WorkbenchPanelKey) => void;
   setPanelMinimized: (panel: WorkbenchPanelKey, minimized: boolean) => void;
@@ -668,6 +672,8 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
   sfxEnabled: initialSavedSfx,
   voiceEnabled: initialSavedVoice,
   theme: initialSavedTheme,
+  mobileTab: "RADAR",
+  setMobileTab: (tab) => set({ mobileTab: tab }),
   minimizedPanels: initialMinimizedPanels,
 
   selectedAirportRecord: null,

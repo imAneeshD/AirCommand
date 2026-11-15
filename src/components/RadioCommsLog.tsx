@@ -29,7 +29,9 @@ function formatElapsedSimTime(sec: number): string {
   return `T+${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-export const RadioCommsLog: React.FC = () => {
+export const RadioCommsLog: React.FC<{ mobileMode?: boolean }> = ({
+  mobileMode = false,
+}) => {
   const sim = useAtcStore((s) => s.sim);
   useAtcStore((s) => s.tickVersion);
   const theme = useAtcStore((s) => s.theme);
@@ -55,7 +57,8 @@ export const RadioCommsLog: React.FC = () => {
   }
 
   const [activeTab, setActiveTab] = useState<BottomTab>("LOGS");
-  const collapsed = useAtcStore((s) => s.minimizedPanels.bottom);
+  const rawCollapsed = useAtcStore((s) => s.minimizedPanels.bottom);
+  const collapsed = mobileMode ? false : rawCollapsed;
   const togglePanelMinimized = useAtcStore((s) => s.togglePanelMinimized);
   const setPanelMinimized = useAtcStore((s) => s.setPanelMinimized);
   const [chatText, setChatText] = useState("");
@@ -99,9 +102,13 @@ export const RadioCommsLog: React.FC = () => {
 
   return (
     <section
-      className={`bg-[var(--atc-panel)] border-t border-[var(--atc-border)] flex flex-col shrink-0 transition-all duration-150 ${
-        collapsed ? "h-9" : activeTab === "AIRCRAFT" ? "h-[228px]" : "h-36"
-      }`}
+      className={
+        mobileMode
+          ? "w-full flex-1 flex flex-col bg-[var(--atc-panel)] min-h-0 overflow-hidden"
+          : `bg-[var(--atc-panel)] border-t border-[var(--atc-border)] flex flex-col shrink-0 transition-all duration-150 ${
+              collapsed ? "h-9" : activeTab === "AIRCRAFT" ? "h-[228px]" : "h-36"
+            }`
+      }
     >
       {/* Header / Tab Bar */}
       <div className="px-3 h-9 border-b border-[var(--atc-border)] bg-[var(--atc-surface)]/85 flex items-center justify-between gap-3 shrink-0">

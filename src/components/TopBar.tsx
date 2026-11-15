@@ -92,6 +92,8 @@ export const TopBar: React.FC = () => {
 
   const isMpActive = Boolean(roomState && roomState.status === "ACTIVE");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [mobileStationOpen, setMobileStationOpen] = useState(false);
+  const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement | null>(null);
 
   // Close tools popover when clicking outside
@@ -123,8 +125,17 @@ export const TopBar: React.FC = () => {
     }
   }
 
+  const currentStation =
+    STATIONS.find((s) => s.role === sim.config.activePlayerStation) ?? STATIONS[5];
+  const currentStationPending =
+    sim.config.activePlayerStation === "ALL"
+      ? Object.values(pendingCounts).reduce((a, b) => a + b, 0)
+      : pendingCounts[sim.config.activePlayerStation as ControllerRole] ?? 0;
+
   return (
-    <header className="min-h-[50px] bg-[var(--atc-panel)] border-b border-[var(--atc-border)] px-3 py-1.5 flex items-center justify-between gap-3 shrink-0 select-none transition-colors">
+    <>
+      {/* DESKTOP HEADER (hidden on mobile, lg:flex) */}
+      <header className="hidden lg:flex min-h-[50px] bg-[var(--atc-panel)] border-b border-[var(--atc-border)] px-3 py-1.5 items-center justify-between gap-3 shrink-0 select-none transition-colors">
       {/* LEFT SECTION: Operational Identity & Station Switcher */}
       <div className="flex items-center gap-2 shrink-0">
         {/* Return to Landing Page */}
@@ -647,5 +658,257 @@ export const TopBar: React.FC = () => {
         </div>
       </div>
     </header>
+
+      {/* MOBILE PHONE HEADER (flex on mobile, lg:hidden) */}
+      <header className="flex lg:hidden min-h-[46px] bg-[var(--atc-panel)] border-b border-[var(--atc-border)] px-2 py-1 items-center justify-between gap-1.5 shrink-0 select-none transition-colors">
+        {/* Left: Home + Airport Picker */}
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            onClick={() => setAppMode("LANDING")}
+            title="Return to Landing Page"
+            className="p-1.5 rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface)] text-[var(--atc-text)] cursor-pointer"
+          >
+            <Home className="w-3.5 h-3.5 text-[var(--atc-accent)]" />
+          </button>
+
+          <button
+            onClick={openAirportSelector}
+            title="Switch Airport"
+            className="flex items-center gap-1 px-2 py-1 rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface)] text-xs font-mono font-bold text-[var(--atc-text)] cursor-pointer"
+          >
+            <Radio className="w-3 h-3 text-[var(--atc-cyan)]" />
+            <span>{sim.airport.icao}</span>
+            {isLiveActive && (
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            )}
+            <ChevronDown className="w-3 h-3 text-[var(--atc-muted)]" />
+          </button>
+        </div>
+
+        {/* Center: Station Switcher + Play/Pause */}
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            onClick={() => setMobileStationOpen((v) => !v)}
+            title="Switch Active Controller Station"
+            className="flex items-center gap-1 px-2 py-1 rounded-md border border-[var(--atc-accent-border)] bg-[var(--atc-surface)] text-[11px] font-mono font-extrabold text-[var(--atc-text)] shadow-xs cursor-pointer"
+          >
+            <span>{currentStation.label}</span>
+            {currentStationPending > 0 && (
+              <span className="px-1 rounded-full bg-amber-500 text-slate-950 text-[9px] font-bold">
+                {currentStationPending}
+              </span>
+            )}
+            <ChevronDown className="w-3 h-3 text-[var(--atc-muted)]" />
+          </button>
+
+          <button
+            disabled={isMpActive}
+            onClick={togglePause}
+            className={`px-2 py-1 rounded-md border text-[11px] font-mono font-bold flex items-center gap-1 cursor-pointer ${
+              sim.paused
+                ? "bg-[var(--atc-surface-alt)] border-[var(--atc-border-strong)] text-[var(--atc-text)]"
+                : "bg-[var(--atc-accent)] border-[var(--atc-accent-border)] text-slate-950"
+            }`}
+          >
+            {sim.paused ? <Play className="w-3 h-3" /> : <Pause className="w-3 h-3" />}
+            <span>{sim.paused ? "PAUSE" : "RUN"}</span>
+          </button>
+        </div>
+
+        {/* Right: Voice PTT + Settings Menu */}
+        <div className="flex items-center gap-1 shrink-0">
+          <VoicePttButton />
+
+          <button
+            onClick={() => setMobileToolsOpen(true)}
+            title="Open Simulation Settings & Tools"
+            className="p-1.5 rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface)] text-[var(--atc-text)] cursor-pointer"
+          >
+            <Settings2 className="w-4 h-4" />
+          </button>
+        </div>
+      </header>
+
+      {/* Mobile Station Picker Modal */}
+      {mobileStationOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-2 animate-in fade-in duration-150">
+          <div className="w-full max-w-sm rounded-2xl bg-[var(--atc-surface)] border border-[var(--atc-border)] shadow-2xl p-4 space-y-3 font-mono">
+            <div className="flex items-center justify-between pb-2 border-b border-[var(--atc-border)]">
+              <span className="font-extrabold text-xs text-[var(--atc-text)] uppercase tracking-wider">
+                Select Controller Station
+              </span>
+              <button
+                onClick={() => setMobileStationOpen(false)}
+                className="p-1 rounded-md text-[var(--atc-muted)] hover:text-[var(--atc-text)] cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {STATIONS.map((st) => {
+                const active = sim.config.activePlayerStation === st.role;
+                const isAll = st.role === "ALL";
+                const count = isAll
+                  ? Object.values(pendingCounts).reduce((a, b) => a + b, 0)
+                  : pendingCounts[st.role as ControllerRole];
+                return (
+                  <button
+                    key={st.role}
+                    onClick={() => {
+                      switchStation(st.role);
+                      setMobileStationOpen(false);
+                    }}
+                    className={`p-2.5 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                      active
+                        ? "bg-[var(--atc-accent-bg)] border-[var(--atc-accent-border)] text-[var(--atc-accent-text)] ring-1 ring-[var(--atc-accent)]"
+                        : "bg-[var(--atc-surface-alt)] border-[var(--atc-border)] text-[var(--atc-text)] hover:bg-[var(--atc-surface)]"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-extrabold text-xs">{st.label}</span>
+                      {count > 0 && (
+                        <span className="px-1.5 py-0.2 rounded-full bg-amber-500 text-slate-950 text-[9px] font-bold">
+                          {count}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-[var(--atc-muted)] mt-1">
+                      {st.freq === "ALL" ? "All Frequencies" : `${st.freq} MHz`}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Tools & Settings Drawer Modal */}
+      {mobileToolsOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-2 animate-in fade-in duration-150">
+          <div className="w-full max-w-sm rounded-2xl bg-[var(--atc-surface)] border border-[var(--atc-border)] shadow-2xl p-4 space-y-3 font-mono text-xs max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-2 border-b border-[var(--atc-border)]">
+              <div>
+                <div className="font-extrabold text-sm text-[var(--atc-text)]">SIMULATION TOOLS</div>
+                <div className="text-[10px] text-[var(--atc-muted)]">Workstation Controls & Setup</div>
+              </div>
+              <button
+                onClick={() => setMobileToolsOpen(false)}
+                className="p-1 rounded-md text-[var(--atc-muted)] hover:text-[var(--atc-text)] text-sm font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Sim Speed */}
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-[var(--atc-text-secondary)] uppercase">
+                Simulation Speed
+              </label>
+              <div className="grid grid-cols-3 gap-1 bg-[var(--atc-surface-alt)] p-1 rounded-lg border border-[var(--atc-border)]">
+                {([1, 2, 4] as const).map((spd) => (
+                  <button
+                    key={spd}
+                    onClick={() => setTimeScale(spd)}
+                    className={`py-1.5 text-center rounded font-bold transition-all cursor-pointer ${
+                      sim.timeScale === spd
+                        ? "bg-[var(--atc-accent)] text-slate-950 shadow-sm"
+                        : "text-[var(--atc-muted)] hover:text-[var(--atc-text)]"
+                    }`}
+                  >
+                    {spd}x
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Live Traffic */}
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-[var(--atc-text-secondary)] uppercase">
+                Real-World Traffic
+              </label>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => void toggleLiveTraffic()}
+                  disabled={liveTrafficLoading}
+                  className={`flex-1 py-2 px-3 rounded-lg border font-bold flex items-center justify-between cursor-pointer ${
+                    isLiveActive
+                      ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-400"
+                      : "bg-[var(--atc-surface-alt)] border-[var(--atc-border)] text-[var(--atc-muted)]"
+                  }`}
+                >
+                  <span>{isLiveActive ? `LIVE TRAFFIC (${liveAircraftCount})` : "LIVE TRAFFIC: OFF"}</span>
+                  <span className={`w-2 h-2 rounded-full ${isLiveActive ? "bg-emerald-400 animate-pulse" : "bg-slate-500"}`} />
+                </button>
+                <button
+                  onClick={() => void toggleLiveTraffic(true)}
+                  disabled={liveTrafficLoading}
+                  className="p-2 rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] text-[var(--atc-muted)] cursor-pointer"
+                  title="Resync live traffic"
+                >
+                  <RefreshCw className={`w-4 h-4 ${liveTrafficLoading ? "animate-spin text-amber-400" : ""}`} />
+                </button>
+              </div>
+            </div>
+
+            {/* Traffic Scenario Picker */}
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-[var(--atc-text-secondary)] uppercase">
+                Traffic Scenario
+              </label>
+              <select
+                value={sim.scenarioId}
+                onChange={(e) => {
+                  loadScenario(e.target.value as ScenarioId);
+                  setMobileToolsOpen(false);
+                }}
+                className="w-full bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] rounded-lg px-2.5 py-2 text-xs font-mono font-semibold text-[var(--atc-text)] focus:border-[var(--atc-accent-border)]"
+              >
+                {SCENARIOS.map((sc) => (
+                  <option key={sc.id} value={sc.id}>
+                    {sc.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Theme & Audio Toggles */}
+            <div className="grid grid-cols-2 gap-1.5 pt-1">
+              <button
+                onClick={toggleTheme}
+                className="py-2 px-2.5 rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] text-[var(--atc-text)] flex items-center justify-center gap-1.5 font-bold cursor-pointer"
+              >
+                {theme === "dark" ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-indigo-600" />}
+                <span>{theme === "dark" ? "LIGHT" : "DARK"}</span>
+              </button>
+
+              <button
+                onClick={toggleVoice}
+                className={`py-2 px-2.5 rounded-lg border font-bold flex items-center justify-center gap-1.5 cursor-pointer ${
+                  voiceEnabled
+                    ? "border-[var(--atc-border)] bg-[var(--atc-surface-alt)] text-[var(--atc-text)]"
+                    : "border-red-500/50 bg-red-500/20 text-red-400"
+                }`}
+              >
+                {voiceEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+                <span>{voiceEnabled ? "VOICE ON" : "MUTED"}</span>
+              </button>
+            </div>
+
+            {/* Verification Modal Link */}
+            <button
+              onClick={() => {
+                setMobileToolsOpen(false);
+                setShowVerificationModal(true);
+              }}
+              className="w-full py-2 px-3 rounded-lg border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] font-bold flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <ShieldCheck className="w-4 h-4" />
+              <span>Mandatory Rule Verifier</span>
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   );
 };
