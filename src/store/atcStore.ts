@@ -874,6 +874,7 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
   pollLiveTraffic: async () => {
     const { sim, selectedAirportRecord, isOnline, roomState, appMode } = get();
     if (!isOnline || appMode !== "SIMULATION" || (roomState && roomState.status === "ACTIVE")) return;
+    if (!sim.liveSnapshotMeta?.liveSyncEnabled) return;
     const targetRecord = selectedAirportRecord || offlineDb.getBundledFallbackAirport(sim.airport.icao);
     if (!targetRecord || !targetRecord.lat || !targetRecord.lon) return;
 
