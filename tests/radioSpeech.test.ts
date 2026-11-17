@@ -83,6 +83,20 @@ test("formatAtcSpeech and ICAO helpers handle callsigns, taxiways, runways, gate
     formatAtcSpeech("Cleared ILS RWY 09R, squawk 7600, Taxiway K, Gate Z9."),
     "Cleared I L S runway zero niner right, squawk seven six zero zero, Taxiway Kilo, Gate Zulu niner."
   );
+
+  // Handoff request voice formatting: authentic ATC intercom coordination without arrows or parentheses
+  const handoffSpeech = formatAtcSpeech("[HANDOFF REQUEST] UAE101 (Bengaluru Ground → Bengaluru Tower). Awaiting your acceptance.");
+  assert.ok(!handoffSpeech.includes("arrow"), "Must never speak 'arrow' or 'pointing'");
+  assert.ok(!handoffSpeech.includes("parenthesis"), "Must never speak 'parenthesis'");
+  assert.ok(!handoffSpeech.includes("→"), "Must not contain raw arrow symbols");
+  assert.equal(
+    handoffSpeech,
+    "Bengaluru Tower, Bengaluru Ground, Handoff request, Emirates one zero one."
+  );
+
+  const transferSpeech = formatAtcSpeech("Frequency transfer for UAE101 from Ground -> Tower.");
+  assert.ok(!transferSpeech.includes("arrow"));
+  assert.ok(transferSpeech.includes("from Ground to Tower."));
 });
 
 test("scoreSpeechVoice prioritizes neural/cloud English voices above legacy local SAPI voices", () => {

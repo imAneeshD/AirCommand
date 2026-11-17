@@ -180,14 +180,14 @@ export function computeDepAppGuidance(
     needsPatternTurn,
     recoveryPreviewPoints: previewPts,
     headline: isGoAround
-      ? `GO-AROUND RETURN → RWY ${rwyId}`
+      ? `GO-AROUND RETURN TO RWY ${rwyId}`
       : needsPatternTurn
-      ? `RE-SEQUENCE PATTERN → RWY ${rwyId}`
-      : `SUGGESTED APPROACH SETUP → RWY ${rwyId}`,
+      ? `RE-SEQUENCE PATTERN TO RWY ${rwyId}`
+      : `SUGGESTED APPROACH SETUP FOR RWY ${rwyId}`,
     stepSummary: needsPatternTurn
-      ? `Vector HDG ${hdgText}°${turnWord} · ALT ${patternAlt.toLocaleString()} ft · SPD ${recSpeed} kt → ${
-          iafId ? `Direct ${iafId} → ` : ""
+      ? `Vector HDG ${hdgText}°${turnWord} · ALT ${patternAlt.toLocaleString()} ft · SPD ${recSpeed} kt to ${
+          iafId ? `Direct ${iafId} to ` : ""
         }ILS RWY ${rwyId}`
-      : `${iafId ? `Direct ${iafId} (HDG ${hdgText}°) · ` : ""}ALT ${patternAlt.toLocaleString()} ft · SPD ${recSpeed} kt → ILS RWY ${rwyId}`,
+      : `${iafId ? `Direct ${iafId} (HDG ${hdgText}°) · ` : ""}ALT ${patternAlt.toLocaleString()} ft · SPD ${recSpeed} kt to ILS RWY ${rwyId}`,
   };
 }

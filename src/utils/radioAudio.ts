@@ -30,8 +30,36 @@ function formatAltitudeWord(altStr: string): string {
  * callsigns/headings, and aviation altitude phrasing.
  */
 export function formatAtcSpeech(rawText: string): string {
-  let text = rawText.replace(/\[[^\]]*\]/g, "").trim();
+  let text = rawText.trim();
   if (!text) return "";
+
+  // Convert handoff request notices into authentic ATC intercom coordination speech
+  if (/\[HANDOFF REQUEST\]/i.test(text)) {
+    const match = text.match(/\[HANDOFF REQUEST\]\s*([^:(]+)(?:\s*\(([^)]+)\))?(?::\s*([^.]+))?/i);
+    if (match) {
+      const callsign = (match[1] ?? "").trim();
+      const stations = (match[2] ?? match[3] ?? "").trim();
+      const parts = stations.split(/\s*(?:→|->|\bto\b|requesting transfer to)\s*/i);
+      if (parts.length >= 2) {
+        const fromStn = parts[0].replace(/^(?:Transfer\s+from\s+)/i, "").trim();
+        const toStn = parts[1].replace(/(?:\.\s*Awaiting.*)$/i, "").trim();
+        text = `${toStn}, ${fromStn}: Handoff request, ${callsign}.`;
+      } else {
+        text = `Handoff request, ${callsign}.`;
+      }
+    }
+  }
+
+  // Strip bracketed metadata tags like [READBACK ERROR], [TOWER LIGHT GUN TO UAE101], etc.
+  text = text.replace(/\[[^\]]*\]/g, " ").trim();
+
+  // Strip or translate directional arrows into natural speech ("to") so TTS NEVER pronounces "right pointing arrow"
+  text = text.replace(/\s*(?:[-=]+>|→|⇒|↦)\s*/g, " to ");
+
+  // Strip brackets, parentheses, middle dots, and special punctuation that speech synthesizers read aloud
+  text = text.replace(/[\(\)\[\]\{\}]/g, " ");
+  text = text.replace(/[\u00B7\u2022|~*#_—–]/g, " ");
+  text = text.replace(/\s*:\s*/g, ", ");
 
   // Standard abbreviations
   text = text.replace(/\bRWY\b/gi, "runway");
