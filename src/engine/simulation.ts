@@ -1842,7 +1842,7 @@ function checkSeparationAndConflicts(state: SimulationState): void {
 
       // Existing crash site wreckage impact check
       if (a.state === "CRASHED" && b.state !== "CRASHED") {
-        if (dist <= 0.035 && altDiff <= 45) {
+        if (dist <= 0.05 && altDiff <= 60) {
           declareAircraftCrash(
             state,
             b,
@@ -1852,7 +1852,7 @@ function checkSeparationAndConflicts(state: SimulationState): void {
           continue;
         }
       } else if (b.state === "CRASHED" && a.state !== "CRASHED") {
-        if (dist <= 0.035 && altDiff <= 45) {
+        if (dist <= 0.05 && altDiff <= 60) {
           declareAircraftCrash(
             state,
             a,
@@ -1864,10 +1864,10 @@ function checkSeparationAndConflicts(state: SimulationState): void {
       }
 
       // Case A: Mid-Air Collision
-      // Both airborne (above elev + 75 ft), same altitude (altDiff <= 120 ft), and same location (dist <= 0.045 NM ~83m)
+      // Both airborne (above elev + 75 ft), same altitude (altDiff <= 150 ft), and same location (dist <= 0.08 NM ~148m wingspan envelope)
       const isAirborneA = a.altitude > elev + 75;
       const isAirborneB = b.altitude > elev + 75;
-      if (isAirborneA && isAirborneB && altDiff <= 120 && dist <= 0.045) {
+      if (isAirborneA && isAirborneB && altDiff <= 150 && dist <= 0.08) {
         declareAircraftCollision(
           state,
           a,
@@ -1879,7 +1879,7 @@ function checkSeparationAndConflicts(state: SimulationState): void {
       }
 
       // Case B: Runway Collision
-      // At least one aircraft on/over active runway surface, both at low altitude, dist <= 0.035 NM (~65m), altDiff <= 45 ft
+      // At least one aircraft on/over active runway surface, both at low altitude, dist <= 0.06 NM (~111m), altDiff <= 60 ft
       const isRunwayA =
         a.state === "TAKEOFF_ROLL" ||
         a.state === "LINE_UP_WAIT" ||
@@ -1894,10 +1894,10 @@ function checkSeparationAndConflicts(state: SimulationState): void {
         b.state === "TOUCHDOWN" ||
         b.state === "ROLLOUT" ||
         b.state === "STOPPED_ON_RUNWAY";
-      const isLowA = a.altitude <= elev + 45;
-      const isLowB = b.altitude <= elev + 45;
+      const isLowA = a.altitude <= elev + 60;
+      const isLowB = b.altitude <= elev + 60;
 
-      if ((isRunwayA || isRunwayB) && isLowA && isLowB && altDiff <= 45 && dist <= 0.035) {
+      if ((isRunwayA || isRunwayB) && isLowA && isLowB && altDiff <= 60 && dist <= 0.06) {
         const rwy =
           (a.targetRunway && state.airport.runways[a.targetRunway]) ||
           (b.targetRunway && state.airport.runways[b.targetRunway]) ||
@@ -1914,9 +1914,9 @@ function checkSeparationAndConflicts(state: SimulationState): void {
       }
 
       // Case C: Ground / Taxiway / Apron Collision
-      // Both aircraft on surface (<= elev + 25 ft), dist <= 0.024 NM (~44m), and not both peacefully parked at gate
-      const isSurfaceA = a.altitude <= elev + 25;
-      const isSurfaceB = b.altitude <= elev + 25;
+      // Both aircraft on surface (<= elev + 28 ft), dist <= 0.024 NM (~44m physical nose-touch), and not both peacefully parked at gate
+      const isSurfaceA = a.altitude <= elev + 28;
+      const isSurfaceB = b.altitude <= elev + 28;
       const bothParkedAtGate =
         a.state === "AT_GATE" &&
         b.state === "AT_GATE" &&
@@ -1924,7 +1924,7 @@ function checkSeparationAndConflicts(state: SimulationState): void {
         b.speed === 0 &&
         a.gateId !== b.gateId;
 
-      if (isSurfaceA && isSurfaceB && !bothParkedAtGate && altDiff <= 25 && dist <= 0.024) {
+      if (isSurfaceA && isSurfaceB && !bothParkedAtGate && altDiff <= 28 && dist <= 0.024) {
         if (a.speed > 0 || b.speed > 0 || a.state !== "AT_GATE" || b.state !== "AT_GATE") {
           declareAircraftCollision(
             state,
