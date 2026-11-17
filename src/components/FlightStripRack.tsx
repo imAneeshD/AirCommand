@@ -564,8 +564,8 @@ export const FlightStripRack: React.FC<{
         <div className="mt-1 flex items-center justify-between text-[10px] font-mono text-[var(--atc-muted)]">
           <span className="truncate">
             {ac.flightKind === "DEPARTURE"
-              ? `${ac.gateId ?? "RAMP"} → ${ac.targetRunway}`
-              : `${ac.assignedApproach ?? ac.targetRunway} → ${ac.gateId ?? "GATE"}`}
+              ? `${ac.gateId ?? "RAMP"} to ${ac.targetRunway}`
+              : `${ac.assignedApproach ?? ac.targetRunway} to ${ac.gateId ?? "GATE"}`}
           </span>
           <span
             className="shrink-0"
@@ -584,7 +584,7 @@ export const FlightStripRack: React.FC<{
               </span>
             )}
             <span className="text-[var(--atc-text)] truncate font-semibold">
-              {ac.aircraftType}{fp?.equipmentSuffix ?? "/L"} → {fp?.destinationIcao ?? ac.destinationIcao ?? "DEST"} · {fp?.proposedDepartureTimeZ ?? "P2121"}
+              {ac.aircraftType}{fp?.equipmentSuffix ?? "/L"} to {fp?.destinationIcao ?? ac.destinationIcao ?? "DEST"} · {fp?.proposedDepartureTimeZ ?? "P2121"}
             </span>
           </div>
           <button

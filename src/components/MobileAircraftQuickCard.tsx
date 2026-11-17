@@ -39,7 +39,7 @@ export const MobileAircraftQuickCard: React.FC<MobileAircraftQuickCardProps> = (
                 : "bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] border border-[var(--atc-emerald-border)]"
             }`}
           >
-            {aircraft.flightKind === "DEPARTURE" ? `DEP → ${aircraft.destinationIcao ?? "DEST"}` : "ARR"}
+            {aircraft.flightKind === "DEPARTURE" ? `DEP to ${aircraft.destinationIcao ?? "DEST"}` : "ARR"}
           </span>
         </div>
 

@@ -296,7 +296,7 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                     </span>
                   </div>
                   <div className="text-[11px] text-[var(--atc-muted)]">
-                    {dep.aircraftType} · Stand {dep.gateId ? `GATE ${dep.gateId}` : "RAMP"} → {dep.destinationIcao ?? "DEST"}
+                    {dep.aircraftType} · Stand {dep.gateId ? `GATE ${dep.gateId}` : "RAMP"} to {dep.destinationIcao ?? "DEST"}
                   </div>
                 </div>
               ))
@@ -1568,7 +1568,7 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                         className="w-full py-2.5 px-3 rounded-lg bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white font-mono font-bold text-xs transition-colors flex items-center justify-center gap-1.5 shadow-md cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         <Radio className="w-4 h-4" />
-                        HANDOFF → TOWER ({controllerFrequency("TOWER", sim.airport)} MHz)
+                        HANDOFF TO TOWER ({controllerFrequency("TOWER", sim.airport)} MHz)
                       </button>
 
                       <div className="grid grid-cols-2 gap-1.5 pt-0.5">
@@ -1723,7 +1723,7 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                       }
                       className="py-1.5 px-2 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-xs font-semibold disabled:opacity-35 disabled:cursor-not-allowed"
                     >
-                      HANDOFF → TWR ({controllerFrequency("TOWER", sim.airport)})
+                      HANDOFF TO TOWER ({controllerFrequency("TOWER", sim.airport)})
                     </button>
                   </div>
                 </div>
@@ -1936,7 +1936,7 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                         : "border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)]"
                     }`}
                   >
-                    HANDOFF → APP ({controllerFrequency("DEPARTURE", sim.airport, "ARRIVAL")})
+                    HANDOFF TO APPROACH ({controllerFrequency("DEPARTURE", sim.airport, "ARRIVAL")})
                   </button>
                   <button
                     disabled={
@@ -1959,7 +1959,7 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                     title="Vacated runway — transfer to Ground Control for taxi to gate stand"
                     className="py-1.5 px-2 rounded-md border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] hover:opacity-90 text-[var(--atc-amber)] font-mono text-[11px] font-semibold disabled:opacity-35 disabled:cursor-not-allowed"
                   >
-                    HANDOFF → GND ({controllerFrequency("GROUND", sim.airport)})
+                    HANDOFF TO GROUND ({controllerFrequency("GROUND", sim.airport)})
                   </button>
                 </div>
               ) : (
@@ -1988,7 +1988,7 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                         : "border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)]"
                     }`}
                   >
-                    HANDOFF → DEP ({controllerFrequency("DEPARTURE", sim.airport, "DEPARTURE")})
+                    HANDOFF TO DEPARTURE ({controllerFrequency("DEPARTURE", sim.airport, "DEPARTURE")})
                   </button>
                   <button
                     disabled={
@@ -2010,7 +2010,7 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                     title="Rejected takeoff or stopped on runway — transfer to Ground Control"
                     className="py-1.5 px-2 rounded-md border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] hover:opacity-90 text-[var(--atc-amber)] font-mono text-[11px] font-semibold disabled:opacity-35 disabled:cursor-not-allowed"
                   >
-                    HANDOFF → GND ({controllerFrequency("GROUND", sim.airport)})
+                    HANDOFF TO GROUND ({controllerFrequency("GROUND", sim.airport)})
                   </button>
                 </div>
               )}
@@ -2482,7 +2482,7 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                     }
                     className="w-full py-1.5 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-xs font-semibold disabled:opacity-35 disabled:cursor-not-allowed"
                   >
-                    HANDOFF → TOWER ({controllerFrequency("TOWER", sim.airport)})
+                    HANDOFF TO TOWER ({controllerFrequency("TOWER", sim.airport)})
                   </button>
                 ) : (
                   <button
@@ -2497,7 +2497,7 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                     }
                     className="w-full py-1.5 rounded-md border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:opacity-90 text-[var(--atc-emerald)] font-mono text-xs font-semibold disabled:opacity-35 disabled:cursor-not-allowed"
                   >
-                    HANDOFF → AREA / CENTER ({controllerFrequency("ACC", sim.airport)})
+                    HANDOFF TO AREA / CENTER ({controllerFrequency("ACC", sim.airport)})
                   </button>
                 )}
               </div>

@@ -290,9 +290,9 @@ export function submitClearanceDecision(
             if (aircraft.pendingRequest?.type === "LANDING") {
               aircraft.pendingRequest.resolved = true;
             }
-            phraseology = `[TOWER LIGHT GUN → ${aircraft.callsign}] STEADY RED (IN FLIGHT: GIVE WAY / CONTINUE CIRCLING — GO AROUND)`;
+            phraseology = `[TOWER LIGHT GUN TO ${aircraft.callsign}] STEADY RED (IN FLIGHT: GIVE WAY / CONTINUE CIRCLING — GO AROUND)`;
           } else {
-            phraseology = `[TOWER LIGHT GUN → ${aircraft.callsign}] STEADY RED (IN FLIGHT: GIVE WAY & CONTINUE CIRCLING)`;
+            phraseology = `[TOWER LIGHT GUN TO ${aircraft.callsign}] STEADY RED (IN FLIGHT: GIVE WAY & CONTINUE CIRCLING)`;
           }
           expectedReadback = `[WING ROCK / CONTINUING CIRCLING] ${aircraft.callsign}`;
         } else {
@@ -313,11 +313,11 @@ export function submitClearanceDecision(
             aircraft.state = "HOLD_POSITION";
             aircraft.stateEnteredAt = state.time;
           }
-          phraseology = `[TOWER LIGHT GUN → ${aircraft.callsign}] STEADY RED (SURFACE: STOP)`;
+          phraseology = `[TOWER LIGHT GUN TO ${aircraft.callsign}] STEADY RED (SURFACE: STOP)`;
           expectedReadback = `[VISUAL ACK / HOLDING ON GROUND] ${aircraft.callsign}`;
         }
       } else {
-        phraseology = `[TOWER LIGHT GUN → ${aircraft.callsign}] ${signal.replace("_", " ")}`;
+        phraseology = `[TOWER LIGHT GUN TO ${aircraft.callsign}] ${signal.replace("_", " ")}`;
         expectedReadback = `[WING ROCK / VISUAL ACK] ${aircraft.callsign}`;
       }
       break;
@@ -840,7 +840,7 @@ export function submitClearanceDecision(
         if (existingPending) {
           return {
             ok: false,
-            reason: `Pending handoff request already exists for ${aircraft.callsign} → ${targetController}.`,
+            reason: `Pending handoff request already exists for ${aircraft.callsign} to ${targetController}.`,
           };
         }
         const handoff: ControllerHandoff = {
@@ -864,7 +864,7 @@ export function submitClearanceDecision(
           controller: targetController,
           aircraftId: aircraft.id,
           category: "PILOT_REQUEST",
-          text: `[HANDOFF REQUEST] ${aircraft.callsign} (${fromLabel} → ${toLabel}). Awaiting your acceptance.`,
+          text: `[HANDOFF REQUEST] ${aircraft.callsign}: Transfer from ${fromLabel} to ${toLabel}. Awaiting acceptance.`,
         });
 
         return {

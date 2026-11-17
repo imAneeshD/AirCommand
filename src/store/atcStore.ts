@@ -1455,7 +1455,7 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
       controller: targetController,
       aircraftId: ac.id,
       category: "SYSTEM",
-      text: `Assumed frequency control of ${ac.callsign} (${fromRole} → ${targetController}). Ready for clearance.`,
+      text: `Frequency transfer complete for ${ac.callsign} from ${fromRole} to ${targetController}. Ready for clearance.`,
     });
 
     radioAudio.playRadioClick("ATC");

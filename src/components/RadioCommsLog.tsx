@@ -271,7 +271,7 @@ export const RadioCommsLog: React.FC<{ mobileMode?: boolean }> = ({
                     )}
                   </span>
                   <span className="text-[var(--atc-text-secondary)] shrink-0 w-36 truncate font-medium">
-                    {m.sender} → {m.recipient}:
+                    {m.sender} to {m.recipient}:
                   </span>
                   <span className={cls}>"{m.text}"</span>
                 </div>
@@ -548,7 +548,7 @@ export const RadioCommsLog: React.FC<{ mobileMode?: boolean }> = ({
                     className="px-2 py-1 rounded border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] flex items-center justify-between gap-2"
                   >
                     <div className="truncate">
-                      <span className="font-bold">{h.callsign}</span> {h.fromController} → {h.toController}{" "}
+                      <span className="font-bold">{h.callsign}</span> {h.fromController} to {h.toController}{" "}
                       <span
                         className={`text-[9px] px-1 rounded ${
                           h.status === "ACCEPTED"

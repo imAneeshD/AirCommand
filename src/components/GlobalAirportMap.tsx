@@ -1135,7 +1135,7 @@ export const GlobalAirportMap: React.FC = () => {
                     <span>
                       {convertingLive
                         ? "Converting Real Live Flights..."
-                        : `Convert Live Flights → Play ATC (${selectedAirportRecord.icao})`}
+                        : `Convert Live Flights to Play ATC (${selectedAirportRecord.icao})`}
                     </span>
                   </button>
 
@@ -1333,7 +1333,7 @@ export const GlobalAirportMap: React.FC = () => {
                 }
               }}
               disabled={!isOnline || airportDetailLoading || convertingLive}
-              title="Convert Live Flights -> Play ATC"
+              title="Convert Live Flights to Play ATC"
               className="py-3 px-3.5 rounded-xl border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] text-[var(--atc-emerald)] font-bold text-xs flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-50 shrink-0"
             >
               <Radio className="w-4 h-4 shrink-0" />
