@@ -1843,6 +1843,14 @@ export function getRunwayExitOptions(
       if (e.from !== cand.eid) continue;
       const targetNode = airport.nodes[e.to];
       if (!targetNode || targetNode.kind !== "HOLD_SHORT") continue;
+      // Protect against exiting into an adjacent/parallel runway's hold-short line
+      if (
+        targetNode.holdShortForRunway &&
+        targetNode.holdShortForRunway !== runwayId &&
+        targetNode.holdShortForRunway !== rwy.oppositeId
+      ) {
+        continue;
+      }
       const distToGate = gateNode
         ? Math.hypot(gateNode.x - targetNode.x, gateNode.y - targetNode.y)
         : targetNode.isNorthSide

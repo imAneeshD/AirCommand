@@ -627,14 +627,30 @@ export function isRunwayOccupied(
       continue;
     }
 
-    // Treat lined up / takeoff rolling aircraft on this or reciprocal runway as occupying
+    // Treat lined up / takeoff rolling / initial climb aircraft on this or reciprocal runway as occupying
     if (
       (ac.state === "LINE_UP_WAIT" ||
         ac.state === "TAKEOFF_CLEARED" ||
         ac.state === "TAKEOFF_ROLL" ||
-        ac.state === "ROTATE") &&
+        ac.state === "ROTATE" ||
+        (ac.state === "CLIMB" && along >= -0.1 && along < rwy.lengthNm + 3.0 && Math.abs(cross) < 0.25)) &&
       isThisOrOpposite
     ) {
+      occupantIds.push(ac.id);
+      continue;
+    }
+
+    // Treat aircraft with active/pending takeoff or lineup clearances as occupying the runway
+    const hasPendingTakeoffOrLineUp = ac.clearances?.some(
+      (c) =>
+        (c.type === "TAKEOFF" || c.type === "LINE_UP") &&
+        (c.active ||
+          c.lifecycle === "ACTIVE" ||
+          c.lifecycle === "ISSUED" ||
+          c.lifecycle === "READBACK_PENDING") &&
+        (c.parameters.runway === runway || (oppId && c.parameters.runway === oppId))
+    );
+    if (hasPendingTakeoffOrLineUp) {
       occupantIds.push(ac.id);
       continue;
     }

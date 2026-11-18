@@ -23,6 +23,7 @@ import type {
   SimulationState,
   TaxiwayName,
 } from "../types/atc.ts";
+import { isRunwayOccupied } from "./validationEngine.ts";
 import {
   createClearanceObject,
   nextId,
@@ -587,6 +588,14 @@ export function submitClearanceDecision(
         };
       }
       const runway = (params.runway as RunwayId | undefined) ?? aircraft.targetRunway;
+      const rwyOcc = isRunwayOccupied(state, runway, aircraft.id);
+      if (rwyOcc.occupied) {
+        const blocker = state.aircraft[rwyOcc.occupantIds[0]];
+        return {
+          ok: false,
+          reason: `Runway ${runway} is occupied by ${blocker?.callsign ?? "traffic"}. Maintain departure separation.`,
+        };
+      }
       const baseAlt = Math.round(state.airport.elevationFt / 500) * 500;
       const initialAlt = Number(params.initialAltitude ?? baseAlt + 3000);
       params.runway = runway;
@@ -685,6 +694,17 @@ export function submitClearanceDecision(
     }
 
     case "VACATE_RUNWAY": {
+      if (
+        aircraft.flightKind === "DEPARTURE" &&
+        aircraft.state !== "STOPPED_ON_RUNWAY" &&
+        aircraft.state !== "TAKEOFF_CANCELLED" &&
+        aircraft.state !== "REJECTED_TAKEOFF"
+      ) {
+        return {
+          ok: false,
+          reason: `Departure ${aircraft.callsign} cannot vacate runway unless takeoff was aborted or cancelled.`,
+        };
+      }
       const isStoppedOrDep =
         aircraft.flightKind === "DEPARTURE" ||
         aircraft.controller === "GROUND" ||

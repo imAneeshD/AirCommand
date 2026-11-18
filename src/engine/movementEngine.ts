@@ -466,10 +466,42 @@ export function updateAircraftMovement(
         ac.heading = rwy.heading;
         ac.altitude = elev;
         ac.verticalSpeed = 0;
+
+        // Departure runway collision avoidance: reject takeoff if a preceding aircraft is ahead on the same runway corridor
+        const curAlong = alongRunwayNm(rwy, ac.x, ac.y);
+        let leaderTooClose = false;
+        for (const otherId of state.aircraftOrder) {
+          if (otherId === ac.id) continue;
+          const other = state.aircraft[otherId];
+          if (!other) continue;
+          const isOccupyingRunwayCorridor =
+            other.state === "TAKEOFF_ROLL" ||
+            other.state === "ROTATE" ||
+            other.state === "LINE_UP_WAIT" ||
+            (other.state === "CLIMB" && other.targetRunway === ac.targetRunway);
+          if (!isOccupyingRunwayCorridor) continue;
+
+          const otherAlong = alongRunwayNm(rwy, other.x, other.y);
+          const otherCross = Math.abs(crossTrackRunwayNm(rwy, other.x, other.y));
+          if (
+            otherCross < 0.05 &&
+            otherAlong > curAlong &&
+            otherAlong - curAlong < 2.0 &&
+            other.altitude < elev + 1000
+          ) {
+            leaderTooClose = true;
+            break;
+          }
+        }
+        if (leaderTooClose && ac.speed > 10) {
+          ac.state = "REJECTED_TAKEOFF";
+          ac.stateEnteredAt = state.time;
+          break;
+        }
+
         const accel = ac.wakeCategory === "HEAVY" ? 9.8 : 10.8;
         ac.speed = Math.min(168, ac.speed + accel * dt);
         const step = (ac.speed / 3600) * dt;
-        const curAlong = alongRunwayNm(rwy, ac.x, ac.y);
         const newAlong = curAlong + step;
         const centerPt = runwayPoint(rwy, newAlong, 0);
         ac.x = centerPt.x;
