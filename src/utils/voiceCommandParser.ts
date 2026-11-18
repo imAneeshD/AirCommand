@@ -422,7 +422,29 @@ export function parseAtcVoiceCommand(rawTranscript: string, sim: SimulationState
   }
 
   if (/\b(?:cleared\s+(?:for\s+)?(?:the\s+)?ils|cleared approach|ils approach)\b/.test(normalized)) {
-    return makeResult("APPROACH", { runway }, `${ac.callsign}: Cleared ILS RWY ${runway}`);
+    let hdgVal: number | undefined;
+    let turnDirection: "LEFT" | "RIGHT" | "NEAREST" | undefined;
+    const hdgM = normalized.match(/\b(left|right)?\s*(?:turn\s+(left|right)\s+)?heading\s+(\d{1,3})\b/);
+    if (hdgM) {
+      const dirWord = (hdgM[1] ?? hdgM[2] ?? "").toUpperCase();
+      turnDirection = dirWord === "LEFT" ? "LEFT" : dirWord === "RIGHT" ? "RIGHT" : "NEAREST";
+      hdgVal = Number(hdgM[3]);
+    }
+    let altVal: number | undefined;
+    const altM = normalized.match(/\b(?:climb|descend|maintain)\s+(?:and\s+maintain\s+)?(?:to\s+)?(\d{4,5})\b/);
+    if (altM) {
+      altVal = Number(altM[1]);
+    }
+    let spdVal: number | undefined;
+    const spdM = normalized.match(/\b(?:speed|reduce\s+speed\s+to|increase\s+speed\s+to)\s+(\d{3})\b/);
+    if (spdM) {
+      spdVal = Number(spdM[1]);
+    }
+    return makeResult(
+      "APPROACH",
+      { runway, heading: hdgVal, turnDirection, altitude: altVal, speed: spdVal },
+      `${ac.callsign}: Cleared ILS RWY ${runway}${altVal ? `, maintain ${altVal}` : ""}${spdVal ? `, speed ${spdVal}` : ""}${hdgVal ? `, heading ${hdgVal}°` : ""}`
+    );
   }
 
   // Heading: "turn left heading 270" / "fly heading 090"
