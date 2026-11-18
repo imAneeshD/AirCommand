@@ -392,11 +392,11 @@ export function submitClearanceDecision(
           }
           params.targetNodeId = fallbackTarget;
         }
-        phraseology = `${aircraft.spokenCallsign}, ${controllerCallsign(command.controller, state.airport)}, push back clear of intersection for traffic.`;
+        phraseology = `${aircraft.spokenCallsign}, push back clear of intersection for traffic.`;
         expectedReadback = `Pushing back clear for traffic, ${aircraft.spokenCallsign}.`;
         immediate = Boolean(params.immediate ?? true);
       } else {
-        phraseology = `${aircraft.spokenCallsign}, ${controllerCallsign(command.controller, state.airport)}, pushback approved.`;
+        phraseology = `${aircraft.spokenCallsign}, pushback approved.`;
         expectedReadback = `Pushback approved, ${aircraft.spokenCallsign}.`;
       }
       break;
@@ -503,7 +503,7 @@ export function submitClearanceDecision(
         aircraft.flightKind === "ARRIVAL" && aircraft.gateId
           ? `gate ${formatGateIcao(aircraft.gateId)}`
           : `runway ${runwaySpokenName(targetRunway)}`;
-      phraseology = `${aircraft.spokenCallsign}, ${controllerCallsign(command.controller, state.airport)}, taxi to ${destLabel} via taxiway ${spokenTw}.`;
+      phraseology = `${aircraft.spokenCallsign}, taxi to ${destLabel} via taxiway ${spokenTw}.`;
       expectedReadback = `Taxi ${destLabel} via taxiway ${spokenTw}, ${aircraft.spokenCallsign}.`;
       if (params.immediate === true) {
         immediate = true;
@@ -523,7 +523,7 @@ export function submitClearanceDecision(
     case "CROSS_RUNWAY": {
       const runway = (params.runway as RunwayId | undefined) ?? state.airport.primaryDepartureRunway;
       params.runway = runway;
-      phraseology = `${aircraft.spokenCallsign}, ${controllerCallsign(command.controller, state.airport)}, cross runway ${runwaySpokenName(runway)}.`;
+      phraseology = `${aircraft.spokenCallsign}, cross runway ${runwaySpokenName(runway)}.`;
       expectedReadback = `Cross runway ${runwaySpokenName(runway)}, ${aircraft.spokenCallsign}.`;
       break;
     }
@@ -541,7 +541,7 @@ export function submitClearanceDecision(
       }
       const runway = (params.runway as RunwayId | undefined) ?? aircraft.targetRunway;
       params.runway = runway;
-      phraseology = `${aircraft.spokenCallsign}, ${controllerCallsign(command.controller, state.airport)}, runway ${runwaySpokenName(runway)}, line up and wait.`;
+      phraseology = `${aircraft.spokenCallsign}, runway ${runwaySpokenName(runway)}, line up and wait.`;
       expectedReadback = `Line up and wait runway ${runwaySpokenName(runway)}, ${aircraft.spokenCallsign}.`;
       break;
     }
@@ -651,7 +651,7 @@ export function submitClearanceDecision(
         aircraft.assignedApproach ??
         aircraft.targetRunway;
       params.runway = runway;
-      phraseology = `${aircraft.spokenCallsign}, ${controllerCallsign(command.controller, state.airport)}, wind ${state.airport.windText}, runway ${runwaySpokenName(runway)}, cleared to land.`;
+      phraseology = `${aircraft.spokenCallsign}, wind ${state.airport.windText}, runway ${runwaySpokenName(runway)}, cleared to land.`;
       expectedReadback = `Cleared to land runway ${runwaySpokenName(runway)}, ${aircraft.spokenCallsign}.`;
       break;
     }
@@ -712,8 +712,8 @@ export function submitClearanceDecision(
       const rwySpoken = runwaySpokenName(runway);
       const twSpoken = chosen.spokenName;
       phraseology = expedite
-        ? `${aircraft.spokenCallsign}, ${controllerCallsign(command.controller, state.airport)}, expedite vacating runway ${rwySpoken} via taxiway ${twSpoken}, traffic on final.`
-        : `${aircraft.spokenCallsign}, ${controllerCallsign(command.controller, state.airport)}, vacate runway ${rwySpoken} via taxiway ${twSpoken}.`;
+        ? `${aircraft.spokenCallsign}, expedite vacating runway ${rwySpoken} via taxiway ${twSpoken}, traffic on final.`
+        : `${aircraft.spokenCallsign}, vacate runway ${rwySpoken} via taxiway ${twSpoken}.`;
       expectedReadback = expedite
         ? `Expediting off runway ${rwySpoken} via taxiway ${twSpoken}, ${aircraft.spokenCallsign}.`
         : `Vacating runway ${rwySpoken} via taxiway ${twSpoken}, ${aircraft.spokenCallsign}.`;
