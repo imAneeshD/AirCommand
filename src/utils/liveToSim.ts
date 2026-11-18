@@ -150,9 +150,24 @@ function pickClosestUnusedGate(
 
   const candidates = layout.gateIds.filter((g) => !usedGates.has(g));
   const pool = candidates.length > 0 ? candidates : layout.gateIds;
-  let best = pool[fallbackIndex % pool.length];
+
+  // Filter pool to avoid stands too close (< 0.035 NM) to already occupied gates
+  const spacedPool = pool.filter((gId) => {
+    const node = layout.nodes[`GATE_${gId}`];
+    if (!node) return false;
+    for (const u of usedGates) {
+      const uNode = layout.nodes[`GATE_${u}`];
+      if (uNode && Math.hypot(node.x - uNode.x, node.y - uNode.y) < 0.035) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  const activePool = spacedPool.length > 0 ? spacedPool : pool;
+  let best = activePool[fallbackIndex % activePool.length];
   let bestDist = Infinity;
-  for (const gId of pool) {
+  for (const gId of activePool) {
     const node = layout.nodes[`GATE_${gId}`];
     if (!node) continue;
     const d = Math.hypot(node.x - xNm, node.y - yNm);
