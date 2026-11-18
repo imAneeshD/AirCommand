@@ -280,7 +280,9 @@ export function updateAircraftMovement(
       case "CROSSING_RUNWAY": {
         ac.altitude = elev;
         ac.verticalSpeed = 0;
-        if (isTrafficAheadOnPath(ac, state, 0.055)) {
+        // High surface safety priority: An aircraft crossing an active runway maintains momentum to evacuate the runway,
+        // and only yields for immediate physical obstruction directly ahead within 0.025 NM.
+        if (isTrafficAheadOnPath(ac, state, ac.state === "CROSSING_RUNWAY" ? 0.025 : 0.055)) {
           ac.speed = Math.max(0, ac.speed - 24 * dt);
           break;
         }
@@ -305,10 +307,10 @@ export function updateAircraftMovement(
         // Before stepping onto a runway crossing segment from a HOLD_SHORT node,
         // verify explicit CROSS_RUNWAY clearance!
         const edge = state.airport.edges.find(
-          (e) => e.from === curNodeId && e.to === nextNodeId
+          (e) => (e.from === curNodeId && e.to === nextNodeId) || (e.from === nextNodeId && e.to === curNodeId)
         );
         const crossingRwy: RunwayId | undefined =
-          edge?.runwayCrossing ?? nextNode.runwayId;
+          edge?.runwayCrossing ?? nextNode.runwayId ?? curNode.runwayId ?? ac.holdingAtRunway;
 
         if (
           curNode.kind === "HOLD_SHORT" &&
@@ -328,6 +330,7 @@ export function updateAircraftMovement(
             break;
           }
           ac.state = "CROSSING_RUNWAY";
+          ac.holdingAtRunway = crossingRwy;
         }
 
         const targetSpd = ac.state === "CROSSING_RUNWAY" ? 26 : 22;
@@ -340,20 +343,26 @@ export function updateAircraftMovement(
 
           // If we just finished crossing a runway onto the opposite side,
           // consume that single crossing clearance and return to TAXIING if more route left.
-          if (
-            ac.state === "CROSSING_RUNWAY" &&
-            (curNode.runwayId || crossingRwy) &&
-            !nextNode.runwayId
-          ) {
-            if (curNode.runwayId) {
-              ac.crossRunwayCleared[curNode.runwayId] = false;
-            }
-            if (crossingRwy) {
-              ac.crossRunwayCleared[crossingRwy] = false;
-            }
-            completeClearancesOfType(ac, "CROSS_RUNWAY");
-            if (ac.routeStepIndex < route.length - 1) {
-              ac.state = "TAXIING";
+          if (ac.state === "CROSSING_RUNWAY") {
+            const activeCrossRwy = ac.holdingAtRunway ?? crossingRwy ?? curNode.runwayId;
+            const rwyObj = activeCrossRwy ? state.airport.runways[activeCrossRwy] : undefined;
+            const isOutsideRwy = !nextNode.runwayId && (
+              !rwyObj ||
+              Math.abs(crossTrackRunwayNm(rwyObj, nextNode.x, nextNode.y)) > Math.max(rwyObj.widthNm * 0.85, 0.025) ||
+              nextNode.kind === "HOLD_SHORT" ||
+              nextNode.kind === "TAXIWAY"
+            );
+
+            if (isOutsideRwy) {
+              if (activeCrossRwy) {
+                ac.crossRunwayCleared[activeCrossRwy] = false;
+              }
+              ac.holdingAtRunway = undefined;
+              ac.holdingShortReason = undefined;
+              completeClearancesOfType(ac, "CROSS_RUNWAY");
+              if (ac.routeStepIndex < route.length - 1) {
+                ac.state = "TAXIING";
+              }
             }
           }
 
@@ -396,7 +405,7 @@ export function updateAircraftMovement(
             const upcomingNodeId = route[ac.routeStepIndex + 1];
             const upcomingNode = state.airport.nodes[upcomingNodeId];
             const nextEdge = state.airport.edges.find(
-              (e) => e.from === nextNode.id && e.to === upcomingNodeId
+              (e) => (e.from === nextNode.id && e.to === upcomingNodeId) || (e.from === upcomingNodeId && e.to === nextNode.id)
             );
             const upcomingRwy =
               nextEdge?.runwayCrossing ?? upcomingNode?.runwayId;
@@ -410,6 +419,7 @@ export function updateAircraftMovement(
                 ac.stateEnteredAt = state.time;
               } else {
                 ac.state = "CROSSING_RUNWAY";
+                ac.holdingAtRunway = upcomingRwy;
               }
             }
           }
@@ -603,6 +613,7 @@ export function updateAircraftMovement(
 
     // Record radar trail periodically for airborne/moving radar tracks
     if (ac.speed > 5) {
+      if (!ac.trail) ac.trail = [];
       const last = ac.trail[ac.trail.length - 1];
       if (!last || Math.hypot(last.x - ac.x, last.y - ac.y) > 0.18) {
         ac.trail.push({ x: ac.x, y: ac.y });

@@ -367,7 +367,7 @@ export function inspectGroundConflict(
 ): GroundConflictReport | null {
   const elev = sim.airport.elevationFt;
   if (!isSurfaceContender(ac, elev)) return null;
-  if (ac.state === "PUSHING_BACK" || ac.state === "PUSHBACK_APPROVED") return null;
+  if (ac.state === "PUSHING_BACK" || ac.state === "PUSHBACK_APPROVED" || ac.state === "CROSSING_RUNWAY") return null;
 
   let blocker = findBlockingTrafficAhead(ac, sim, 0.08);
   if (!blocker && ac.yieldToAircraftId) {
@@ -424,7 +424,7 @@ export function inspectGroundConflict(
 
   const isYieldWaiting = Boolean(ac.state === "HOLD_POSITION" && ac.yieldToAircraftId);
   const isTaxiingStopped =
-    (ac.state === "TAXIING" || ac.state === "CROSSING_RUNWAY") &&
+    ac.state === "TAXIING" &&
     Boolean(blocker) &&
     ac.speed <= 3.5;
   const isManualHoldWithBlocker = (ac.state === "HOLD_POSITION" || ac.state === "HOLDING_SHORT") && Boolean(blocker);

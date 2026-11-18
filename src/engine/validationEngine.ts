@@ -111,6 +111,12 @@ export function canAircraftExecuteAction(
     }
 
     case "CROSS_RUNWAY": {
+      if (aircraft.state === "CROSSING_RUNWAY") {
+        return {
+          allowed: true,
+          reason: "Aircraft is actively crossing the runway.",
+        };
+      }
       const runway = getNextCrossingRunway(aircraft, simulationState);
       if (!runway) {
         return {
@@ -414,7 +420,7 @@ export function getNextCrossingRunway(
   aircraft: Aircraft,
   simulation: SimulationState
 ): RunwayId | null {
-  if (aircraft.holdingAtRunway && aircraft.holdingShortReason === "CROSSING_REQUIRED") {
+  if (aircraft.holdingAtRunway) {
     return aircraft.holdingAtRunway;
   }
   const route = aircraft.assignedRouteNodeIds;
@@ -423,7 +429,7 @@ export function getNextCrossingRunway(
   const fromId = route[idx];
   const toId = route[idx + 1];
   const edge = simulation.airport.edges.find(
-    (e) => e.from === fromId && e.to === toId
+    (e) => (e.from === fromId && e.to === toId) || (e.from === toId && e.to === fromId)
   );
   if (edge?.runwayCrossing) {
     return edge.runwayCrossing;
@@ -431,6 +437,10 @@ export function getNextCrossingRunway(
   const toNode = simulation.airport.nodes[toId];
   if (toNode?.runwayId) {
     return toNode.runwayId;
+  }
+  const fromNode = simulation.airport.nodes[fromId];
+  if (fromNode?.runwayId) {
+    return fromNode.runwayId;
   }
   return null;
 }
@@ -493,7 +503,8 @@ export function canAircraftMove(
     }
 
     case "CROSSING_RUNWAY":
-      return canAircraftExecuteAction(aircraft, "CROSS_RUNWAY", simulation).allowed;
+      // An aircraft actively crossing an active runway MUST continuously move to safely clear the runway pavement!
+      return true;
 
     case "LINE_UP_WAIT": {
       // If not yet physically positioned on runway threshold, allow moving ONLY if LINE_UP or TAKEOFF cleared
