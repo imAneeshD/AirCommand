@@ -52,6 +52,17 @@ export const MobileAircraftQuickCard: React.FC<MobileAircraftQuickCardProps> = (
         </button>
       </div>
 
+      {/* Emergency Active Banner */}
+      {aircraft.operationMode === "EMERGENCY_OPERATION" && aircraft.emergencyType !== "NONE" && (
+        <div className="px-2 py-1 rounded-lg bg-red-500/20 border border-red-500/50 text-red-400 font-bold text-[10px] flex items-center justify-between animate-pulse">
+          <span className="flex items-center gap-1.5 truncate">
+            <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
+            <span className="truncate">MAYDAY: {aircraft.emergencyType.replace(/_/g, " ")}</span>
+          </span>
+          <span className="font-mono text-[9px] bg-red-600 text-white px-1.5 py-0.5 rounded shrink-0">7700</span>
+        </div>
+      )}
+
       {/* State & Telemetry line */}
       <div className="flex items-center justify-between text-[11px] text-[var(--atc-muted)]">
         <span className="flex items-center gap-1">

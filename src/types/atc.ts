@@ -118,9 +118,14 @@ export type OperationMode = "NORMAL_OPERATION" | "EMERGENCY_OPERATION";
 export type EmergencyType =
   | "NONE"
   | "ENGINE_FAILURE"
-  | "REJECTED_TAKEOFF_ABORT"
-  | "MEDICAL"
+  | "DUAL_ENGINE_FAILURE"
+  | "TURBULENCE_WINDSHEAR"
   | "LOW_FUEL"
+  | "BIRD_STRIKE"
+  | "HYDRAULIC_FAILURE"
+  | "CABIN_PRESSURE"
+  | "MEDICAL"
+  | "REJECTED_TAKEOFF_ABORT"
   | "RUNWAY_EXCURSION"
   | "CRASH";
 
@@ -702,6 +707,17 @@ export interface SimulationState {
   lastAutonomousRunAt: number;
   lastTrafficSpawnAt: number;
   lastFunnyMomentAt?: number;
+  recentFunnyMomentIds?: string[];
+  pendingFunnyDialogues?: Array<{
+    fireAt: number;
+    sender: string;
+    recipient: string;
+    controller: ControllerRole;
+    aircraftId: string;
+    category: "PILOT_REQUEST" | "ATC_CLEARANCE" | "PILOT_READBACK";
+    text: string;
+  }>;
+  lastEmergencyEventAt?: number;
   liveSnapshotMeta?: {
     airportIcao: string;
     fetchedAtMs: number;

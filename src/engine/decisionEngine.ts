@@ -15,6 +15,7 @@ import type {
   ControllerHandoff,
   ControllerRole,
   DecisionResponse,
+  EmergencyType,
   FlightKind,
   LightGunSignal,
   RadioMessage,
@@ -29,6 +30,7 @@ import {
   transitionClearanceLifecycle,
 } from "./clearanceEngine.ts";
 import { getFunnyReadbackQuip } from "./funnyMomentsEngine.ts";
+import { triggerAircraftEmergency } from "./emergencyEventsEngine.ts";
 
 export function addRadioMessage(
   state: SimulationState,
@@ -1713,7 +1715,7 @@ export function triggerRadioFailure(
 export function triggerEmergency(
   state: SimulationState,
   aircraftId: string,
-  emergencyType: "ENGINE_FAILURE" | "REJECTED_TAKEOFF_ABORT" | "MEDICAL"
+  emergencyType: Exclude<EmergencyType, "NONE" | "CRASH">
 ): boolean {
   const ac = state.aircraft[aircraftId];
   if (!ac) return false;
@@ -1732,35 +1734,7 @@ export function triggerEmergency(
     return res.ok;
   }
 
-  ac.operationMode = "EMERGENCY_OPERATION";
-  ac.emergencyType = emergencyType;
-  ac.squawk = "7700";
-  ac.pendingRequest = {
-    id: nextId(state, "req"),
-    type: "EMERGENCY_PRIORITY",
-    controller: ac.controller,
-    message: `MAYDAY MAYDAY, ${ac.spokenCallsign}, ${emergencyType.replace("_", " ").toLowerCase()}, requesting priority landing runway ${runwaySpokenName(ac.targetRunway)}!`,
-    requestedAt: state.time,
-    runway: ac.targetRunway,
-    resolved: false,
-  };
-  addRadioMessage(state, {
-    sender: ac.callsign,
-    recipient: controllerCallsign(ac.controller, state.airport),
-    controller: ac.controller,
-    aircraftId: ac.id,
-    category: "EMERGENCY",
-    text: ac.pendingRequest.message,
-  });
-  state.incidents.push({
-    id: nextId(state, "inc"),
-    timestamp: state.time,
-    severity: "CRITICAL",
-    code: emergencyType,
-    message: `EMERGENCY (${emergencyType}) declared by ${ac.callsign} (Squawk 7700).`,
-    aircraftIds: [ac.id],
-  });
-  return true;
+  return triggerAircraftEmergency(state, aircraftId, emergencyType);
 }
 
 export function clearStoppedRunwayEmergency(

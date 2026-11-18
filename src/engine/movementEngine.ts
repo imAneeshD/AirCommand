@@ -767,6 +767,14 @@ function integrateAirborneFlight(
     } else {
       smoothSetVs(0);
     }
+  } else if (ac.emergencyType === "DUAL_ENGINE_FAILURE") {
+    // Unpowered glider kinematics: continuous glide descent (-1020 fpm) toward runway
+    smoothSetVs(-1020, 500);
+    ac.altitude = Math.max(elev, ac.altitude + (ac.verticalSpeed / 60) * dt);
+  } else if (ac.emergencyType === "CABIN_PRESSURE" && ac.altitude > Math.max(elev + 2500, 10000)) {
+    // Rapid decompression emergency descent down to 10,000 ft safe oxygen level
+    smoothSetVs(-3500, 900);
+    ac.altitude = Math.max(Math.max(elev + 2500, 10000), ac.altitude + (ac.verticalSpeed / 60) * dt);
   } else {
     const defaultAirAlt = Math.round((elev + 3000) / 500) * 500;
     const targetAlt =
@@ -828,6 +836,13 @@ function integrateAirborneFlight(
   } else if (ac.state === "CLIMB" || ac.state === "CRUISE_OUTBOUND") {
     // Natural jet climb acceleration schedule when no explicit speed restriction assigned
     desiredSpeed = agl < 1200 ? 178 : agl < 3000 ? 215 : 250;
+  }
+
+  // Emergency engine limits
+  if (ac.emergencyType === "DUAL_ENGINE_FAILURE") {
+    desiredSpeed = 165; // Best unpowered glide speed
+  } else if (ac.emergencyType === "ENGINE_FAILURE" || ac.emergencyType === "BIRD_STRIKE") {
+    desiredSpeed = Math.min(desiredSpeed, 190); // Single engine reduced thrust ceiling
   }
 
   const spdDiff = desiredSpeed - ac.speed;
