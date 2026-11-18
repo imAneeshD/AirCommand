@@ -5,6 +5,7 @@ import type {
   SimulationState,
 } from "../types/atc.ts";
 import { runwaySpokenName } from "../data/asteriaAirport.ts";
+import { hashCallsign } from "../data/aircraftCatalog.ts";
 import { addRadioMessage, controllerCallsign } from "./decisionEngine.ts";
 import { nextId } from "./clearanceEngine.ts";
 
@@ -32,7 +33,9 @@ export const EMERGENCY_DEFINITIONS: Record<Exclude<EmergencyType, "NONE" | "RUNW
     generateDistressCall: (ac, state) => {
       const ctrl = controllerCallsign(ac.controller, state.airport, ac.flightKind);
       const rwy = runwaySpokenName(ac.targetRunway);
-      return `MAYDAY MAYDAY MAYDAY, ${ac.spokenCallsign}, declaring emergency fuel, less than 15 minutes reserves remaining! Requesting priority vectors direct for runway ${rwy}!`;
+      const fuel = ac.fuelRemainingPct ?? 6;
+      const mins = Math.max(5, Math.round(fuel * 1.5));
+      return `MAYDAY MAYDAY MAYDAY, ${ac.spokenCallsign}, declaring emergency fuel, ${fuel}% (${mins} minutes reserves) remaining! Requesting priority vectors direct for runway ${rwy}!`;
     },
   },
   TURBULENCE_WINDSHEAR: {
@@ -126,6 +129,11 @@ export function triggerAircraftEmergency(
 ): boolean {
   const ac = state.aircraft[aircraftId];
   if (!ac || ac.state === "CRASHED") return false;
+
+  if (emergencyType === "LOW_FUEL") {
+    // Critical emergency fuel reserve state: 5% to 8% (under 15 minutes of fuel remaining)
+    ac.fuelRemainingPct = 5 + (Math.abs(hashCallsign(ac.callsign)) % 4);
+  }
 
   const def = EMERGENCY_DEFINITIONS[emergencyType as keyof typeof EMERGENCY_DEFINITIONS];
   const distressMsg = def ? def.generateDistressCall(ac, state) : `${ac.spokenCallsign} declaring emergency (${emergencyType})!`;

@@ -1021,7 +1021,9 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
               </span>
             </div>
             <div className="text-[11px] text-red-200 leading-snug">
-              {ac.pendingRequest?.message ?? `Aircraft declared in-flight emergency (${ac.emergencyType}). Priority vectors and runway clearance requested.`}
+              {ac.emergencyType === "LOW_FUEL"
+                ? `CRITICAL EMERGENCY FUEL: ${ac.fuelRemainingPct ?? 6}% (${Math.round((ac.fuelRemainingPct ?? 6) * 1.5)} minutes reserves remaining). Immediate priority approach vectors required.`
+                : ac.pendingRequest?.message ?? `Aircraft declared in-flight emergency (${ac.emergencyType}). Priority vectors and runway clearance requested.`}
             </div>
           </div>
         )}
