@@ -1105,6 +1105,48 @@ export function deriveFlightMetadata(
   const remote = pickRemoteHub(h, airport.icao, prefix, bearingDeg);
   const digits = callsign.replace(/\D/g, "") || String(100 + (h % 899));
 
+  const isIndianCarrier =
+    prefix === "AIC" ||
+    prefix === "IGO" ||
+    prefix === "AXB" ||
+    prefix === "VTI" ||
+    prefix === "SEJ" ||
+    prefix === "AKJ" ||
+    prefix === "BZP" ||
+    prefix === "LLR" ||
+    prefix === "SDG";
+
+  const isMiddleEastCarrier =
+    prefix === "UAE" ||
+    prefix === "FDB" ||
+    prefix === "ETD" ||
+    prefix === "QTR" ||
+    prefix === "SVA" ||
+    prefix === "ABY" ||
+    prefix === "JZR" ||
+    prefix === "KAC" ||
+    prefix === "OMS" ||
+    prefix === "GFA";
+
+  const isEuropeanCarrier =
+    prefix === "BAW" ||
+    prefix === "DLH" ||
+    prefix === "AFR" ||
+    prefix === "KLM" ||
+    prefix === "THY" ||
+    prefix === "BOX" ||
+    prefix === "CLX";
+
+  const isAsianCarrier =
+    prefix === "SIA" ||
+    prefix === "MXD" ||
+    prefix === "BBC" ||
+    prefix === "MAS" ||
+    prefix === "THA" ||
+    prefix === "CPA" ||
+    prefix === "ANA" ||
+    prefix === "JAL";
+
   // Determine realistic tail registration based on country/carrier prefix
   let registration: string;
   if (prefix === "IAF") {
@@ -1115,32 +1157,56 @@ export function deriveFlightMetadata(
     registration = `ZZ${170 + (h % 20)}`;
   } else if (prefix === "NAVY") {
     registration = `IN-${700 + (h % 90)}`;
+  } else if (prefix === "QTR") {
+    // Qatar Airways registrations (authentic A350/B787/B777 series)
+    const qtrTails = ["ALA", "ALB", "ALC", "ALE", "ALH", "ALM", "ALR", "ALY", "AMA", "ANE", "ANF", "BAA", "BAC", "BAP"];
+    registration = `A7-${qtrTails[h % qtrTails.length]}`;
+  } else if (prefix === "UAE") {
+    // Emirates registrations
+    const uaeTails = ["EPA", "EPD", "EPL", "EQA", "EEQ", "EVS", "EVB", "EOM", "ECK"];
+    registration = `A6-${uaeTails[h % uaeTails.length]}`;
+  } else if (prefix === "FDB" || prefix === "ETD" || prefix === "ABY") {
+    registration = `A6-${digits.padStart(3, "E").slice(-3)}`;
+  } else if (prefix === "SIA") {
+    const siaTails = ["SWA", "SWB", "SHC", "SMD", "SMI", "SQA"];
+    registration = `9V-${siaTails[h % siaTails.length]}`;
+  } else if (prefix === "BAW") {
+    const bawTails = ["WNA", "WNB", "XTA", "ZBA", "ZBC", "BPA"];
+    registration = `G-${bawTails[h % bawTails.length]}`;
+  } else if (prefix === "DLH" || prefix === "BOX") {
+    const dlhTails = ["AIQ", "AIM", "AIK", "AIP", "AMB"];
+    registration = `D-${dlhTails[h % dlhTails.length]}`;
+  } else if (prefix === "AFR") {
+    const afrTails = ["ZNA", "ZNB", "GZT", "GZU", "HZU"];
+    registration = `F-${afrTails[h % afrTails.length]}`;
+  } else if (prefix === "KLM") {
+    const klmTails = ["KCA", "KCD", "BVA", "BVB", "AOA"];
+    registration = `PH-${klmTails[h % klmTails.length]}`;
+  } else if (prefix === "THY") {
+    const thyTails = ["LGA", "LGB", "JYA", "JYD", "KPA"];
+    registration = `TC-${thyTails[h % thyTails.length]}`;
+  } else if (prefix === "SVA") {
+    registration = `HZ-AK${digits.slice(-1) || "1"}`;
+  } else if (prefix === "CPA") {
+    registration = `B-LR${digits.slice(-1) || "A"}`;
+  } else if (prefix === "ANA" || prefix === "JAL") {
+    registration = `JA${800 + (h % 190)}A`;
+  } else if (prefix === "DAL") {
+    registration = `N${digits.padStart(3, "5").slice(-3)}DN`;
+  } else if (prefix === "UAL") {
+    registration = `N${digits.padStart(3, "4").slice(-3)}UA`;
+  } else if (prefix === "AAL") {
+    registration = `N${digits.padStart(3, "9").slice(-3)}AA`;
+  } else if (prefix === "SWA") {
+    registration = `N${digits.padStart(3, "8").slice(-3)}WN`;
+  } else if (prefix === "JBU") {
+    registration = `N${digits.padStart(3, "6").slice(-3)}JB`;
   } else if (
-    prefix === "AIC" ||
-    prefix === "IGO" ||
-    prefix === "AXB" ||
-    prefix === "VTI" ||
-    prefix === "SEJ" ||
-    prefix === "AKJ" ||
-    prefix === "BZP" ||
-    airport.icao.startsWith("V")
+    isIndianCarrier ||
+    (airport.icao.startsWith("V") && !isMiddleEastCarrier && !isEuropeanCarrier && !isAsianCarrier)
   ) {
     const letters = ["EXA", "IFR", "SPJ", "ATQ", "BLR", "DEL", "BOM", "MAA", "VTI", "KOK"];
     registration = `VT-${letters[h % letters.length].slice(0, 2)}${digits.slice(-1) || "A"}`;
-  } else if (prefix === "UAE" || prefix === "FDB" || prefix === "ETD" || prefix === "ABY") {
-    registration = `A6-${digits.padStart(3, "E").slice(-3)}`;
-  } else if (prefix === "QTR") {
-    registration = `A7-${digits.padStart(3, "B").slice(-3)}`;
-  } else if (prefix === "SIA") {
-    registration = `9V-${digits.padStart(3, "S").slice(-3)}`;
-  } else if (prefix === "BAW") {
-    registration = `G-B${digits.padStart(3, "W").slice(-3)}`;
-  } else if (prefix === "DLH" || prefix === "BOX") {
-    registration = `D-A${digits.padStart(3, "I").slice(-3)}`;
-  } else if (prefix === "AFR") {
-    registration = `F-G${digits.padStart(3, "Z").slice(-3)}`;
-  } else if (prefix === "KLM") {
-    registration = `PH-${digits.padStart(3, "K").slice(-3)}`;
   } else {
     const suffix = prefix.slice(0, 2) || "AT";
     registration = `N${digits.padStart(3, "4").slice(0, 3)}${suffix}`;

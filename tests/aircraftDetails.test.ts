@@ -64,3 +64,155 @@ test("Cargo tri-jet and airline livery detection handles FedEx MD-11F", () => {
   const liv = getAirlineLivery(fdx);
   assert.equal(liv.title, "FedEx");
 });
+
+test("International aircraft registrations at Indian airports use correct country prefixes, not VT-", () => {
+  const airport = { id: "VOBL" as const, icao: "VOBL", name: "Kempegowda Intl", city: "Bengaluru" } as unknown as import("../src/types/atc.ts").AirportLayout;
+
+  // Qatar Airways QTR must have A7- registration and OTHH origin
+  const qtr = getResolvedAircraftDetails(
+    {
+      id: "QTR417",
+      callsign: "QTR417",
+      spokenCallsign: "Qatar 417",
+      airline: "Qatar Airways",
+      aircraftType: "A359",
+      wakeCategory: "HEAVY",
+      flightKind: "ARRIVAL",
+      squawk: "3100",
+      state: "CRUISE_OUTBOUND",
+      controller: "DEPARTURE",
+      operationMode: "NORMAL_OPERATION",
+      emergencyType: "NONE",
+      commStatus: "NORMAL",
+      nordoMode: "LIGHT_GUN_SIGNALS",
+      x: 0,
+      y: 0,
+      heading: 90,
+      altitude: 10000,
+      speed: 250,
+      verticalSpeed: 0,
+      targetRunway: "27L",
+      assignedRouteNodeIds: [],
+      assignedRouteTaxiways: [],
+      routeStepIndex: 0,
+      crossRunwayCleared: {},
+      requiresPushback: false,
+      assignedHeading: null,
+      assignedTurnDirection: "NEAREST",
+      assignedAltitude: null,
+      assignedSpeed: null,
+      assignedApproach: null,
+      assignedDirectFix: null,
+      clearances: [],
+      pendingRequest: null,
+      hasReadbackError: false,
+      armNextReadbackError: false,
+      spawnedAt: 0,
+      stateEnteredAt: 0,
+      lastTransmissionAt: 0,
+      trail: [],
+    },
+    airport
+  );
+
+  assert.equal(qtr.livery.airlineName, "Qatar Airways");
+  assert.ok(qtr.registration.startsWith("A7-"), `Expected A7- prefix for Qatar Airways, got ${qtr.registration}`);
+  assert.notEqual(qtr.registration.slice(0, 3), "VT-", "Qatar Airways must not receive Indian VT- registration");
+  assert.equal(qtr.originIcao, "OTHH");
+
+  // Emirates UAE must have A6- registration
+  const uae = getResolvedAircraftDetails(
+    {
+      id: "UAE504",
+      callsign: "UAE504",
+      spokenCallsign: "Emirates 504",
+      airline: "Emirates",
+      aircraftType: "B77W",
+      wakeCategory: "HEAVY",
+      flightKind: "ARRIVAL",
+      squawk: "3200",
+      state: "CRUISE_OUTBOUND",
+      controller: "DEPARTURE",
+      operationMode: "NORMAL_OPERATION",
+      emergencyType: "NONE",
+      commStatus: "NORMAL",
+      nordoMode: "LIGHT_GUN_SIGNALS",
+      x: 0,
+      y: 0,
+      heading: 90,
+      altitude: 10000,
+      speed: 250,
+      verticalSpeed: 0,
+      targetRunway: "27L",
+      assignedRouteNodeIds: [],
+      assignedRouteTaxiways: [],
+      routeStepIndex: 0,
+      crossRunwayCleared: {},
+      requiresPushback: false,
+      assignedHeading: null,
+      assignedTurnDirection: "NEAREST",
+      assignedAltitude: null,
+      assignedSpeed: null,
+      assignedApproach: null,
+      assignedDirectFix: null,
+      clearances: [],
+      pendingRequest: null,
+      hasReadbackError: false,
+      armNextReadbackError: false,
+      spawnedAt: 0,
+      stateEnteredAt: 0,
+      lastTransmissionAt: 0,
+      trail: [],
+    },
+    airport
+  );
+  assert.ok(uae.registration.startsWith("A6-"), `Expected A6- prefix for Emirates, got ${uae.registration}`);
+
+  // Domestic carrier (IndiGo) must have VT- registration
+  const igo = getResolvedAircraftDetails(
+    {
+      id: "IGO101",
+      callsign: "IGO101",
+      spokenCallsign: "IndiGo 101",
+      airline: "IndiGo",
+      aircraftType: "A320",
+      wakeCategory: "MEDIUM",
+      flightKind: "DEPARTURE",
+      squawk: "2100",
+      state: "AT_GATE",
+      controller: "GROUND",
+      operationMode: "NORMAL_OPERATION",
+      emergencyType: "NONE",
+      commStatus: "NORMAL",
+      nordoMode: "LIGHT_GUN_SIGNALS",
+      x: 0,
+      y: 0,
+      heading: 90,
+      altitude: 3000,
+      speed: 0,
+      verticalSpeed: 0,
+      targetRunway: "27L",
+      assignedRouteNodeIds: [],
+      assignedRouteTaxiways: [],
+      routeStepIndex: 0,
+      crossRunwayCleared: {},
+      requiresPushback: false,
+      assignedHeading: null,
+      assignedTurnDirection: "NEAREST",
+      assignedAltitude: null,
+      assignedSpeed: null,
+      assignedApproach: null,
+      assignedDirectFix: null,
+      clearances: [],
+      pendingRequest: null,
+      hasReadbackError: false,
+      armNextReadbackError: false,
+      spawnedAt: 0,
+      stateEnteredAt: 0,
+      lastTransmissionAt: 0,
+      trail: [],
+    },
+    airport
+  );
+  assert.ok(igo.registration.startsWith("VT-"), `Expected VT- prefix for IndiGo, got ${igo.registration}`);
+});
