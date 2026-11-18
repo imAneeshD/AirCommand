@@ -1839,8 +1839,48 @@ export function spawnRandomTraffic(
       { aircraftType: acType, callsign, isCargo, isMilitary, wakeCategory: wakeCat },
       occupiedGateIds
     ) ?? state.airport.gateIds[state.nextIdCounter % state.airport.gateIds.length];
-  const spawnPt = runwayPoint(rwySpec, -11.5, fromLeft ? 3.8 : -3.8);
+  const activeInbound = state.aircraftOrder
+    .map((id) => state.aircraft[id])
+    .filter(
+      (a): a is Aircraft =>
+        Boolean(
+          a &&
+            a.flightKind === "ARRIVAL" &&
+            a.state !== "COMPLETED_ARRIVAL" &&
+            a.state !== "CRASHED" &&
+            (a.state === "APPROACH" ||
+              a.state === "FINAL" ||
+              a.state === "CLEARED_TO_LAND" ||
+              a.state === "GO_AROUND")
+        )
+    );
+
   const baseAlt = Math.round(state.airport.elevationFt / 500) * 500;
+  const occupiedAltitudes = activeInbound.map((a) => a.assignedAltitude ?? a.altitude);
+
+  // Distinct stepped arrival shelves (4,000 ft, 5,000 ft, 6,000 ft, 7,000 ft, 8,000 ft, 9,000 ft)
+  // Ensures every incoming flight enters at a conflict-free flight level with >= 800 ft vertical clearance
+  const candidateShelves = [
+    baseAlt + 4000,
+    baseAlt + 5000,
+    baseAlt + 6000,
+    baseAlt + 7000,
+    baseAlt + 8000,
+    baseAlt + 9000,
+  ];
+  let spawnAltitude = candidateShelves.find((shelf) =>
+    occupiedAltitudes.every((occ) => Math.abs(occ - shelf) >= 800)
+  );
+  if (!spawnAltitude) {
+    spawnAltitude = baseAlt + 4000 + activeInbound.length * 1000;
+  }
+
+  // Stagger entry distances along the arrival corridor (12 NM to 22 NM) so planes never spawn on top of each other
+  const spawnDistNm = 12.0 + (activeInbound.length * 3.2) + ((state.nextIdCounter * 2) % 4);
+  const lateralSign = fromLeft ? 1 : -1;
+  const lateralOffset = lateralSign * (3.2 + ((state.nextIdCounter * 3) % 4) * 0.8);
+  const spawnPt = runwayPoint(rwySpec, -spawnDistNm, lateralOffset);
+
   const ac = createArrivalAircraft(state, {
     callsign,
     spokenCallsign,
@@ -1848,21 +1888,22 @@ export function spawnRandomTraffic(
     aircraftType: acType,
     x: spawnPt.x,
     y: spawnPt.y,
-    heading: ((rwySpec.heading + (fromLeft ? 25 : -25) + 360) % 360) || 360,
-    altitude: baseAlt + 4200,
+    heading: ((rwySpec.heading + (fromLeft ? 22 : -22) + 360) % 360) || 360,
+    altitude: spawnAltitude,
     speed: 205,
     targetRunway: rwy,
     gateId,
     state: "APPROACH",
     controller: "DEPARTURE",
   });
+  const flSpoken = String(Math.round(spawnAltitude)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   addRadioMessage(state, {
     sender: callsign,
     recipient: controllerCallsign("DEPARTURE", state.airport, "ARRIVAL"),
     controller: "DEPARTURE",
     aircraftId: callsign,
     category: "PILOT_REQUEST",
-    text: `${controllerCallsign("DEPARTURE", state.airport, "ARRIVAL")}, ${spokenCallsign}, inbound descending through 4,200 for runway ${runwaySpokenName(rwy)}, with information Alpha.`,
+    text: `${controllerCallsign("DEPARTURE", state.airport, "ARRIVAL")}, ${spokenCallsign}, inbound descending through ${flSpoken} for runway ${runwaySpokenName(rwy)}, with information Alpha.`,
   });
   updateAircraftStates(state);
   return ac;
@@ -1893,9 +1934,9 @@ function checkSeparationAndConflicts(state: SimulationState): void {
         continue;
       }
 
-      // Existing crash site wreckage impact check
+      // Existing crash site wreckage impact check (only within close physical debris contact zone <= 0.018 NM ~33m)
       if (a.state === "CRASHED" && b.state !== "CRASHED") {
-        if (dist <= 0.05 && altDiff <= 60) {
+        if (dist <= 0.018 && altDiff <= 30) {
           declareAircraftCrash(
             state,
             b,
@@ -1905,7 +1946,7 @@ function checkSeparationAndConflicts(state: SimulationState): void {
           continue;
         }
       } else if (b.state === "CRASHED" && a.state !== "CRASHED") {
-        if (dist <= 0.05 && altDiff <= 60) {
+        if (dist <= 0.018 && altDiff <= 30) {
           declareAircraftCrash(
             state,
             a,
@@ -1917,10 +1958,15 @@ function checkSeparationAndConflicts(state: SimulationState): void {
       }
 
       // Case A: Mid-Air Collision
-      // Both airborne (above elev + 75 ft), same altitude (altDiff <= 150 ft), and same location (dist <= 0.08 NM ~148m wingspan envelope)
+      // Real physical collision envelope: actual airframe contact (fuselage & wingspan overlap).
+      // A320/B737 wingspan: ~35m (0.019 NM); B777/A350/A380 wingspan: ~65-80m (0.035-0.043 NM).
+      // Touching contact requires center-to-center distance <= sum of half-spans (~0.024 - 0.032 NM).
+      // Vertical height of an airliner is 40-55 ft (altDiff <= 55 ft).
       const isAirborneA = a.altitude > elev + 75;
       const isAirborneB = b.altitude > elev + 75;
-      if (isAirborneA && isAirborneB && altDiff <= 150 && dist <= 0.08) {
+      const maxMidAirContactDist =
+        a.wakeCategory === "HEAVY" || b.wakeCategory === "HEAVY" ? 0.032 : 0.024;
+      if (isAirborneA && isAirborneB && altDiff <= 55 && dist <= maxMidAirContactDist) {
         declareAircraftCollision(
           state,
           a,
@@ -1932,7 +1978,7 @@ function checkSeparationAndConflicts(state: SimulationState): void {
       }
 
       // Case B: Runway Collision
-      // At least one aircraft on/over active runway surface, both at low altitude, dist <= 0.06 NM (~111m), altDiff <= 60 ft
+      // Physical runway contact envelope: dist <= 0.028/0.020 NM (~37-52m), altDiff <= 35 ft
       const isRunwayA =
         a.state === "TAKEOFF_ROLL" ||
         a.state === "LINE_UP_WAIT" ||
@@ -1949,8 +1995,10 @@ function checkSeparationAndConflicts(state: SimulationState): void {
         b.state === "STOPPED_ON_RUNWAY";
       const isLowA = a.altitude <= elev + 60;
       const isLowB = b.altitude <= elev + 60;
+      const maxRwyContactDist =
+        a.wakeCategory === "HEAVY" || b.wakeCategory === "HEAVY" ? 0.028 : 0.020;
 
-      if ((isRunwayA || isRunwayB) && isLowA && isLowB && altDiff <= 60 && dist <= 0.06) {
+      if ((isRunwayA || isRunwayB) && isLowA && isLowB && altDiff <= 35 && dist <= maxRwyContactDist) {
         const rwy =
           (a.targetRunway && state.airport.runways[a.targetRunway]) ||
           (b.targetRunway && state.airport.runways[b.targetRunway]) ||

@@ -154,7 +154,12 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
       setSelectedTaxiRunway(ac.targetRunway);
       const rwyId = ac.assignedApproach ?? ac.targetRunway;
       setSelectedApproachRunway(rwyId);
-      const g = computeDepAppGuidance(sim.airport, ac, rwyId);
+      const g = computeDepAppGuidance(
+        sim.airport,
+        ac,
+        rwyId,
+        Object.values(sim.aircraft)
+      );
       setCustomHeading(String(g.recommendedHeading).padStart(3, "0"));
       setTurnDir(g.recommendedTurnDirection);
 
@@ -2145,17 +2150,20 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
             const depAppGuidance = computeDepAppGuidance(
               sim.airport,
               ac,
-              selectedApproachRunway
+              selectedApproachRunway,
+              Object.values(sim.aircraft)
             );
             const recHdgStr = String(depAppGuidance.recommendedHeading).padStart(3, "0");
             const recBaseAlt = Math.round(sim.airport.elevationFt / 500) * 500;
             const altOptions = Array.from(
               new Set([
                 recBaseAlt + 2500,
-                recBaseAlt + 3000,
-                recBaseAlt + 5000,
+                recBaseAlt + 3500,
+                recBaseAlt + 4500,
+                recBaseAlt + 5500,
                 recBaseAlt + 7000,
                 recBaseAlt + 10000,
+                depAppGuidance.recommendedAltitude,
               ])
             ).sort((a, b) => a - b);
             const speedOptions = [160, 180, 210, 250];

@@ -40,7 +40,8 @@ function bearingDeg(x1: number, y1: number, x2: number, y2: number): number {
 export function computeDepAppGuidance(
   airport: AirportLayout,
   ac: Aircraft,
-  requestedRunway?: RunwayId
+  requestedRunway?: RunwayId,
+  allAircraft?: Aircraft[]
 ): DepAppGuidance {
   const elev = airport.elevationFt;
   const baseAlt = Math.round(elev / 500) * 500;
@@ -122,7 +123,29 @@ export function computeDepAppGuidance(
   const hasOverflownRunway = along > 0.5;
   const needsPatternTurn = isGoAround || hasOverflownRunway;
 
-  const patternAlt = baseAlt + 2500;
+  let patternAlt = baseAlt + 2500;
+  if (allAircraft && allAircraft.length > 0 && rwy) {
+    // Find active inbound arrivals in the same approach stream
+    const otherInbound = allAircraft.filter(
+      (other) =>
+        other.id !== ac.id &&
+        other.flightKind === "ARRIVAL" &&
+        other.state !== "COMPLETED_ARRIVAL" &&
+        other.state !== "CRASHED" &&
+        (other.assignedApproach === rwyId || other.targetRunway === rwyId) &&
+        (other.state === "APPROACH" ||
+          other.state === "FINAL" ||
+          other.state === "CLEARED_TO_LAND" ||
+          other.state === "LANDING")
+    );
+    // Count how many arrivals on this runway corridor are ahead of ac
+    const aheadCount = otherInbound.filter((other) => {
+      const otherAlong = alongRunwayNm(rwy, other.x, other.y);
+      return otherAlong > along;
+    }).length;
+    // Step altitude shelf by 1,000 ft for each aircraft ahead in trail to guarantee vertical separation
+    patternAlt = baseAlt + 2500 + Math.min(4, aheadCount) * 1000;
+  }
   const sideSign = Math.abs(cross) >= 0.4 ? Math.sign(cross) : 1; // +1 right pattern, -1 left pattern
   const downwindPt = rwy ? runwayPoint(rwy, -6.5, sideSign * 2.8) : { x: ac.x, y: ac.y };
   const interceptPt = rwy ? runwayPoint(rwy, -8.5, 0) : { x: ac.x, y: ac.y };
