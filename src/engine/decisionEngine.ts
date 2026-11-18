@@ -117,6 +117,33 @@ export function controllerFrequency(
   }
 }
 
+/**
+ * Formats a destination airport/city string for spoken radiotelephony and clearance phraseology.
+ * Strips nested parenthetical airport names and ICAO/IATA codes (e.g. "(Louisville Worldport (SDF))"),
+ * state codes (e.g. ", KY"), and leaves natural conversational destination names (e.g. "Louisville").
+ */
+export function formatSpokenDestination(rawDest?: string | null): string {
+  if (!rawDest) return "destination";
+  let cleaned = rawDest.trim();
+  // Strip innermost parenthetical and bracketed content repeatedly (handles nested like (Louisville Worldport (SDF)))
+  while (/\([^()]*\)/.test(cleaned)) {
+    cleaned = cleaned.replace(/\s*\([^()]*\)/g, " ").trim();
+  }
+  while (/\[[^\[\]]*\]/.test(cleaned)) {
+    cleaned = cleaned.replace(/\s*\[[^\[\]]*\]/g, " ").trim();
+  }
+  while (/\{[^{}]*\}/.test(cleaned)) {
+    cleaned = cleaned.replace(/\s*\{[^{}]*\}/g, " ").trim();
+  }
+  // Strip US / regional state codes like ", KY", ", FL", ", CA"
+  cleaned = cleaned.replace(/,\s*[A-Z]{2}\b/g, "").trim();
+  // Strip any lingering stray brackets
+  cleaned = cleaned.replace(/[()[\]{}]/g, " ").trim();
+  // Strip trailing punctuation
+  cleaned = cleaned.replace(/[,;/-]+$/, "").trim();
+  return cleaned || rawDest.trim() || "destination";
+}
+
 function formatRunwayOrAltitudeError(
   clearance: ATCClearance,
   state: SimulationState
@@ -326,7 +353,8 @@ export function submitClearanceDecision(
     }
 
     case "IFR_CLEARANCE": {
-      const dest = (params.destination as string) ?? aircraft.destinationName ?? aircraft.destinationIcao ?? "destination";
+      const rawDest = (params.destination as string) ?? aircraft.destinationName ?? aircraft.destinationIcao ?? "destination";
+      const dest = formatSpokenDestination(rawDest);
       const sid = (params.sid as string) ?? aircraft.assignedDepartureFix ?? state.airport.departureFixIds?.[0] ?? "departure";
       const alt = (params.altitude as number | string) ?? 5000;
       const rwy = (params.runway as string) ?? aircraft.targetRunway ?? state.airport.primaryDepartureRunway ?? "";

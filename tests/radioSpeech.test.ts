@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createBaseSimulation, createDepartureAircraft, stepSimulation } from "../src/engine/simulation.ts";
-import { submitClearanceDecision, acknowledgeSyncClearance } from "../src/engine/decisionEngine.ts";
+import { submitClearanceDecision, acknowledgeSyncClearance, formatSpokenDestination } from "../src/engine/decisionEngine.ts";
 import { collectNewMessagesSince } from "../src/store/atcStore.ts";
 import {
   ICAO_PHONETIC_TABLE,
@@ -97,6 +97,37 @@ test("formatAtcSpeech and ICAO helpers handle callsigns, taxiways, runways, gate
   const transferSpeech = formatAtcSpeech("Frequency transfer for UAE101 from Ground -> Tower.");
   assert.ok(!transferSpeech.includes("arrow"));
   assert.ok(transferSpeech.includes("from Ground to Tower."));
+
+  // Parentheses and bracketed codes (like (SDF) or (MIA)) must be completely excluded from speech output
+  const clearanceSpeech = formatAtcSpeech(
+    "Cleared to Louisville, KY (Louisville Worldport (SDF)) via DEP2, runway 02, climb maintain 5000, departure 119.1, squawk 2146, UPS 298."
+  );
+  assert.ok(!clearanceSpeech.includes("SDF"), "Must not speak raw bracketed SDF");
+  assert.ok(!clearanceSpeech.includes("Sierra Delta Foxtrot"), "Must not speak SDF phonetics");
+  assert.ok(!clearanceSpeech.includes("Worldport"), "Must not speak inner parenthetical name");
+  assert.ok(!clearanceSpeech.includes("("), "Must have no open parenthesis");
+  assert.ok(!clearanceSpeech.includes(")"), "Must have no close parenthesis");
+});
+
+test("formatSpokenDestination produces clean destination city/airport names without bracketed codes", () => {
+  assert.equal(
+    formatSpokenDestination("Louisville, KY (Louisville Worldport (SDF))"),
+    "Louisville"
+  );
+  assert.equal(
+    formatSpokenDestination("Miami, FL (Miami International (MIA))"),
+    "Miami"
+  );
+  assert.equal(
+    formatSpokenDestination("Delhi (Indira Gandhi Intl (DEL))"),
+    "Delhi"
+  );
+  assert.equal(
+    formatSpokenDestination("Bengaluru (Kempegowda Intl (BLR))"),
+    "Bengaluru"
+  );
+  assert.equal(formatSpokenDestination("Paris"), "Paris");
+  assert.equal(formatSpokenDestination(""), "destination");
 });
 
 test("scoreSpeechVoice prioritizes neural/cloud English voices above legacy local SAPI voices", () => {

@@ -45,7 +45,7 @@ import {
 } from "../utils/groundConflict.ts";
 import { formatAltitudeReadout } from "../utils/telemetry.ts";
 import { radioAudio } from "../utils/radioAudio.ts";
-import { controllerCallsign, controllerFrequency } from "../engine/decisionEngine.ts";
+import { controllerCallsign, controllerFrequency, formatSpokenDestination } from "../engine/decisionEngine.ts";
 import { Accordion } from "./Accordion.tsx";
 
 export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
@@ -1465,7 +1465,7 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                     Clearance Transmission Preview (Spoken Phraseology)
                   </div>
                   <p className="text-[11px] text-[var(--atc-text-secondary)] leading-relaxed italic">
-                    "{ac.spokenCallsign}, cleared to {ac.destinationName ?? ac.destinationIcao ?? "destination"} via {delSid} departure, runway {delRwy}, climb and maintain {delAltitude.toLocaleString()} feet, departure frequency {controllerFrequency("DEPARTURE", sim.airport, "DEPARTURE")}, squawk {delSquawk}."
+                    "{ac.spokenCallsign}, cleared to {formatSpokenDestination(ac.destinationName ?? ac.destinationIcao ?? "destination")} via {delSid} departure, runway {delRwy}, climb and maintain {delAltitude.toLocaleString()} feet, departure frequency {controllerFrequency("DEPARTURE", sim.airport, "DEPARTURE")}, squawk {delSquawk}."
                   </p>
                 </div>
 
