@@ -26,6 +26,7 @@ import type { AirportRecord, LiveAdsbTrack, LiveTrafficSnapshot } from "../types
 import { offlineDb } from "../utils/offlineDb.ts";
 import { AircraftPhotoFrame } from "./AircraftPhotoFrame.tsx";
 import { LocalClockBadge } from "./LocalClockBadge.tsx";
+import { PlaneFlightLoader } from "./PlaneFlightLoader.tsx";
 
 const QUICK_AIRSPACE_HUBS = [
   { icao: "VIDP", name: "Delhi (VIDP)", lat: 28.5556, lon: 77.0952 },
@@ -648,6 +649,14 @@ export const LiveTrafficView: React.FC = () => {
           )}
         </aside>
       </div>
+
+      {converting && (
+        <PlaneFlightLoader
+          message="Synthesizing Live ATC Radar Scope..."
+          submessage="CONVERTING ADS-B TRANSPONDERS TO CONTROLLABLE FLIGHTS"
+          fullscreen={true}
+        />
+      )}
     </div>
   );
 };

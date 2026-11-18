@@ -17,6 +17,7 @@ import {
   WifiOff,
 } from "lucide-react";
 import { useAtcStore } from "../store/atcStore.ts";
+import { PlaneFlightLoader } from "./PlaneFlightLoader.tsx";
 import type { ControllerRole, DifficultyLevel, ScenarioId } from "../types/atc.ts";
 
 const ROLES: Array<{
@@ -681,6 +682,28 @@ export const MultiplayerLobby: React.FC = () => {
           </div>
         )}
       </div>
+
+      {isCreating && (
+        <PlaneFlightLoader
+          message="Provisioning ATC Multiplayer Room..."
+          submessage="CREATING SECURE SESSION & ALLOCATING STATIONS"
+          fullscreen={true}
+        />
+      )}
+      {isJoining && (
+        <PlaneFlightLoader
+          message="Connecting to Multiplayer Airspace..."
+          submessage="SYNCHRONIZING TOWER COMMUNICATIONS"
+          fullscreen={true}
+        />
+      )}
+      {isStartingSession && (
+        <PlaneFlightLoader
+          message="Launching Shared Airspace Simulation..."
+          submessage="SYNCHRONIZING RADAR SCOPES ACROSS ALL STATIONS"
+          fullscreen={true}
+        />
+      )}
     </div>
   );
 };

@@ -14,6 +14,7 @@ import { RadarScopeCanvas } from "./components/RadarScopeCanvas.tsx";
 import { RadioCommsLog } from "./components/RadioCommsLog.tsx";
 import { TopBar } from "./components/TopBar.tsx";
 import { VerificationModal } from "./components/VerificationModal.tsx";
+import { PlaneFlightLoader } from "./components/PlaneFlightLoader.tsx";
 import { useAtcStore } from "./store/atcStore.ts";
 import { radioAudio } from "./utils/radioAudio.ts";
 import { speechPtt } from "./utils/speechRecognitionPtt.ts";
@@ -36,6 +37,7 @@ export function App() {
   const setMobileTab = useAtcStore((s) => s.setMobileTab);
   const sim = useAtcStore((s) => s.sim);
   const selectAircraft = useAtcStore((s) => s.selectAircraft);
+  const globalLoading = useAtcStore((s) => s.globalLoading);
 
   const [mobileSheetExpanded, setMobileSheetExpanded] = useState(false);
 
@@ -289,6 +291,15 @@ export function App() {
 
       <VerificationModal />
       <PostSessionModal />
+
+      {/* Global Animated Plane in Air Loading Screen */}
+      {globalLoading?.active && (
+        <PlaneFlightLoader
+          message={globalLoading.message}
+          submessage={globalLoading.submessage}
+          fullscreen={true}
+        />
+      )}
     </div>
   );
 }
