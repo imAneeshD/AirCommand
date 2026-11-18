@@ -1917,13 +1917,21 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
 
   haltRunwayOperations: (runwayId, aircraftId) => {
     const { sim } = get();
+    const ac = aircraftId ? sim.aircraft[aircraftId] : undefined;
     const ok = haltRunwayOperations(sim, runwayId, aircraftId);
     if (ok) radioAudio.playRadioClick("ALERT");
+    const locKind = ac?.crashDetails?.locationKind ?? (ac?.crashDetails?.runwayId ? "RUNWAY" : "APRON");
+    const locText =
+      locKind === "APRON"
+        ? "Apron & Ramp operations halted. Sector isolated."
+        : locKind === "TAXIWAY"
+        ? "Taxiway operations halted. Sector closed."
+        : `Runway ${runwayId} closed. Operations halted.`;
     set((s) => ({
       tickVersion: s.tickVersion + 1,
       lastFeedback: {
         ok,
-        text: ok ? `Runway ${runwayId} closed. Operations halted.` : "Cannot close runway.",
+        text: ok ? locText : "Cannot halt operations.",
         at: sim.time,
       },
     }));

@@ -218,6 +218,8 @@ export interface Aircraft {
   emergencyType: EmergencyType;
   crashDetails?: {
     time: number;
+    locationKind?: "RUNWAY" | "APRON" | "TAXIWAY" | "AIR";
+    locationLabel?: string;
     runwayId?: RunwayId;
     reason: string;
     arffDispatched: boolean;
