@@ -43,7 +43,15 @@ export function App() {
   const globalLoading = useAtcStore((s) => s.globalLoading);
 
   const [mobileSheetExpanded, setMobileSheetExpanded] = useState(false);
-  const [showEmailModal, setShowEmailModal] = useState(false);
+  const showEmailModal = useAtcStore((s) => s.showEmailModal);
+  const setShowEmailModal = useAtcStore((s) => s.setShowEmailModal);
+
+  // Auto-prompt on initial app mount if user has no saved email
+  useEffect(() => {
+    if (!loadSavedUserEmail()) {
+      setShowEmailModal(true);
+    }
+  }, [setShowEmailModal]);
 
   // Auto-start session tracking & prompt for controller email logbook when entering simulation
   useEffect(() => {
@@ -60,7 +68,7 @@ export function App() {
     return () => {
       sessionTracker.endSession();
     };
-  }, [appMode]);
+  }, [appMode, setShowEmailModal, sim]);
 
   useEffect(() => {
     setMobileSheetExpanded(false);

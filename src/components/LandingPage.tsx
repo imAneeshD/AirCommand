@@ -29,6 +29,7 @@ import { useAtcStore } from "../store/atcStore.ts";
 import type { AirportId, AirportRecord, PlayerRoleMode, ScenarioId } from "../types/atc.ts";
 import { offlineDb } from "../utils/offlineDb.ts";
 import { radioAudio } from "../utils/radioAudio.ts";
+import { loadSavedUserEmail } from "../utils/storage.ts";
 
 interface FeaturedAirportItem {
   id: string;
@@ -315,6 +316,7 @@ export const LandingPage: React.FC = () => {
   const selectAndSaveAirport = useAtcStore((s) => s.selectAndSaveAirport);
   const launchRealAirportSimulation = useAtcStore((s) => s.launchRealAirportSimulation);
   const setShowVerificationModal = useAtcStore((s) => s.setShowVerificationModal);
+  const setShowEmailModal = useAtcStore((s) => s.setShowEmailModal);
   const removeLocalOfflineMap = useAtcStore((s) => s.removeLocalOfflineMap);
 
   const [selectedAirportId, setSelectedAirportId] = useState<string>(
@@ -371,6 +373,11 @@ export const LandingPage: React.FC = () => {
         return;
       }
 
+      // Prompt for email logbook if user hasn't set one yet
+      if (!loadSavedUserEmail()) {
+        setShowEmailModal(true);
+      }
+
       // Check bundled real airport
       const bundled = offlineDb.getBundledFallbackAirport(targetId);
       if (bundled) {
@@ -387,6 +394,9 @@ export const LandingPage: React.FC = () => {
 
   // Resume current active session
   const handleResumeCurrentSession = () => {
+    if (!loadSavedUserEmail()) {
+      setShowEmailModal(true);
+    }
     setAppMode("SIMULATION");
   };
 
@@ -485,6 +495,16 @@ export const LandingPage: React.FC = () => {
             className="p-2 rounded-lg border border-[var(--atc-border)] bg-[var(--atc-surface)] hover:border-[var(--atc-border-strong)] text-[var(--atc-text)] text-xs transition-colors"
           >
             {isLight ? <Moon className="w-4 h-4 text-indigo-500" /> : <Sun className="w-4 h-4 text-amber-400" />}
+          </button>
+
+          {/* Controller Logbook */}
+          <button
+            onClick={() => setShowEmailModal(true)}
+            title={loadSavedUserEmail() ? `Controller Logbook: ${loadSavedUserEmail()}` : "Enter email to sync logbook across sessions"}
+            className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--atc-cyan-bg)] hover:brightness-110 border border-[var(--atc-cyan-border)] text-xs font-mono font-medium text-[var(--atc-cyan)] transition-colors cursor-pointer"
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-[var(--atc-cyan)]" />
+            <span className="max-w-[130px] truncate">{loadSavedUserEmail() || "Logbook"}</span>
           </button>
 
           {/* Rules Verification */}

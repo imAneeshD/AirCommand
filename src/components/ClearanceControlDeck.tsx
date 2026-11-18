@@ -364,7 +364,10 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
     return al >= -0.05 && al <= r.lengthNm + 0.05 && cr <= Math.max(r.widthNm * 1.5, 0.035);
   });
   const isPhysicallyOnRunway = Boolean(
-    activeRunwayObj && ac.altitude <= sim.airport.elevationFt + 50
+    activeRunwayObj &&
+    ac.altitude <= sim.airport.elevationFt + 50 &&
+    ac.state !== "CROSSING_RUNWAY" &&
+    ac.state !== "TAXIING"
   );
   const activeRunwayId = (activeRunwayObj?.id ?? ac.assignedApproach ?? ac.targetRunway) as RunwayId;
 
@@ -380,6 +383,7 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
 
   const canVacateRwy =
     !nordoLocked &&
+    ac.state !== "CROSSING_RUNWAY" &&
     (ac.state === "TOUCHDOWN" ||
       ac.state === "ROLLOUT" ||
       ac.state === "VACATING_RUNWAY" ||
@@ -406,7 +410,16 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
     return bestId;
   }, [ac.currentNodeId, ac.state, ac.gateId, ac.x, ac.y, isPhysicallyOnRunway, sim.airport.nodes]);
 
-  const isArrivalToGate = ac.flightKind === "ARRIVAL" || isStoppedOnRunway || isPhysicallyOnRunway;
+  const isDepartureAbortOnRunway =
+    ac.flightKind === "DEPARTURE" &&
+    (ac.state === "STOPPED_ON_RUNWAY" ||
+      ac.state === "TAKEOFF_CANCELLED" ||
+      ac.state === "REJECTED_TAKEOFF");
+
+  const isArrivalToGate =
+    ac.flightKind === "ARRIVAL" ||
+    (isDepartureAbortOnRunway && !selectedTaxiRunway);
+
   const taxiRoutes = effectiveCurrentNodeId
     ? getSuggestedTaxiRoutes(
         sim.airport,
@@ -476,6 +489,7 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
     "rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] hover:border-[var(--atc-border-strong)] hover:bg-[var(--atc-surface)] text-[var(--atc-text)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 
   const renderRunwayVacateCard = () => {
+    if (ac.state === "CROSSING_RUNWAY") return null;
     if (!canVacateRwy && !isPhysicallyOnRunway && !isStoppedOnRunway) return null;
     return (
       <div className="rounded-lg border border-[var(--atc-amber-border)] bg-[var(--atc-surface-alt)] p-3 space-y-2.5 shadow-sm">
@@ -589,6 +603,48 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
     );
   };
 
+  const renderCrossingRunwayCard = () => {
+    if (ac.state !== "CROSSING_RUNWAY") return null;
+    const crossingRwyId = ac.holdingAtRunway ?? activeRunwayId;
+    return (
+      <div className="rounded-lg border border-[var(--atc-cyan-border)] bg-[var(--atc-surface-alt)] p-3 space-y-2.5 shadow-sm">
+        <div className="flex items-center justify-between gap-1">
+          <div className="font-bold flex items-center gap-1.5 text-[var(--atc-cyan)] text-xs">
+            <span className="w-2 h-2 rounded-full bg-[var(--atc-cyan)] animate-ping" />
+            <span>CROSSING RUNWAY {crossingRwyId}</span>
+          </div>
+          <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-[var(--atc-cyan-bg)] text-[var(--atc-cyan)] border border-[var(--atc-cyan-border)]">
+            26 KTS
+          </span>
+        </div>
+
+        <p className="text-[10px] text-[var(--atc-text-secondary)] leading-relaxed">
+          Aircraft is crossing runway {crossingRwyId} towards departure runway {ac.targetRunway}. High-priority active crossing.
+        </p>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              handleIssueClearance(
+                {
+                  aircraftId: ac.id,
+                  controller: deckTab === "GROUND" ? "GROUND" : (ac.controller === "GROUND" ? "GROUND" : "TOWER"),
+                  type: "CROSS_RUNWAY",
+                  parameters: { runway: crossingRwyId },
+                },
+                "CROSS_EXPEDITE"
+              );
+            }}
+            className="w-full py-1.5 px-2.5 rounded border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] text-[var(--atc-cyan)] font-mono text-[11px] font-bold hover:brightness-110 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+          >
+            <ArrowRight className="w-3.5 h-3.5" />
+            <span>EXPEDITE CROSSING (32 KTS)</span>
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   const renderTaxiRouteBuilder = () => (
     <div className="rounded-md border border-[var(--atc-border)] bg-[var(--atc-surface-alt)] p-2 space-y-2">
       <div className="flex items-center justify-between gap-2">
@@ -597,7 +653,7 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
             ? isStoppedOnRunway || isPhysicallyOnRunway
               ? `Taxi to Gate ${ac.gateId ?? "Apron"}`
               : `Taxi to Gate ${ac.gateId ?? ""}`
-            : "Taxi Clearance"}
+            : `Taxi to Runway ${selectedTaxiRunway ?? ac.targetRunway}`}
         </span>
         {!isArrivalToGate && (
           <span className="text-[10px] font-mono text-[var(--atc-muted)] whitespace-nowrap">
@@ -1723,6 +1779,7 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
               ) : (
                 /* NORMAL GROUND VIEW: Clean & Predicted Pushback, Hold Position, Taxi Route Builder */
                 <div className="space-y-2.5">
+                  {ac.state === "CROSSING_RUNWAY" && renderCrossingRunwayCard()}
                   {(isPhysicallyOnRunway || isStoppedOnRunway || canVacateRwy) && renderRunwayVacateCard()}
                   
                   {ac.state === "AT_GATE" ? (

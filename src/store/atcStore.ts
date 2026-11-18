@@ -163,6 +163,7 @@ interface AtcStore {
   hoverPreviewRoute: string[] | null;
   lastFeedback: { ok: boolean; text: string; at: number } | null;
   showVerificationModal: boolean;
+  showEmailModal: boolean;
   sfxEnabled: boolean;
   voiceEnabled: boolean;
   theme: ThemeMode;
@@ -273,6 +274,7 @@ interface AtcStore {
   resetCameraForStation: (role?: PlayerRoleMode) => void;
   setHoverPreviewRoute: (nodeIds: string[] | null) => void;
   setShowVerificationModal: (open: boolean) => void;
+  setShowEmailModal: (open: boolean) => void;
   toggleSfx: () => void;
   toggleVoice: () => void;
   setVoiceEnabled: (enabled: boolean) => void;
@@ -742,6 +744,7 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
   hoverPreviewRoute: null,
   lastFeedback: null,
   showVerificationModal: false,
+  showEmailModal: false,
   sfxEnabled: initialSavedSfx,
   voiceEnabled: initialSavedVoice,
   theme: initialSavedTheme,
@@ -2120,6 +2123,7 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
   setHoverPreviewRoute: (nodeIds) => set({ hoverPreviewRoute: nodeIds }),
 
   setShowVerificationModal: (open) => set({ showVerificationModal: open }),
+  setShowEmailModal: (open) => set({ showEmailModal: open }),
 
   toggleSfx: () =>
     set((s) => {

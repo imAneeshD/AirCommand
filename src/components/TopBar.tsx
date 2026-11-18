@@ -26,7 +26,6 @@ import type { ControllerRole, PlayerRoleMode, ScenarioId } from "../types/atc.ts
 import { LocalClockBadge } from "./LocalClockBadge.tsx";
 import { RadioVoiceMenu } from "./RadioVoiceMenu.tsx";
 import { VoicePttButton } from "./VoicePttButton.tsx";
-import { UserEmailSessionModal } from "./UserEmailSessionModal.tsx";
 import { loadSavedUserEmail } from "../utils/storage.ts";
 
 const STATIONS: Array<{
@@ -83,6 +82,7 @@ export const TopBar: React.FC = () => {
   const openAirportSelector = useAtcStore((s) => s.openAirportSelector);
   const toggleSfx = useAtcStore((s) => s.toggleSfx);
   const toggleVoice = useAtcStore((s) => s.toggleVoice);
+  const setShowEmailModal = useAtcStore((s) => s.setShowEmailModal);
   const toggleTheme = useAtcStore((s) => s.toggleTheme);
   const minimizedPanels = useAtcStore((s) => s.minimizedPanels);
   const togglePanelMinimized = useAtcStore((s) => s.togglePanelMinimized);
@@ -94,7 +94,6 @@ export const TopBar: React.FC = () => {
 
   const isMpActive = Boolean(roomState && roomState.status === "ACTIVE");
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [mobileStationOpen, setMobileStationOpen] = useState(false);
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement | null>(null);
@@ -403,6 +402,18 @@ export const TopBar: React.FC = () => {
           </button>
         </div>
 
+        {/* Controller Logbook Pill */}
+        <button
+          onClick={() => setShowEmailModal(true)}
+          title={loadSavedUserEmail() ? `Controller Logbook: ${loadSavedUserEmail()}` : "Open Controller Logbook (Set Email)"}
+          className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-cyan-500/30 bg-cyan-950/20 hover:bg-cyan-900/30 text-cyan-400 font-mono text-xs transition-colors cursor-pointer shadow-sm"
+        >
+          <ShieldCheck className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+          <span className="hidden xl:inline max-w-[120px] truncate font-semibold">
+            {loadSavedUserEmail() || "Logbook"}
+          </span>
+        </button>
+
         {/* Theme Toggle (Sun / Moon) */}
         <button
           onClick={toggleTheme}
@@ -474,7 +485,7 @@ export const TopBar: React.FC = () => {
                 <button
                   onClick={() => {
                     setSettingsOpen(false);
-                    setEmailModalOpen(true);
+                    setShowEmailModal(true);
                   }}
                   className="px-2 py-1 rounded text-[10px] font-bold bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-400 border border-cyan-500/30 transition-colors whitespace-nowrap cursor-pointer"
                 >
@@ -933,11 +944,6 @@ export const TopBar: React.FC = () => {
           </div>
         </div>
       )}
-
-      <UserEmailSessionModal
-        isOpen={emailModalOpen}
-        onClose={() => setEmailModalOpen(false)}
-      />
     </>
   );
 };

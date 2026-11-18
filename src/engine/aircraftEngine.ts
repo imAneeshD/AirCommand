@@ -375,7 +375,7 @@ export function updateAircraftStates(state: SimulationState): void {
       case "HOLDING_SHORT": {
         if (ac.holdingShortReason === "CROSSING_REQUIRED" && ac.holdingAtRunway) {
           if (canAircraftExecuteAction(ac, "CROSS_RUNWAY", state).allowed) {
-            ac.holdingAtRunway = undefined;
+            // Keep ac.holdingAtRunway set during CROSSING_RUNWAY so kinematics and clearance decks know which runway is being crossed!
             ac.holdingShortReason = undefined;
             ac.state = "CROSSING_RUNWAY";
             ac.stateEnteredAt = state.time;

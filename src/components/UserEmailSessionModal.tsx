@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Mail, ShieldCheck, UserCheck, X } from "lucide-react";
 import { loadSavedUserEmail, saveUserEmail } from "../utils/storage.ts";
 import { sessionTracker } from "../utils/sessionTracker.ts";
@@ -16,6 +16,13 @@ export const UserEmailSessionModal: React.FC<UserEmailSessionModalProps> = ({
 }) => {
   const [emailInput, setEmailInput] = useState(() => loadSavedUserEmail() ?? "");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setEmailInput(loadSavedUserEmail() ?? "");
+      setErrorMsg(null);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
