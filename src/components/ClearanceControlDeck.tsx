@@ -1502,27 +1502,16 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                     <div className="space-y-2">
                       <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-900 dark:bg-emerald-950/50 dark:border-emerald-700/60 dark:text-emerald-300 text-xs font-semibold flex items-center gap-2 shadow-sm">
                         <CheckCircle className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                        <span>IFR Cleared · Aircraft ready at gate. Hand off to Ground.</span>
+                        <span>IFR Cleared · Transferred to Ground for pushback &amp; start.</span>
                       </div>
 
                       <button
                         type="button"
-                        disabled={isCommandDisabled("HANDOFF_GND")}
-                        onClick={() =>
-                          handleIssueClearance(
-                            {
-                              aircraftId: ac.id,
-                              controller: "DELIVERY",
-                              type: "HANDOFF",
-                              parameters: { targetController: "GROUND" },
-                            },
-                            "HANDOFF_GND"
-                          )
-                        }
-                        className="w-full py-2.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-all transform active:scale-[0.99]"
+                        onClick={() => setDeckTab("GROUND")}
+                        className="w-full py-2.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md cursor-pointer transition-all transform active:scale-[0.99]"
                       >
                         <ArrowRight className="w-4 h-4 shrink-0" />
-                        <span>CONTACT GROUND ({controllerFrequency("GROUND", sim.airport)} MHz) FOR PUSHBACK &amp; START</span>
+                        <span>SWITCH TO GROUND CONTROLS</span>
                       </button>
                     </div>
                   )}
@@ -1600,36 +1589,72 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                       </div>
                     </div>
                   ) : (
-                    /* Case 2: Departure holding short for takeoff -> Transfer to Tower (Predicted Clean Minimal View) */
-                    <div className="rounded-xl border border-[var(--atc-cyan-border)] bg-[var(--atc-surface-alt)] p-3.5 space-y-3 shadow-sm">
+                    /* Case 2: Departure holding short for takeoff -> Ready on Tower (Predicted Clean Minimal View) */
+                    <div className="rounded-xl border border-emerald-500/40 bg-[var(--atc-surface-alt)] p-3.5 space-y-3 shadow-sm">
                       <div className="flex items-center justify-between">
-                        <span className="font-bold text-xs text-[var(--atc-cyan)] flex items-center gap-1.5">
+                        <span className="font-bold text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
                           <Radio className="w-3.5 h-3.5" />
                           HOLDING SHORT RWY {ac.targetRunway}
                         </span>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--atc-cyan-bg)] text-[var(--atc-cyan)] border border-[var(--atc-cyan-border)] font-mono font-bold">
-                          READY FOR TOWER
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 font-mono font-bold">
+                          READY FOR DEPARTURE
                         </span>
                       </div>
                       <p className="text-[11px] text-[var(--atc-text-secondary)] leading-relaxed">
-                        Taxi complete. Transfer communications to Tower ({controllerFrequency("TOWER", sim.airport)} MHz) for lineup and takeoff clearance.
+                        Taxi complete. Aircraft is holding short on Tower frequency ({controllerFrequency("TOWER", sim.airport)} MHz), ready for departure.
                       </p>
-                      <button
-                        type="button"
-                        disabled={nordoLocked || ac.controller === "TOWER" || isCommandDisabled("HANDOFF_TOWER")}
-                        onClick={() =>
-                          handleIssueClearance({
-                            aircraftId: ac.id,
-                            controller: "GROUND",
-                            type: "HANDOFF",
-                            parameters: { targetController: "TOWER" },
-                          }, "HANDOFF_TOWER")
-                        }
-                        className="w-full py-3 px-4 rounded-xl bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white font-mono font-bold text-xs sm:text-sm transition-all flex items-center justify-center gap-2 shadow-lg shadow-sky-600/25 cursor-pointer disabled:opacity-40"
-                      >
-                        <Radio className="w-4 h-4" />
-                        CONTACT TOWER ({controllerFrequency("TOWER", sim.airport)} MHz)
-                      </button>
+
+                      <div className="space-y-2">
+                        <button
+                          type="button"
+                          disabled={nordoLocked || isCommandDisabled("TAKEOFF")}
+                          onClick={() => {
+                            const baseAlt = Math.round(sim.airport.elevationFt / 500) * 500;
+                            handleIssueClearance({
+                              aircraftId: ac.id,
+                              controller: "TOWER",
+                              type: "TAKEOFF",
+                              parameters: { runway: ac.targetRunway, initialAltitude: baseAlt + 3000 },
+                            }, "TAKEOFF");
+                          }}
+                          className="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-mono font-bold text-xs sm:text-sm transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 cursor-pointer disabled:opacity-40"
+                        >
+                          <ArrowRight className="w-4 h-4" />
+                          CLEARED FOR TAKEOFF RWY {ac.targetRunway}
+                        </button>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            disabled={nordoLocked || isCommandDisabled("LINE_UP")}
+                            onClick={() =>
+                              handleIssueClearance({
+                                aircraftId: ac.id,
+                                controller: "TOWER",
+                                type: "LINE_UP",
+                                parameters: { runway: ac.targetRunway },
+                              }, "LINE_UP")
+                            }
+                            className="py-2 px-3 rounded-lg border border-[var(--atc-accent-border)] bg-[var(--atc-accent-bg)] hover:opacity-90 text-[var(--atc-accent-text)] font-mono text-xs font-bold transition-all disabled:opacity-35 disabled:cursor-not-allowed"
+                          >
+                            LINE UP &amp; WAIT
+                          </button>
+                          <button
+                            type="button"
+                            disabled={nordoLocked || isCommandDisabled("HOLD_POSITION")}
+                            onClick={() =>
+                              handleIssueClearance({
+                                aircraftId: ac.id,
+                                controller: "TOWER",
+                                type: "HOLD_POSITION",
+                              }, "HOLD_POSITION")
+                            }
+                            className="py-2 px-3 rounded-lg border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] hover:opacity-90 text-[var(--atc-amber)] font-mono text-xs font-bold transition-all disabled:opacity-35 disabled:cursor-not-allowed"
+                          >
+                            HOLD POSITION
+                          </button>
+                        </div>
+                      </div>
 
                       {/* Contingency / Emergency Override: ONLY in worst conditions or when explicitly toggled */}
                       {showAltTaxiways ? (
@@ -1756,35 +1781,19 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                       {renderTaxiRouteBuilder()}
                       {renderRunwayCrossingGrid()}
 
-                      <div className="grid grid-cols-2 gap-1.5">
-                        <button
-                          disabled={nordoLocked || isCommandDisabled("UNABLE")}
-                          onClick={() =>
-                            handleIssueClearance({
-                              aircraftId: ac.id,
-                              controller: "GROUND",
-                              type: "UNABLE",
-                            }, "UNABLE")
-                          }
-                          className={`py-1.5 px-2 font-mono text-xs ${neutralBtn}`}
-                        >
-                          UNABLE
-                        </button>
-                        <button
-                          disabled={nordoLocked || ac.controller === "TOWER" || isCommandDisabled("HANDOFF_TOWER")}
-                          onClick={() =>
-                            handleIssueClearance({
-                              aircraftId: ac.id,
-                              controller: "GROUND",
-                              type: "HANDOFF",
-                              parameters: { targetController: "TOWER" },
-                            }, "HANDOFF_TOWER")
-                          }
-                          className="py-1.5 px-2 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-xs font-semibold disabled:opacity-35 disabled:cursor-not-allowed"
-                        >
-                          CONTACT TOWER ({controllerFrequency("TOWER", sim.airport)})
-                        </button>
-                      </div>
+                      <button
+                        disabled={nordoLocked || isCommandDisabled("UNABLE")}
+                        onClick={() =>
+                          handleIssueClearance({
+                            aircraftId: ac.id,
+                            controller: "GROUND",
+                            type: "UNABLE",
+                          }, "UNABLE")
+                        }
+                        className={`w-full py-1.5 px-2 font-mono text-xs ${neutralBtn}`}
+                      >
+                        UNABLE
+                      </button>
                     </>
                   )}
                 </div>
@@ -1863,24 +1872,6 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                   {(isPhysicallyOnRunway || isStoppedOnRunway) && (
                     <div className="space-y-1.5 pt-1">
                       {renderRunwayVacateCard()}
-                      <button
-                        disabled={nordoLocked || isCommandDisabled("HANDOFF_GND")}
-                        onClick={() =>
-                          handleIssueClearance(
-                            {
-                              aircraftId: ac.id,
-                              controller: "TOWER",
-                              type: "HANDOFF",
-                              parameters: { targetController: "GROUND" },
-                            },
-                            "HANDOFF_GND"
-                          )
-                        }
-                        className="w-full py-1.5 px-2 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)] font-mono text-xs font-semibold disabled:opacity-35 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 cursor-pointer"
-                      >
-                        <Radio className="w-3.5 h-3.5" />
-                        HAND OFF TO GROUND ({controllerFrequency("GROUND", sim.airport)})
-                      </button>
                     </div>
                   )}
                 </div>

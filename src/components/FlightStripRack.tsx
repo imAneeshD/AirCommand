@@ -633,8 +633,8 @@ export const FlightStripRack: React.FC<{
           )}
         </div>
 
-        {/* Incoming Handoff Request with 1-click ACCEPT Button */}
-        {ho && (
+        {/* Incoming Handoff Request with 1-click ACCEPT Button (Multiplayer coordination only) */}
+        {ho && Boolean(roomState && Object.values(roomState.slots).filter((s) => s.playerId && s.connected).length > 1) && (
           <div className="mt-1.5 px-2 py-1.5 rounded-md bg-[var(--atc-cyan-bg)] border border-[var(--atc-cyan-border)] flex items-center justify-between gap-2 text-[10px] font-mono shadow-sm">
             <span className="font-bold text-[var(--atc-cyan)] flex items-center gap-1.5 truncate">
               <Radio className="w-3.5 h-3.5 animate-spin-slow shrink-0" />
