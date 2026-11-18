@@ -58,10 +58,11 @@ function stripHtml(raw: string | undefined): string {
 export function normalizeAircraftModelFamily(model: string): string {
   const cleaned = model
     .replace(/\([^)]*\)/g, " ")
+    .replace(/\b(XWB|neo|MAX|dash|classic)\b/gi, "")
     .replace(/\s+/g, " ")
     .trim();
-  // e.g. "Boeing 737-800" -> "Boeing 737", "Airbus A320-200" -> "Airbus A320", "Embraer E190" -> "Embraer E190"
-  return cleaned.replace(/(-\d{2,3}[A-Z]*|ER|LR|F)$/i, "").trim();
+  // e.g. "Boeing 737-800" -> "Boeing 737", "Airbus A350-900" -> "Airbus A350", "Airbus A320-200" -> "Airbus A320"
+  return cleaned.replace(/(-\d{2,4}[A-Z]*|ER|LR|F)$/i, "").trim();
 }
 
 function cleanAirlineName(airline: string): string {
@@ -78,6 +79,7 @@ function buildSearchQueries(query: AircraftPhotoQuery): Array<{
   const modelFull = (query.model ?? "").trim() || (query.typeCode ?? "").trim();
   if (!modelFull) return [];
   const modelFamily = normalizeAircraftModelFamily(modelFull);
+  const typeCode = (query.typeCode ?? "").trim().toUpperCase();
   const airlineRaw = (query.airline ?? "").trim();
   const airlineClean = cleanAirlineName(airlineRaw);
   const queries: Array<{ search: string; matchedBy: "airline_model" | "model_only" }> = [];
@@ -87,8 +89,21 @@ function buildSearchQueries(query: AircraftPhotoQuery): Array<{
     !/^(unknown|private|general aviation|generic)$/i.test(airlineClean);
 
   if (hasAirline) {
+    // 1. Natural search without over-restrictive quotes: e.g. Qatar Airways A350
     queries.push({
-      search: `"${airlineClean}" "${modelFamily || modelFull}" filetype:bitmap`,
+      search: `${airlineClean} ${modelFamily || modelFull} filetype:bitmap`,
+      matchedBy: "airline_model",
+    });
+    // 2. Type code search: e.g. Qatar Airways A359
+    if (typeCode && typeCode !== modelFamily) {
+      queries.push({
+        search: `${airlineClean} ${typeCode} filetype:bitmap`,
+        matchedBy: "airline_model",
+      });
+    }
+    // 3. Exact quoted airline name: e.g. "Qatar Airways" A350
+    queries.push({
+      search: `"${airlineClean}" ${modelFamily || modelFull} filetype:bitmap`,
       matchedBy: "airline_model",
     });
     if (airlineClean !== airlineRaw) {
@@ -97,17 +112,18 @@ function buildSearchQueries(query: AircraftPhotoQuery): Array<{
         matchedBy: "airline_model",
       });
     }
-  }
-
-  queries.push({
-    search: `"${modelFull}" aircraft filetype:bitmap`,
-    matchedBy: "model_only",
-  });
-  if (modelFamily && modelFamily !== modelFull) {
+  } else {
+    // Only search model_only if NO specific commercial airline is requested!
     queries.push({
-      search: `"${modelFamily}" airliner filetype:bitmap`,
+      search: `"${modelFull}" aircraft filetype:bitmap`,
       matchedBy: "model_only",
     });
+    if (modelFamily && modelFamily !== modelFull) {
+      queries.push({
+        search: `"${modelFamily}" airliner filetype:bitmap`,
+        matchedBy: "model_only",
+      });
+    }
   }
 
   return queries;
@@ -116,7 +132,8 @@ function buildSearchQueries(query: AircraftPhotoQuery): Array<{
 function scoreCandidate(
   page: WikimediaPage,
   airlineTokens: string[],
-  modelTokens: string[]
+  modelTokens: string[],
+  matchedBy: "airline_model" | "model_only" = "model_only"
 ): number {
   const title = page.title ?? "";
   const info = page.imageinfo?.[0];
@@ -138,12 +155,26 @@ function scoreCandidate(
   if (w > 0 && w < 320) return -1;
 
   const hay = `${title} ${stripHtml(info.extmetadata?.ImageDescription?.value)}`.toLowerCase();
+
+  // If airline match is required, verify airline presence!
+  if (matchedBy === "airline_model") {
+    if (airlineTokens.length === 0) return -1;
+    const hasAirlineToken = airlineTokens.some((tok) => tok.length >= 3 && hay.includes(tok));
+    if (!hasAirlineToken) {
+      return -1; // Reject mismatched airline!
+    }
+    // Reject manufacturer test / house livery aircraft when commercial airline is requested
+    if (/\b(airbus industrie|airbus house|boeing house|factory colors|prototype|flight test|msn 001)\b/i.test(hay)) {
+      return -1;
+    }
+  }
+
   let score = 10;
   for (const tok of modelTokens) {
     if (tok.length >= 2 && hay.includes(tok)) score += 6;
   }
   for (const tok of airlineTokens) {
-    if (tok.length >= 3 && hay.includes(tok)) score += 8;
+    if (tok.length >= 3 && hay.includes(tok)) score += 10;
   }
   if (w >= 720) score += 2;
   if (/(airport|runway|landing|takeoff|taxi|apron|final|boeing|airbus|jet)/i.test(hay)) {
@@ -190,9 +221,9 @@ export class AircraftPhotoService {
       );
     }
 
-    // 2. Exact airframe photo by tail registration (only when explicitly requested for real tails)
+    // 2. Exact airframe photo by tail registration (checked when registration has 4+ characters)
     const reg = (query.registration ?? "").trim().toUpperCase().replace(/[^A-Z0-9-]/g, "");
-    if (!resolved.found && query.preferRegistration && reg.length >= 4) {
+    if (!resolved.found && reg.length >= 4) {
       resolved = await this.searchPlanespotters(
         `https://api.planespotters.net/pub/photos/reg/${encodeURIComponent(reg)}`,
         "registration",
@@ -200,7 +231,7 @@ export class AircraftPhotoService {
       );
     }
 
-    // 3. Fallback to Wikimedia Commons by airline + model -> model only
+    // 3. Fallback to Wikimedia Commons by airline + model
     if (!resolved.found) {
       const searchPlan = buildSearchQueries(query);
       const airlineTokens = cleanAirlineName(query.airline ?? "")
@@ -241,7 +272,7 @@ export class AircraftPhotoService {
     try {
       const res = await this.fetchFn(endpoint, {
         headers: {
-          "User-Agent": "AirCommandATC/2.0",
+          "User-Agent": "AirCommandATC/2.0 (+https://github.com/aircommand-atc; contact@aircommand.dev)",
           Accept: "application/json",
         },
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -296,7 +327,7 @@ export class AircraftPhotoService {
     try {
       const res = await this.fetchFn(endpoint, {
         headers: {
-          "User-Agent": "AirCommandATC/1.0 (https://github.com/aircommand-atc; education-sim)",
+          "User-Agent": "AirCommandATC/2.0 (+https://github.com/aircommand-atc; contact@aircommand.dev)",
           Accept: "application/json",
         },
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -312,7 +343,7 @@ export class AircraftPhotoService {
       let bestPage: WikimediaPage | null = null;
       let bestScore = -1;
       for (const page of pages) {
-        const s = scoreCandidate(page, airlineTokens, modelTokens);
+        const s = scoreCandidate(page, airlineTokens, modelTokens, matchedBy);
         if (s > bestScore) {
           bestScore = s;
           bestPage = page;

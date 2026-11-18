@@ -51,11 +51,11 @@ export const AircraftPhotoFrame: React.FC<AircraftPhotoFrameProps> = ({
     apiClient
       .getAircraftPhoto({
         icao24: effectiveIcao24 || undefined,
-        preferRegistration: Boolean(effectiveIcao24),
+        preferRegistration: true,
         airline: livery.airlineName,
         model: spec.model,
         typeCode: spec.code,
-        registration,
+        registration: registration || undefined,
       })
       .then((res) => {
         clientPhotoCache.set(cacheKey, res);
