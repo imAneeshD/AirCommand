@@ -690,7 +690,12 @@ function integrateAirborneFlight(
       ac.heading = turnTowardHeading(ac.heading, tgtHdg, 4 * dt, "NEAREST");
     } else {
       // Re-sequencing or pattern recovery toward downwind gate or IAF
-      const guidance = computeDepAppGuidance(state.airport, ac, rwyId);
+      const guidance = computeDepAppGuidance(
+        state.airport,
+        ac,
+        rwyId,
+        Object.values(state.aircraft)
+      );
       ac.heading = turnTowardHeading(
         ac.heading,
         guidance.recommendedHeading,

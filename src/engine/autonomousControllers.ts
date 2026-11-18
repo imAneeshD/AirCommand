@@ -790,7 +790,12 @@ function runAutonomousDeparture(state: SimulationState): void {
       const rwySpec = state.airport.runways[rwy];
       if (!rwySpec) continue;
       const along = alongRunwayNm(rwySpec, ac.x, ac.y);
-      const guidance = computeDepAppGuidance(state.airport, ac, rwy);
+      const guidance = computeDepAppGuidance(
+        state.airport,
+        ac,
+        rwy,
+        Object.values(state.aircraft)
+      );
 
       // 1. Proactively hand off to Tower when established on final approach within 12 NM
       const isEstablishedOnFinal =
@@ -826,8 +831,8 @@ function runAutonomousDeparture(state: SimulationState): void {
               runway: rwy,
               heading: guidance.recommendedHeading,
               turnDirection: guidance.recommendedTurnDirection,
-              altitude: baseAlt + 2500,
-              speed: 165,
+              altitude: guidance.recommendedAltitude,
+              speed: guidance.recommendedSpeed ?? 165,
               fixId: guidance.recommendedDirectFix,
             },
           },
@@ -857,19 +862,34 @@ function runAutonomousDeparture(state: SimulationState): void {
         continue;
       }
 
-      // 4. Descend to approach altitude
-      if (ac.assignedAltitude === null || ac.assignedAltitude > baseAlt + 2800) {
-        submitClearanceDecision(
-          state,
-          {
-            aircraftId: ac.id,
-            controller: "DEPARTURE",
-            type: "ALTITUDE",
-            parameters: { altitude: baseAlt + 2500 },
-          },
-          "AUTONOMOUS"
+      // 4. Descend to safe stepped approach altitude (respecting player manual altitude overrides)
+      const latestAltClr = [...ac.clearances]
+        .reverse()
+        .find(
+          (c) =>
+            (c.type === "ALTITUDE" || c.type === "APPROACH") &&
+            !c.cancelled
         );
-        continue;
+      const isPlayerAlt = latestAltClr?.issuedBy === "PLAYER";
+
+      if (!isPlayerAlt) {
+        const targetAlt = guidance.recommendedAltitude;
+        if (
+          ac.assignedAltitude === null ||
+          Math.abs(ac.assignedAltitude - targetAlt) >= 400
+        ) {
+          submitClearanceDecision(
+            state,
+            {
+              aircraftId: ac.id,
+              controller: "DEPARTURE",
+              type: "ALTITUDE",
+              parameters: { altitude: targetAlt },
+            },
+            "AUTONOMOUS"
+          );
+          continue;
+        }
       }
 
       // 5. Approach speed control
@@ -880,14 +900,12 @@ function runAutonomousDeparture(state: SimulationState): void {
             aircraftId: ac.id,
             controller: "DEPARTURE",
             type: "SPEED",
-            parameters: { speed: 165 },
+            parameters: { speed: guidance.recommendedSpeed ?? 165 },
           },
           "AUTONOMOUS"
         );
         continue;
       }
-
-      continue;
     }
   }
 }
@@ -988,14 +1006,35 @@ function runAutonomousCenter(state: SimulationState): void {
         );
         continue;
       }
-      if (ac.assignedAltitude === null || ac.assignedAltitude > elev + 6000) {
+      const latestCenterAltClr = [...ac.clearances]
+        .reverse()
+        .find(
+          (c) =>
+            (c.type === "ALTITUDE" || c.type === "APPROACH") &&
+            !c.cancelled
+        );
+      const isPlayerCenterAlt = latestCenterAltClr?.issuedBy === "PLAYER";
+
+      if (!isPlayerCenterAlt && (ac.assignedAltitude === null || ac.assignedAltitude > elev + 6000)) {
+        // Assign a conflict-free shelf (5,000, 6,000, 7,000, 8,000)
+        const occupiedAlts = Object.values(state.aircraft)
+          .filter((other) => other.id !== ac.id && other.state !== "CRASHED" && other.state !== "COMPLETED_ARRIVAL")
+          .map((other) => other.assignedAltitude ?? other.altitude);
+        const centerShelves = [
+          Math.round((elev + 5000) / 500) * 500,
+          Math.round((elev + 6000) / 500) * 500,
+          Math.round((elev + 7000) / 500) * 500,
+          Math.round((elev + 8000) / 500) * 500,
+        ];
+        const safeShelf = centerShelves.find((s) => occupiedAlts.every((a) => Math.abs(a - s) >= 800)) ?? centerShelves[0];
+
         submitClearanceDecision(
           state,
           {
             aircraftId: ac.id,
             controller: "CENTER",
             type: "ALTITUDE",
-            parameters: { altitude: Math.round((elev + 5000) / 500) * 500 },
+            parameters: { altitude: safeShelf },
           },
           "AUTONOMOUS"
         );

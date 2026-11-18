@@ -2424,7 +2424,12 @@ function drawScope(
       selectedAc.state === "GO_AROUND" ||
       selectedAc.state === "MISSED_APPROACH"
     ) {
-      const guidance = computeDepAppGuidance(sim.airport, selectedAc);
+      const guidance = computeDepAppGuidance(
+        sim.airport,
+        selectedAc,
+        undefined,
+        Object.values(sim.aircraft)
+      );
       if (guidance.recoveryPreviewPoints.length >= 2) {
         const recPts: ScreenPt[] = guidance.recoveryPreviewPoints.map((pt) => {
           const [sx, sy] = toScreen(pt.x, pt.y);
