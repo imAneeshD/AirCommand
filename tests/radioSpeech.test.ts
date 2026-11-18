@@ -84,15 +84,9 @@ test("formatAtcSpeech and ICAO helpers handle callsigns, taxiways, runways, gate
     "Cleared I L S runway zero niner right, squawk seven six zero zero, Taxiway Kilo, Gate Zulu niner."
   );
 
-  // Handoff request voice formatting: authentic ATC intercom coordination without arrows or parentheses
+  // Auto transmission notices such as [HANDOFF REQUEST] or system coordination must NEVER be read aloud by the voice engine
   const handoffSpeech = formatAtcSpeech("[HANDOFF REQUEST] UAE101 (Bengaluru Ground → Bengaluru Tower). Awaiting your acceptance.");
-  assert.ok(!handoffSpeech.includes("arrow"), "Must never speak 'arrow' or 'pointing'");
-  assert.ok(!handoffSpeech.includes("parenthesis"), "Must never speak 'parenthesis'");
-  assert.ok(!handoffSpeech.includes("→"), "Must not contain raw arrow symbols");
-  assert.equal(
-    handoffSpeech,
-    "Bengaluru Tower, Bengaluru Ground, Handoff request, Emirates one zero one."
-  );
+  assert.equal(handoffSpeech, "", "Auto transmission handoff requests must not be read aloud by voice engine");
 
   const transferSpeech = formatAtcSpeech("Frequency transfer for UAE101 from Ground -> Tower.");
   assert.ok(!transferSpeech.includes("arrow"));

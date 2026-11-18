@@ -986,7 +986,7 @@ export function submitClearanceDecision(
           recipient: toLabel,
           controller: targetController,
           aircraftId: aircraft.id,
-          category: "PILOT_REQUEST",
+          category: "SYSTEM",
           text: `[HANDOFF REQUEST] ${aircraft.callsign}: Transfer from ${fromLabel} to ${toLabel}. Awaiting acceptance.`,
         });
 
