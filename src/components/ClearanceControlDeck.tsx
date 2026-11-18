@@ -998,6 +998,33 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
           </div>
         ) : null}
 
+        {ac.state !== "CRASHED" && ac.operationMode === "EMERGENCY_OPERATION" && ac.emergencyType !== "NONE" && (
+          <div className="rounded-lg border border-red-500 bg-red-950/40 p-3 space-y-2 font-mono shadow-md animate-pulse">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-red-400 font-extrabold text-xs">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span className="uppercase tracking-wide">
+                  {ac.emergencyType === "DUAL_ENGINE_FAILURE"
+                    ? "TOTAL ENGINE FLAMEOUT · GLIDING"
+                    : ac.emergencyType === "LOW_FUEL"
+                    ? "LOW FUEL EMERGENCY"
+                    : ac.emergencyType === "TURBULENCE_WINDSHEAR"
+                    ? "SEVERE WINDSHEAR ON FINAL"
+                    : ac.emergencyType === "CABIN_PRESSURE"
+                    ? "RAPID DECOMPRESSION DESCENT"
+                    : `IN-FLIGHT EMERGENCY · ${ac.emergencyType.replace(/_/g, " ")}`}
+                </span>
+              </div>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-600 text-white font-bold shrink-0">
+                SQUAWK 7700
+              </span>
+            </div>
+            <div className="text-[11px] text-red-200 leading-snug">
+              {ac.pendingRequest?.message ?? `Aircraft declared in-flight emergency (${ac.emergencyType}). Priority vectors and runway clearance requested.`}
+            </div>
+          </div>
+        )}
+
         {ac.state === "CRASHED" ? (
           <div className="rounded-lg border border-red-500 bg-red-950/40 p-3 space-y-3 font-mono shadow-lg">
             <div className="flex items-center justify-between">
