@@ -283,8 +283,7 @@ function runAutonomousGround(state: SimulationState): void {
         }
       } else if (
         ac.holdingShortReason === "DEPARTURE_RUNWAY" ||
-        ac.holdingAtRunway === ac.targetRunway ||
-        (!ac.holdingShortReason && ac.flightKind === "DEPARTURE" && !ac.holdingAtRunway)
+        ac.holdingAtRunway === ac.targetRunway
       ) {
         submitClearanceDecision(
           state,
@@ -299,6 +298,39 @@ function runAutonomousGround(state: SimulationState): void {
           },
           "AUTONOMOUS"
         );
+      } else if (ac.flightKind === "DEPARTURE") {
+        // Departure aircraft holding on taxiway after vacating runway (aborted/cancelled takeoff)
+        // Automatically taxi it back to departure runway
+        const startNodeId = ac.currentNodeId ?? findNearestGroundNodeId(state.airport, ac.x, ac.y);
+        if (startNodeId) {
+          const routes = getSuggestedTaxiRoutes(
+            state.airport,
+            startNodeId,
+            ac.targetRunway,
+            ac.gateId,
+            false,
+            state,
+            ac.id
+          );
+          const chosen = routes.find((r) => r.conflictLevel !== "BLOCKED") ?? routes[0];
+          if (chosen && chosen.conflictLevel !== "BLOCKED") {
+            submitClearanceDecision(
+              state,
+              {
+                aircraftId: ac.id,
+                controller: "GROUND",
+                type: "TAXI",
+                parameters: {
+                  runway: ac.targetRunway,
+                  routeTaxiways: chosen.taxiways,
+                  destinationNodeId: chosen.destinationNodeId,
+                  routeNodeIds: chosen.nodeIds,
+                },
+              },
+              "AUTONOMOUS"
+            );
+          }
+        }
       } else if (ac.flightKind === "ARRIVAL") {
         const startNodeId = ac.currentNodeId ?? findNearestGroundNodeId(state.airport, ac.x, ac.y);
         const destGate = ac.gateId ?? state.airport.gateIds[0];
@@ -517,9 +549,8 @@ function runAutonomousTower(state: SimulationState): void {
       continue;
     }
 
-    // Priority 3: Landed arrival clear of runway -> hand off to Ground
+    // Priority 3: Landed arrival or vacated departure clear of runway -> hand off to Ground
     if (
-      ac.flightKind === "ARRIVAL" &&
       ac.state === "HOLDING_SHORT" &&
       (ac.holdingShortReason === "ROUTE_END" ||
         ac.holdingAtRunway === undefined)

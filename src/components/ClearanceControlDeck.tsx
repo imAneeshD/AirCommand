@@ -422,7 +422,11 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
   const groundConflict = inspectGroundConflict(sim, ac);
 
   const isHoldingShort = Boolean(
-    !isPhysicallyOnRunway && (ac.state === "HOLDING_SHORT" || ac.holdingAtRunway)
+    !isPhysicallyOnRunway &&
+      ac.state === "HOLDING_SHORT" &&
+      (ac.holdingShortReason === "DEPARTURE_RUNWAY" ||
+        ac.holdingShortReason === "CROSSING_REQUIRED" ||
+        Boolean(ac.holdingAtRunway))
   );
   const heldRunway =
     ac.holdingAtRunway ??
@@ -432,10 +436,9 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
       (ac.holdingAtRunway && ac.holdingAtRunway !== ac.targetRunway)
   );
   const isDepartureHoldingShort = Boolean(
-    isHoldingShort && (
-      ac.holdingShortReason === "DEPARTURE_RUNWAY" ||
-      (ac.flightKind === "DEPARTURE" && !isCrossingRequired)
-    )
+    isHoldingShort &&
+      ac.holdingShortReason === "DEPARTURE_RUNWAY" &&
+      !isCrossingRequired
   );
   const hasMultipleRunwaysOrTaxiways =
     sim.airport.runwayIds.length > 1 || taxiRoutes.length > 1;
@@ -1756,6 +1759,55 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                   ) : (
                     /* Taxiing / Ready to Taxi */
                     <>
+                      {/* Highlighted Vacated / Aborted Departure Taxi Card */}
+                      {ac.flightKind === "DEPARTURE" &&
+                        (ac.holdingShortReason === "ROUTE_END" ||
+                          ac.state === "HOLD_POSITION" ||
+                          ac.state === "HOLDING_SHORT") &&
+                        !isPhysicallyOnRunway && (
+                          <div className="rounded-xl border border-[var(--atc-accent-border)] bg-[var(--atc-surface-alt)] p-3 space-y-2.5 shadow-sm">
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-xs text-[var(--atc-accent-text)] flex items-center gap-1.5">
+                                <Radio className="w-3.5 h-3.5 text-[var(--atc-accent)]" />
+                                VACATED RUNWAY — TAXI BACK TO RUNWAY
+                              </span>
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--atc-accent-bg)] text-[var(--atc-accent-text)] border border-[var(--atc-accent-border)] font-mono font-bold">
+                                DEPARTURE {selectedTaxiRunway}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-[var(--atc-text-secondary)] leading-relaxed">
+                              Aircraft has moved clear of the runway onto the taxiway. Issue taxi clearance to return to departure runway {selectedTaxiRunway}.
+                            </p>
+                            {taxiRoutes.length > 0 && (
+                              <button
+                                type="button"
+                                disabled={nordoLocked || taxiRoutes[0].conflictLevel === "BLOCKED"}
+                                onClick={() => {
+                                  const best = taxiRoutes.find((r) => r.conflictLevel !== "BLOCKED") ?? taxiRoutes[0];
+                                  handleIssueClearance(
+                                    {
+                                      aircraftId: ac.id,
+                                      controller: "GROUND",
+                                      type: "TAXI",
+                                      parameters: {
+                                        runway: selectedTaxiRunway,
+                                        routeTaxiways: best.taxiways,
+                                        destinationNodeId: best.destinationNodeId,
+                                        routeNodeIds: best.nodeIds,
+                                      },
+                                    },
+                                    "TAXI"
+                                  );
+                                }}
+                                className="w-full py-2.5 px-3 rounded-xl bg-[var(--atc-accent)] hover:brightness-105 active:scale-[0.99] text-stone-950 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md cursor-pointer disabled:opacity-40"
+                              >
+                                <ArrowRight className="w-4 h-4 fill-current" />
+                                <span>TAXI BACK TO RWY {selectedTaxiRunway} ({taxiRoutes[0].label})</span>
+                              </button>
+                            )}
+                          </div>
+                        )}
+
                       <div className="grid grid-cols-2 gap-1.5">
                         <button
                           disabled={
@@ -1811,73 +1863,100 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
             <div className="space-y-2.5">
               {ac.flightKind === "DEPARTURE" && (
                 <div className="space-y-1.5">
-                  <button
-                    disabled={nordoLocked || isCommandDisabled("LINE_UP")}
-                    onClick={() =>
-                      handleIssueClearance({
-                        aircraftId: ac.id,
-                        controller: "TOWER",
-                        type: "LINE_UP",
-                        parameters: { runway: ac.targetRunway },
-                      }, "LINE_UP")
-                    }
-                    className="w-full py-2 rounded-md border border-[var(--atc-accent-border)] bg-[var(--atc-accent-bg)] hover:opacity-90 text-[var(--atc-accent-text)] font-mono text-xs font-bold disabled:opacity-35 disabled:cursor-not-allowed"
-                  >
-                    LINE UP AND WAIT RWY {ac.targetRunway}
-                  </button>
-
-                  <button
-                    disabled={nordoLocked || isCommandDisabled("TAKEOFF")}
-                    onClick={() => {
-                      const baseAlt = Math.round(sim.airport.elevationFt / 500) * 500;
-                      handleIssueClearance({
-                        aircraftId: ac.id,
-                        controller: "TOWER",
-                        type: "TAKEOFF",
-                        parameters: { runway: ac.targetRunway, initialAltitude: baseAlt + 3000 },
-                      }, "TAKEOFF");
-                    }}
-                    className="w-full py-2 rounded-md border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:opacity-90 text-[var(--atc-emerald)] font-mono text-xs font-bold disabled:opacity-35 disabled:cursor-not-allowed"
-                  >
-                    CLEARED FOR TAKEOFF RWY {ac.targetRunway}
-                  </button>
-
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <button
-                      disabled={nordoLocked || isCommandDisabled("CANCEL_TAKEOFF")}
-                      onClick={() =>
-                        handleIssueClearance({
-                          aircraftId: ac.id,
-                          controller: "TOWER",
-                          type:
-                            ac.state === "TAKEOFF_ROLL" || ac.state === "ROTATE"
-                              ? "REJECT_TAKEOFF"
-                              : "CANCEL_TAKEOFF",
-                        }, "CANCEL_TAKEOFF")
-                      }
-                      className="py-1.5 px-2 rounded-md border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] hover:opacity-90 text-[var(--atc-amber)] font-mono text-[11px] font-semibold disabled:opacity-35 disabled:cursor-not-allowed"
-                    >
-                      CANCEL TAKEOFF
-                    </button>
-                    <button
-                      disabled={nordoLocked || ac.state !== "TAKEOFF_ROLL" || isCommandDisabled("REJECT_TAKEOFF")}
-                      onClick={() =>
-                        handleIssueClearance({
-                          aircraftId: ac.id,
-                          controller: "TOWER",
-                          type: "REJECT_TAKEOFF",
-                        }, "REJECT_TAKEOFF")
-                      }
-                      className="py-1.5 px-2 rounded-md border border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] hover:opacity-90 text-[var(--atc-red)] font-mono text-[11px] font-bold disabled:opacity-35 disabled:cursor-not-allowed"
-                    >
-                      REJECT TAKEOFF
-                    </button>
-                  </div>
-
-                  {(isPhysicallyOnRunway || isStoppedOnRunway) && (
-                    <div className="space-y-1.5 pt-1">
-                      {renderRunwayVacateCard()}
+                  {!isPhysicallyOnRunway && !isDepartureHoldingShort ? (
+                    <div className="rounded-xl border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] p-3 space-y-2.5 shadow-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-xs text-[var(--atc-amber)] flex items-center gap-1.5">
+                          <Radio className="w-3.5 h-3.5" />
+                          AIRCRAFT CLEAR OF RUNWAY
+                        </span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--atc-surface)] text-[var(--atc-amber)] border border-[var(--atc-amber-border)] font-mono font-bold">
+                          ON TAXIWAY
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-[var(--atc-text-secondary)] leading-relaxed">
+                        Aircraft has vacated runway {ac.targetRunway} onto the taxiway. Switch to Ground Control to taxi back to the departure runway.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setDeckTab("GROUND")}
+                        className="w-full py-2.5 px-3 rounded-xl bg-[var(--atc-accent)] hover:brightness-105 active:scale-[0.99] text-stone-950 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md cursor-pointer"
+                      >
+                        <ArrowRight className="w-4 h-4 fill-current" />
+                        <span>SWITCH TO GROUND (TAXI TO RWY {ac.targetRunway})</span>
+                      </button>
                     </div>
+                  ) : (
+                    <>
+                      <button
+                        disabled={nordoLocked || isCommandDisabled("LINE_UP")}
+                        onClick={() =>
+                          handleIssueClearance({
+                            aircraftId: ac.id,
+                            controller: "TOWER",
+                            type: "LINE_UP",
+                            parameters: { runway: ac.targetRunway },
+                          }, "LINE_UP")
+                        }
+                        className="w-full py-2 rounded-md border border-[var(--atc-accent-border)] bg-[var(--atc-accent-bg)] hover:opacity-90 text-[var(--atc-accent-text)] font-mono text-xs font-bold disabled:opacity-35 disabled:cursor-not-allowed"
+                      >
+                        LINE UP AND WAIT RWY {ac.targetRunway}
+                      </button>
+
+                      <button
+                        disabled={nordoLocked || isCommandDisabled("TAKEOFF")}
+                        onClick={() => {
+                          const baseAlt = Math.round(sim.airport.elevationFt / 500) * 500;
+                          handleIssueClearance({
+                            aircraftId: ac.id,
+                            controller: "TOWER",
+                            type: "TAKEOFF",
+                            parameters: { runway: ac.targetRunway, initialAltitude: baseAlt + 3000 },
+                          }, "TAKEOFF");
+                        }}
+                        className="w-full py-2 rounded-md border border-[var(--atc-emerald-border)] bg-[var(--atc-emerald-bg)] hover:opacity-90 text-[var(--atc-emerald)] font-mono text-xs font-bold disabled:opacity-35 disabled:cursor-not-allowed"
+                      >
+                        CLEARED FOR TAKEOFF RWY {ac.targetRunway}
+                      </button>
+
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <button
+                          disabled={nordoLocked || isCommandDisabled("CANCEL_TAKEOFF")}
+                          onClick={() =>
+                            handleIssueClearance({
+                              aircraftId: ac.id,
+                              controller: "TOWER",
+                              type:
+                                ac.state === "TAKEOFF_ROLL" || ac.state === "ROTATE"
+                                  ? "REJECT_TAKEOFF"
+                                  : "CANCEL_TAKEOFF",
+                            }, "CANCEL_TAKEOFF")
+                          }
+                          className="py-1.5 px-2 rounded-md border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] hover:opacity-90 text-[var(--atc-amber)] font-mono text-[11px] font-semibold disabled:opacity-35 disabled:cursor-not-allowed"
+                        >
+                          CANCEL TAKEOFF
+                        </button>
+                        <button
+                          disabled={nordoLocked || ac.state !== "TAKEOFF_ROLL" || isCommandDisabled("REJECT_TAKEOFF")}
+                          onClick={() =>
+                            handleIssueClearance({
+                              aircraftId: ac.id,
+                              controller: "TOWER",
+                              type: "REJECT_TAKEOFF",
+                            }, "REJECT_TAKEOFF")
+                          }
+                          className="py-1.5 px-2 rounded-md border border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] hover:opacity-90 text-[var(--atc-red)] font-mono text-[11px] font-bold disabled:opacity-35 disabled:cursor-not-allowed"
+                        >
+                          REJECT TAKEOFF
+                        </button>
+                      </div>
+
+                      {(isPhysicallyOnRunway || isStoppedOnRunway) && (
+                        <div className="space-y-1.5 pt-1">
+                          {renderRunwayVacateCard()}
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               )}

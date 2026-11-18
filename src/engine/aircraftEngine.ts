@@ -406,24 +406,36 @@ export function updateAircraftStates(state: SimulationState): void {
             msg,
             ac.targetRunway
           );
-        } else if (ac.flightKind === "ARRIVAL" && ac.holdingShortReason === "ROUTE_END") {
-          // Automated handoff: When arrival vacates runway after landing,
+        } else if (ac.holdingShortReason === "ROUTE_END") {
+          // Automated handoff: When aircraft vacates runway after landing or aborted takeoff,
           // frequency automatically transitions to Ground control without requiring manual handoff.
           if (ac.controller === "TOWER") {
             ac.controller = "GROUND";
             ac.lastTransmissionAt = state.time;
           }
           const groundName = controllerCallsign("GROUND", state.airport, ac.flightKind);
-          const spokenGate = ac.gateId ? formatGateIcao(ac.gateId) : "";
-          issuePilotRequestIfNeeded(
-            state,
-            ac,
-            "GATE_TAXI",
-            "GROUND",
-            `${groundName}, ${ac.spokenCallsign}, clear of runway, request taxi to gate ${spokenGate}.`,
-            undefined,
-            ac.gateId
-          );
+          if (ac.flightKind === "DEPARTURE") {
+            const rwyName = runwaySpokenName(ac.targetRunway);
+            issuePilotRequestIfNeeded(
+              state,
+              ac,
+              "TAXI",
+              "GROUND",
+              `${groundName}, ${ac.spokenCallsign}, clear of runway ${rwyName}, request taxi back to runway ${rwyName}.`,
+              ac.targetRunway
+            );
+          } else {
+            const spokenGate = ac.gateId ? formatGateIcao(ac.gateId) : "";
+            issuePilotRequestIfNeeded(
+              state,
+              ac,
+              "GATE_TAXI",
+              "GROUND",
+              `${groundName}, ${ac.spokenCallsign}, clear of runway, request taxi to gate ${spokenGate}.`,
+              undefined,
+              ac.gateId
+            );
+          }
         }
         break;
       }
@@ -866,21 +878,42 @@ export function updateAircraftStates(state: SimulationState): void {
             completeClearancesOfType(ac, "LAND");
             completeClearancesOfType(ac, "VACATE_RUNWAY");
             completeClearancesOfType(ac, "APPROACH");
+            completeClearancesOfType(ac, "TAKEOFF");
+            completeClearancesOfType(ac, "LINE_UP");
             ac.assignedApproach = null;
             ac.holdingAtRunway = undefined;
             ac.holdingShortReason = "ROUTE_END";
             ac.state = "HOLDING_SHORT";
             ac.stateEnteredAt = state.time;
-            const spokenGate = ac.gateId ? formatGateIcao(ac.gateId) : "";
-            issuePilotRequestIfNeeded(
-              state,
-              ac,
-              "GATE_TAXI",
-              ac.controller,
-              `${controllerCallsign(ac.controller, state.airport)}, ${ac.spokenCallsign}, clear of runway, request taxi to gate ${spokenGate}.`,
-              undefined,
-              ac.gateId
-            );
+
+            if (ac.controller === "TOWER") {
+              ac.controller = "GROUND";
+              ac.lastTransmissionAt = state.time;
+            }
+
+            const groundName = controllerCallsign("GROUND", state.airport, ac.flightKind);
+            if (ac.flightKind === "DEPARTURE") {
+              const rwyName = runwaySpokenName(ac.targetRunway);
+              issuePilotRequestIfNeeded(
+                state,
+                ac,
+                "TAXI",
+                "GROUND",
+                `${groundName}, ${ac.spokenCallsign}, clear of runway ${rwyName}, request taxi back to runway ${rwyName}.`,
+                ac.targetRunway
+              );
+            } else {
+              const spokenGate = ac.gateId ? formatGateIcao(ac.gateId) : "";
+              issuePilotRequestIfNeeded(
+                state,
+                ac,
+                "GATE_TAXI",
+                "GROUND",
+                `${groundName}, ${ac.spokenCallsign}, clear of runway, request taxi to gate ${spokenGate}.`,
+                undefined,
+                ac.gateId
+              );
+            }
           }
         }
         break;
