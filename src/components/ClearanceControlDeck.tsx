@@ -1031,7 +1031,15 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 text-red-400 font-extrabold text-xs">
                 <AlertOctagon className="w-4 h-4 animate-pulse" />
-                <span>CRASH ALARM · RUNWAY EXCURSION</span>
+                <span>
+                  {ac.crashDetails?.locationKind === "APRON"
+                    ? "CRASH ALARM · APRON / PARKING COLLISION"
+                    : ac.crashDetails?.locationKind === "TAXIWAY"
+                    ? "CRASH ALARM · TAXIWAY COLLISION"
+                    : ac.crashDetails?.locationKind === "AIR"
+                    ? "CRASH ALARM · MID-AIR COLLISION"
+                    : "CRASH ALARM · RUNWAY EXCURSION"}
+                </span>
               </div>
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-600 text-white font-bold">
                 MAYDAY 7700
@@ -1051,7 +1059,7 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                 className={`w-full py-2 px-2.5 rounded-md text-xs font-bold transition-all flex items-center justify-center gap-2 ${
                   ac.crashDetails?.arffDispatched
                     ? "bg-emerald-100 text-emerald-900 border border-emerald-300 dark:bg-emerald-950/60 dark:border-emerald-500/80 dark:text-emerald-300 cursor-default"
-                    : "bg-red-600 hover:bg-red-500 text-white shadow-md animate-pulse"
+                    : "bg-red-600 hover:bg-red-500 text-white shadow-md animate-pulse cursor-pointer"
                 }`}
               >
                 {ac.crashDetails?.arffDispatched ? (
@@ -1067,30 +1075,45 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                 )}
               </button>
 
-              {/* Facility 2: Halt Runway */}
+              {/* Facility 2: Halt Runway / Isolate Sector */}
               {(() => {
-                const rwyId = ac.crashDetails?.runwayId ?? ac.targetRunway;
-                const isHalted = Boolean(ac.crashDetails?.runwayHalted || sim.closedRunways?.[rwyId]);
+                const locKind = ac.crashDetails?.locationKind ?? (ac.crashDetails?.runwayId ? "RUNWAY" : "APRON");
+                const rwyId = ac.crashDetails?.runwayId;
+                const isHalted = Boolean(
+                  ac.crashDetails?.runwayHalted || (rwyId && sim.closedRunways?.[rwyId])
+                );
                 return (
                   <button
                     type="button"
                     disabled={isHalted}
-                    onClick={() => haltRunwayOperations(rwyId, ac.id)}
+                    onClick={() => haltRunwayOperations(rwyId ?? "", ac.id)}
                     className={`w-full py-2 px-2.5 rounded-md text-xs font-bold transition-all flex items-center justify-center gap-2 ${
                       isHalted
                         ? "bg-amber-950/60 border border-amber-500/80 text-amber-300 cursor-default"
-                        : "bg-amber-600 hover:bg-amber-500 text-white shadow-md"
+                        : "bg-amber-600 hover:bg-amber-500 text-white shadow-md cursor-pointer"
                     }`}
                   >
                     {isHalted ? (
                       <>
                         <CheckCircle className="w-4 h-4" />
-                        <span>RUNWAY {rwyId} CLOSED · OPERATIONS HALTED</span>
+                        <span>
+                          {locKind === "APRON"
+                            ? "APRON & RAMP ISOLATED · OPERATIONS HALTED"
+                            : locKind === "TAXIWAY"
+                            ? "TAXIWAY SECTOR CLOSED · OPERATIONS HALTED"
+                            : `RUNWAY ${rwyId} CLOSED · OPERATIONS HALTED`}
+                        </span>
                       </>
                     ) : (
                       <>
                         <Ban className="w-4 h-4" />
-                        <span>HALT RUNWAY {rwyId} OPERATIONS (CLOSE RWY)</span>
+                        <span>
+                          {locKind === "APRON"
+                            ? "HALT APRON & RAMP OPERATIONS (ISOLATE APRON)"
+                            : locKind === "TAXIWAY"
+                            ? "HALT TAXIWAY OPERATIONS (CLOSE TAXIWAY SECTOR)"
+                            : `HALT RUNWAY ${rwyId} OPERATIONS (CLOSE RWY)`}
+                        </span>
                       </>
                     )}
                   </button>
@@ -1105,7 +1128,7 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                 className={`w-full py-2 px-2.5 rounded-md text-xs font-bold transition-all flex items-center justify-center gap-2 ${
                   ac.crashDetails?.medicalRequested
                     ? "bg-cyan-950/60 border border-cyan-500/80 text-cyan-300 cursor-default"
-                    : "bg-cyan-600 hover:bg-cyan-500 text-slate-950 shadow-md"
+                    : "bg-cyan-600 hover:bg-cyan-500 text-slate-950 shadow-md cursor-pointer"
                 }`}
               >
                 {ac.crashDetails?.medicalRequested ? (
@@ -1123,6 +1146,7 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
 
               {/* Facility 4: Clear Crash Site */}
               {(() => {
+                const locKind = ac.crashDetails?.locationKind ?? (ac.crashDetails?.runwayId ? "RUNWAY" : "APRON");
                 const canClear = Boolean(
                   ac.crashDetails?.arffDispatched &&
                     ac.crashDetails?.runwayHalted &&
@@ -1133,15 +1157,21 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                     type="button"
                     disabled={!canClear}
                     onClick={() => clearCrashSite(ac.id)}
-                    className="w-full py-2 px-2.5 rounded-md text-xs font-bold transition-all flex items-center justify-center gap-2 bg-slate-800 border border-slate-600 hover:border-emerald-500 hover:text-emerald-400 text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="w-full py-2 px-2.5 rounded-md text-xs font-bold transition-all flex items-center justify-center gap-2 bg-slate-800 border border-slate-600 hover:border-emerald-500 hover:text-emerald-400 text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                     title={
                       canClear
                         ? "Clear wreckage with crane and tug and restore airfield operations"
-                        : "Requires ARFF dispatch, Runway halt, and Medical evacuation coordination first"
+                        : "Requires ARFF dispatch, Area isolation, and Medical evacuation coordination first"
                     }
                   >
                     <Wrench className="w-4 h-4" />
-                    <span>CLEAR CRASH SITE &amp; REOPEN RUNWAY</span>
+                    <span>
+                      {locKind === "APRON"
+                        ? "CLEAR CRASH SITE & REOPEN APRON"
+                        : locKind === "TAXIWAY"
+                        ? "CLEAR CRASH SITE & REOPEN TAXIWAY"
+                        : "CLEAR CRASH SITE & REOPEN RUNWAY"}
+                    </span>
                   </button>
                 );
               })()}

@@ -6,11 +6,96 @@ import {
   runwaySpokenName,
 } from "../data/asteriaAirport.ts";
 import { hashCallsign } from "../data/aircraftCatalog.ts";
-import type { Aircraft, RunwayId, RunwaySpec, SimulationState } from "../types/atc.ts";
+import type { Aircraft, RunwayId, RunwaySpec, SimulationState, TaxiNode } from "../types/atc.ts";
 import { formatGateIcao } from "../utils/natoPhonetics.ts";
 import { completeClearancesOfType, nextId } from "./clearanceEngine.ts";
 import { addRadioMessage, controllerCallsign } from "./decisionEngine.ts";
 import { canAircraftExecuteAction } from "./validationEngine.ts";
+
+export function resolveCrashLocation(
+  state: SimulationState,
+  x: number,
+  y: number,
+  collisionType: "MID_AIR" | "RUNWAY" | "GROUND",
+  ac?: Aircraft,
+  rwy?: RunwaySpec
+): {
+  locationKind: "RUNWAY" | "APRON" | "TAXIWAY" | "AIR";
+  locationLabel: string;
+  runwayId?: RunwayId;
+} {
+  if (collisionType === "MID_AIR") {
+    return {
+      locationKind: "AIR",
+      locationLabel: `Airspace at ${Math.round(ac?.altitude ?? 3000)} ft`,
+    };
+  }
+
+  if (collisionType === "RUNWAY" || rwy) {
+    const rwyId = (rwy?.id ?? ac?.targetRunway ?? "09R") as RunwayId;
+    return {
+      locationKind: "RUNWAY",
+      locationLabel: `Runway ${rwyId}`,
+      runwayId: rwyId,
+    };
+  }
+
+  // GROUND collision: Find nearest node
+  let closestNode: TaxiNode | undefined;
+  let minDist = Infinity;
+  if (state.airport?.nodes) {
+    for (const node of Object.values(state.airport.nodes)) {
+      const d = Math.hypot(node.x - x, node.y - y);
+      if (d < minDist) {
+        minDist = d;
+        closestNode = node;
+      }
+    }
+  }
+
+  // Check if close to a gate or in apron area (within ~0.25 NM)
+  const isGateNode =
+    closestNode?.kind === "GATE" ||
+    closestNode?.kind === "PUSHBACK_SPOT" ||
+    closestNode?.id?.startsWith("GATE") ||
+    Boolean(closestNode?.gateId) ||
+    Boolean(ac?.gateId);
+
+  if (isGateNode && minDist < 0.25) {
+    const gateId = closestNode?.gateId ?? ac?.gateId ?? closestNode?.label;
+    return {
+      locationKind: "APRON",
+      locationLabel: gateId ? `Apron Stand ${gateId}` : "Terminal Apron / Parking Stand",
+    };
+  }
+
+  // Check if near runway entry/exit/crossing
+  if (
+    closestNode?.runwayId ||
+    closestNode?.kind === "RUNWAY_CROSSING" ||
+    closestNode?.kind === "RUNWAY_ENTRY" ||
+    closestNode?.kind === "RUNWAY_EXIT"
+  ) {
+    const identifiedRwy = (closestNode.runwayId ?? ac?.targetRunway) as RunwayId | undefined;
+    if (identifiedRwy) {
+      return {
+        locationKind: "RUNWAY",
+        locationLabel: `Runway ${identifiedRwy}`,
+        runwayId: identifiedRwy,
+      };
+    }
+  }
+
+  // Taxiway
+  const edge = closestNode && state.airport?.edges
+    ? state.airport.edges.find((e) => e.from === closestNode!.id || e.to === closestNode!.id)
+    : undefined;
+  const twName = edge?.taxiway ?? closestNode?.label;
+  return {
+    locationKind: "TAXIWAY",
+    locationLabel: twName ? `Taxiway ${twName}` : "Ground Taxiway",
+  };
+}
 
 export function declareAircraftCrash(
   state: SimulationState,
@@ -25,10 +110,12 @@ export function declareAircraftCrash(
   ac.operationMode = "EMERGENCY_OPERATION";
   ac.emergencyType = "CRASH";
   ac.squawk = "7700";
-  const rwyId = rwy?.id ?? ac.targetRunway ?? "09R";
+  const loc = resolveCrashLocation(state, ac.x, ac.y, rwy ? "RUNWAY" : "GROUND", ac, rwy);
   ac.crashDetails = {
     time: state.time,
-    runwayId: rwyId,
+    locationKind: loc.locationKind,
+    locationLabel: loc.locationLabel,
+    runwayId: loc.runwayId,
     reason,
     arffDispatched: false,
     runwayHalted: false,
@@ -40,18 +127,18 @@ export function declareAircraftCrash(
     id: nextId(state, "inc"),
     timestamp: state.time,
     severity: "CRITICAL",
-    code: "CRASH_EXCURSION",
-    message: `CRASH / RUNWAY EXCURSION: ${ac.callsign} impacted off-runway at ${rwyId} (${reason}).`,
+    code: loc.locationKind === "RUNWAY" ? "CRASH_EXCURSION" : "CRASH_GROUND_IMPACT",
+    message: `CRASH / ${loc.locationLabel.toUpperCase()}: ${ac.callsign} impacted at ${loc.locationLabel} (${reason}).`,
     aircraftIds: [ac.id],
   });
 
   addRadioMessage(state, {
     sender: "TOWER",
     recipient: "ALL_STATIONS",
-    controller: "TOWER",
+    controller: loc.locationKind === "APRON" || loc.locationKind === "TAXIWAY" ? "GROUND" : "TOWER",
     aircraftId: ac.id,
     category: "EMERGENCY",
-    text: `CRASH ALARM! ${ac.callsign} off-runway excursion / impact declared at runway ${runwaySpokenName(rwyId)}. Emergency crash rescue facilities activated.`,
+    text: `CRASH ALARM! ${ac.callsign} accident declared at ${loc.locationLabel}. Emergency crash rescue facilities activated.`,
   });
 }
 
@@ -65,11 +152,12 @@ export function declareAircraftCollision(
 ): void {
   const elev = state.airport.elevationFt;
   const collisionAlt = Math.max(elev, Math.round((a.altitude + b.altitude) / 2));
-  const rwyId = rwy?.id ?? a.targetRunway ?? b.targetRunway ?? "09R";
 
   // Position wreckage at collision midpoint
   const midX = (a.x + b.x) / 2;
   const midY = (a.y + b.y) / 2;
+
+  const loc = resolveCrashLocation(state, midX, midY, collisionType, a, rwy);
 
   for (const ac of [a, b]) {
     ac.state = "CRASHED";
@@ -83,10 +171,12 @@ export function declareAircraftCollision(
     ac.squawk = "7700";
     ac.crashDetails = {
       time: state.time,
-      runwayId: collisionType === "RUNWAY" ? rwyId : undefined,
-      reason: `${collisionType === "MID_AIR" ? "Mid-air collision" : collisionType === "RUNWAY" ? "Runway collision" : "Ground collision"} between ${a.callsign} and ${b.callsign}`,
+      locationKind: loc.locationKind,
+      locationLabel: loc.locationLabel,
+      runwayId: loc.runwayId,
+      reason: `${loc.locationKind === "AIR" ? "Mid-air collision" : loc.locationKind === "RUNWAY" ? "Runway collision" : loc.locationKind === "APRON" ? "Apron parking collision" : "Taxiway collision"} between ${a.callsign} and ${b.callsign} at ${loc.locationLabel}`,
       arffDispatched: false,
-      runwayHalted: collisionType === "RUNWAY",
+      runwayHalted: loc.locationKind === "RUNWAY",
       medicalRequested: false,
     };
   }
@@ -105,7 +195,7 @@ export function declareAircraftCollision(
     timestamp: state.time,
     severity: "CRITICAL",
     code: incidentCode,
-    message: `COLLISION DISASTER (${collisionType}): ${a.callsign} and ${b.callsign} collided! (${reason})`,
+    message: `COLLISION DISASTER (${collisionType}): ${a.callsign} and ${b.callsign} collided at ${loc.locationLabel}! (${reason})`,
     aircraftIds: [a.id, b.id],
   });
 
@@ -113,8 +203,8 @@ export function declareAircraftCollision(
     collisionType === "MID_AIR"
       ? `MAYDAY MAYDAY MAYDAY! Mid-air collision between ${a.callsign} and ${b.callsign} at ${collisionAlt} ft! Both aircraft down, search and rescue activated!`
       : collisionType === "RUNWAY"
-      ? `CRASH ALARM! High-speed collision on runway ${runwaySpokenName(rwyId)} between ${a.callsign} and ${b.callsign}! Runway closed, crash fire rescue responding!`
-      : `GROUND EMERGENCY! Collision on taxiway between ${a.callsign} and ${b.callsign}! Operations halted, fire & rescue responding!`;
+      ? `CRASH ALARM! High-speed collision on runway ${runwaySpokenName(loc.runwayId ?? "09R")} between ${a.callsign} and ${b.callsign}! Runway closed, crash fire rescue responding!`
+      : `GROUND EMERGENCY! Collision at ${loc.locationLabel} between ${a.callsign} and ${b.callsign}! Sector isolated, fire & rescue responding!`;
 
   addRadioMessage(state, {
     sender: "TOWER",

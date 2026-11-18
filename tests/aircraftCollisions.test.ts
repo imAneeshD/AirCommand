@@ -197,3 +197,76 @@ test("Aircraft Collision: Parked planes at distinct gates do NOT crash", () => {
   const crashIncident = sim.incidents.find((inc) => inc.code.includes("COLLISION"));
   assert.equal(crashIncident, undefined, "Legitimately parked planes must not trigger collisions");
 });
+
+test("Aircraft Collision: Apron / Parking stand crash isolates apron sector and does NOT close runway", async () => {
+  const sim = createBaseSimulation("NORMAL_OPS", "ALL", "KAST");
+  const kast = sim.airport;
+
+  const gate = kast.nodes["GATE_B10"] ?? Object.values(kast.nodes).find((n) => n.kind === "GATE")!;
+  assert.ok(gate);
+
+  // Plane 1: pushing back from gate
+  const ac1 = createArrivalAircraft(sim, {
+    callsign: "JBU698",
+    spokenCallsign: "JetBlue 698",
+    airline: "JetBlue",
+    aircraftType: "A320",
+    x: gate.x,
+    y: gate.y,
+    heading: 180,
+    altitude: kast.elevationFt,
+    speed: 5,
+    targetRunway: "09R",
+    gateId: gate.gateId ?? "B10",
+    state: "TAXIING",
+    controller: "GROUND",
+  });
+
+  // Plane 2: taxiing into the same apron parking spot
+  const ac2 = createArrivalAircraft(sim, {
+    callsign: "FDX539",
+    spokenCallsign: "FedEx 539",
+    airline: "FedEx",
+    aircraftType: "B772",
+    x: gate.x + 0.005,
+    y: gate.y + 0.005,
+    heading: 0,
+    altitude: kast.elevationFt,
+    speed: 8,
+    targetRunway: "09R",
+    state: "TAXIING",
+    controller: "GROUND",
+  });
+
+  stepSimulation(sim, 0.5);
+
+  assert.equal(ac1.state, "CRASHED");
+  assert.equal(ac2.state, "CRASHED");
+  assert.equal(ac1.crashDetails?.locationKind, "APRON", "Must identify locationKind as APRON");
+  assert.equal(ac1.crashDetails?.runwayId, undefined, "Apron crash must not assign a runwayId");
+  assert.ok(ac1.crashDetails?.locationLabel?.includes("Apron"), "Location label must designate Apron");
+
+  // Also check that an approaching aircraft on runway 09R is NOT forced to go around when apron operations are halted
+  const approachAc = createArrivalAircraft(sim, {
+    callsign: "SIA400",
+    spokenCallsign: "Singapore 400",
+    airline: "Singapore",
+    aircraftType: "A359",
+    x: 5.0,
+    y: 0.0,
+    heading: 270,
+    altitude: kast.elevationFt + 1500,
+    speed: 150,
+    targetRunway: "09R",
+    assignedApproach: "09R",
+    state: "FINAL",
+    controller: "TOWER",
+  });
+
+  const { haltRunwayOperations } = await import("../src/engine/decisionEngine.ts");
+  haltRunwayOperations(sim, undefined, ac1.id);
+
+  assert.equal(ac1.crashDetails?.runwayHalted, true, "Apron crash area must be marked halted");
+  assert.equal(sim.closedRunways?.["09R"], undefined, "Runway 09R must remain OPEN despite apron crash");
+  assert.equal(approachAc.state, "FINAL", "Approach aircraft must NOT be forced to go around for an apron crash");
+});
