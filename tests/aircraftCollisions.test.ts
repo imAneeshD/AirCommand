@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createBaseSimulation, createArrivalAircraft, stepSimulation } from "../src/engine/simulation.ts";
+import {
+  createBaseSimulation,
+  createArrivalAircraft,
+  stepSimulation,
+  findBestGateForAircraft,
+  selectSpacedGates,
+} from "../src/engine/simulation.ts";
 import { runwayPoint } from "../src/data/asteriaAirport.ts";
 
 test("Aircraft Collision: Mid-air collision when two planes are at the same altitude and position in air", () => {
@@ -269,4 +275,80 @@ test("Aircraft Collision: Apron / Parking stand crash isolates apron sector and 
   assert.equal(ac1.crashDetails?.runwayHalted, true, "Apron crash area must be marked halted");
   assert.equal(sim.closedRunways?.["09R"], undefined, "Runway 09R must remain OPEN despite apron crash");
   assert.equal(approachAc.state, "FINAL", "Approach aircraft must NOT be forced to go around for an apron crash");
+});
+
+test("Parking Separation: findBestGateForAircraft and selectSpacedGates avoid parking near existing planes", () => {
+  const sim = createBaseSimulation("NORMAL_OPS", "ALL", "KAST");
+  const kast = sim.airport;
+
+  // Initial gate assignment for first plane
+  const occupied = new Set<string>();
+  const firstGate = findBestGateForAircraft(kast, { aircraftType: "A320" }, occupied);
+  assert.ok(firstGate, "Should assign a first gate");
+  occupied.add(firstGate);
+
+  // Second plane should NOT be assigned a gate immediately adjacent if well-spaced gates are available
+  const secondGate = findBestGateForAircraft(kast, { aircraftType: "A320" }, occupied);
+  assert.ok(secondGate, "Should assign a second gate");
+  assert.notEqual(firstGate, secondGate, "Second gate must be distinct from first gate");
+
+  const n1 = kast.nodes[`GATE_${firstGate}`];
+  const n2 = kast.nodes[`GATE_${secondGate}`];
+  assert.ok(n1 && n2);
+  const dist = Math.hypot(n1.x - n2.x, n1.y - n2.y);
+  assert.ok(
+    dist >= 0.035,
+    `Assigned gates (${firstGate} and ${secondGate}) must be spaced safely apart (dist=${dist.toFixed(4)} NM >= 0.035 NM)`
+  );
+
+  // selectSpacedGates returns spaced gates across the terminal
+  const multiGates = selectSpacedGates(kast, 3);
+  assert.equal(multiGates.length, 3);
+  const d01 = Math.hypot(kast.nodes[`GATE_${multiGates[0]}`].x - kast.nodes[`GATE_${multiGates[1]}`].x, kast.nodes[`GATE_${multiGates[0]}`].y - kast.nodes[`GATE_${multiGates[1]}`].y);
+  assert.ok(d01 >= 0.035, "Spaced gates must maintain separation >= 0.035 NM");
+});
+
+test("Apron Clearance: Pushback in adjacent lane (dist > 0.012 NM) does NOT trigger false collision with parked aircraft", () => {
+  const sim = createBaseSimulation("NORMAL_OPS", "ALL", "KAST");
+  const kast = sim.airport;
+
+  const gate = kast.nodes["GATE_B10"] ?? Object.values(kast.nodes).find((n) => n.kind === "GATE")!;
+
+  // Aircraft 1 stationary at gate
+  const ac1 = createArrivalAircraft(sim, {
+    callsign: "AIC201",
+    spokenCallsign: "Air India 201",
+    airline: "Air India",
+    aircraftType: "A320",
+    x: gate.x,
+    y: gate.y,
+    heading: 0,
+    altitude: kast.elevationFt,
+    speed: 0,
+    targetRunway: "09R",
+    gateId: gate.gateId ?? "B10",
+    state: "AT_GATE",
+    controller: "DELIVERY",
+  });
+
+  // Aircraft 2 moving in pushback lane 0.018 NM away (~33 meters separation)
+  const ac2 = createArrivalAircraft(sim, {
+    callsign: "AIC202",
+    spokenCallsign: "Air India 202",
+    airline: "Air India",
+    aircraftType: "A320",
+    x: gate.x + 0.018,
+    y: gate.y,
+    heading: 180,
+    altitude: kast.elevationFt,
+    speed: 5,
+    targetRunway: "09R",
+    state: "PUSHING_BACK",
+    controller: "GROUND",
+  });
+
+  stepSimulation(sim, 0.5);
+
+  assert.notEqual(ac1.state, "CRASHED", "Stationary parked plane must not crash from neighboring pushback");
+  assert.notEqual(ac2.state, "CRASHED", "Pushing plane must not crash when clear of parked plane");
 });

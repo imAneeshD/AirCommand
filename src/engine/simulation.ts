@@ -150,6 +150,21 @@ export function findBestGateForAircraft(
   const wakeCat = ac.wakeCategory ?? resolveWakeCategory(acType);
   const isHeavy = wakeCat === "HEAVY" || wakeCat === "SUPER";
 
+  const getMinDistToOccupied = (gid: string): number => {
+    if (occupiedGateIds.size === 0) return Infinity;
+    const node = airport.nodes[`GATE_${gid}`];
+    if (!node) return Infinity;
+    let minDist = Infinity;
+    for (const occId of occupiedGateIds) {
+      const occNode = airport.nodes[`GATE_${occId}`];
+      if (occNode) {
+        const d = Math.hypot(node.x - occNode.x, node.y - occNode.y);
+        if (d < minDist) minDist = d;
+      }
+    }
+    return minDist;
+  };
+
   const scoreGate = (gid: string): number => {
     const node = airport.nodes[`GATE_${gid}`];
     const upper = gid.toUpperCase();
@@ -186,28 +201,31 @@ export function findBestGateForAircraft(
       upper === "G2" ||
       label.includes("HEAVY");
 
+    let baseScore = 90;
     if (isCargo) {
-      if (isCargoStand) return 100;
-      if (isMilStand) return 40;
-      return 10;
+      baseScore = isCargoStand ? 100 : isMilStand ? 40 : 10;
+    } else if (isMilitary) {
+      baseScore = isMilStand ? 100 : isCargoStand ? 50 : 10;
+    } else if (isHeavy) {
+      baseScore = isCargoStand || isMilStand ? 5 : isHeavyCapable ? 100 : 50;
+    } else {
+      baseScore = isCargoStand || isMilStand ? 5 : isHeavyCapable ? 60 : 90;
     }
 
-    if (isMilitary) {
-      if (isMilStand) return 100;
-      if (isCargoStand) return 50;
-      return 10;
+    // Distance separation bonus: favor stands that give wide clearance from other parked aircraft
+    const minDist = getMinDistToOccupied(gid);
+    let sepBonus = 0;
+    if (minDist === Infinity) {
+      sepBonus = 30;
+    } else if (minDist >= 0.050) {
+      sepBonus = 40;
+    } else if (minDist >= 0.035) {
+      sepBonus = 20;
+    } else if (minDist < 0.024) {
+      sepBonus = -500; // Heavily penalize stands that are right next to an occupied gate
     }
 
-    if (isHeavy) {
-      if (isCargoStand || isMilStand) return 5;
-      if (isHeavyCapable) return 100;
-      return 50;
-    }
-
-    // Standard passenger flight
-    if (isCargoStand || isMilStand) return 5;
-    if (isHeavyCapable) return 60;
-    return 90;
+    return baseScore + sepBonus;
   };
 
   const freeGates = allGates.filter((g) => !occupiedGateIds.has(g));
@@ -218,17 +236,50 @@ export function findBestGateForAircraft(
     return allGates[0] ?? null;
   }
 
-  const scored = freeGates.map((g) => ({ gate: g, score: scoreGate(g) }));
+  // 1. First priority: Gates that maintain safe separation (>= 0.035 NM ~65m) from all occupied aircraft
+  const safeSpacedGates = freeGates.filter((g) => getMinDistToOccupied(g) >= 0.035);
+
+  // 2. Second priority: If no >= 0.035 NM gate is free, try moderate separation (>= 0.024 NM)
+  const moderateSpacedGates =
+    safeSpacedGates.length > 0
+      ? safeSpacedGates
+      : freeGates.filter((g) => getMinDistToOccupied(g) >= 0.024);
+
+  // 3. Fallback: If airport is very compact, select from all free gates prioritizing largest distance
+  const candidatePool =
+    moderateSpacedGates.length > 0
+      ? moderateSpacedGates
+      : [...freeGates].sort((a, b) => getMinDistToOccupied(b) - getMinDistToOccupied(a)).slice(0, 3);
+
+  const scored = candidatePool.map((g) => ({ gate: g, score: scoreGate(g) }));
   const maxScore = Math.max(...scored.map((s) => s.score));
-  // Pick from all free candidate gates in the highest scoring tier
-  const topTier = scored.filter((s) => s.score >= maxScore - 10).map((s) => s.gate);
+  const topTier = scored.filter((s) => s.score >= maxScore - 15).map((s) => s.gate);
 
   if (randomize && topTier.length > 0) {
     return topTier[Math.floor(Math.random() * topTier.length)];
   }
 
-  const sorted = [...freeGates].sort((a, b) => scoreGate(b) - scoreGate(a));
-  return sorted[0] ?? freeGates[0];
+  const sorted = [...candidatePool].sort((a, b) => scoreGate(b) - scoreGate(a));
+  return sorted[0] ?? candidatePool[0] ?? freeGates[0];
+}
+
+/**
+ * Selects multiple gates distributed across the airport to guarantee safe parking separation.
+ */
+export function selectSpacedGates(
+  airport: AirportLayout,
+  count: number,
+  occupied: Set<string> = new Set<string>()
+): string[] {
+  const chosen: string[] = [];
+  const occupiedSet = new Set<string>(occupied);
+  for (let i = 0; i < count; i++) {
+    const g = findBestGateForAircraft(airport, {}, occupiedSet, false);
+    if (!g) break;
+    chosen.push(g);
+    occupiedSet.add(g);
+  }
+  return chosen;
 }
 
 export function pickRandomFleetPlane(
@@ -684,11 +735,12 @@ export function createScenarioSimulation(
   const rwyArr = ap.primaryArrivalRunway;
   const depSpec = ap.runways[rwyDep];
   const arrSpec = ap.runways[rwyArr];
-  const g0 = ap.gateIds[2] ?? ap.gateIds[0];
-  const g1 = ap.gateIds[5] ?? ap.gateIds[1] ?? ap.gateIds[0];
-  const g2 = ap.gateIds[ap.gateIds.length - 1] ?? ap.gateIds[0];
-  const g3 = ap.gateIds[0];
-  const g4 = ap.gateIds[1] ?? ap.gateIds[0];
+  const initialScenarioGates = selectSpacedGates(ap, Math.min(6, ap.gateIds.length));
+  const g0 = initialScenarioGates[0] ?? ap.gateIds[0];
+  const g1 = initialScenarioGates[1] ?? ap.gateIds[1] ?? ap.gateIds[0];
+  const g2 = initialScenarioGates[2] ?? ap.gateIds[ap.gateIds.length - 1] ?? ap.gateIds[0];
+  const g3 = initialScenarioGates[3] ?? initialScenarioGates[0] ?? ap.gateIds[0];
+  const g4 = initialScenarioGates[4] ?? initialScenarioGates[1] ?? ap.gateIds[0];
 
   const usedGates = new Set<string>();
   const usedCallsigns = new Set<string>();
@@ -1276,7 +1328,7 @@ export function createScenarioSimulation(
       });
       state.selectedAircraftId = state.aircraftOrder[0] ?? null;
     } else {
-      const rushGates = ap.gateIds.slice(0, Math.min(5, ap.gateIds.length));
+      const rushGates = selectSpacedGates(ap, Math.min(5, ap.gateIds.length), usedGates);
       rushGates.forEach((g, idx) => {
         const al = AIRLINES[idx % AIRLINES.length];
         const num = 400 + idx * 37;
@@ -1915,26 +1967,35 @@ function checkSeparationAndConflicts(state: SimulationState): void {
       }
 
       // Case C: Ground / Taxiway / Apron Collision
-      // Both aircraft on surface (<= elev + 28 ft), dist <= 0.024 NM (~44m physical nose-touch), and not both peacefully parked at gate
+      // Both aircraft on surface (<= elev + 28 ft)
       const isSurfaceA = a.altitude <= elev + 28;
       const isSurfaceB = b.altitude <= elev + 28;
       const bothParkedAtGate =
         a.state === "AT_GATE" &&
         b.state === "AT_GATE" &&
         a.speed === 0 &&
-        b.speed === 0 &&
-        a.gateId !== b.gateId;
+        b.speed === 0;
 
-      if (isSurfaceA && isSurfaceB && !bothParkedAtGate && altDiff <= 28 && dist <= 0.024) {
-        if (a.speed > 0 || b.speed > 0 || a.state !== "AT_GATE" || b.state !== "AT_GATE") {
-          declareAircraftCollision(
-            state,
-            a,
-            b,
-            "GROUND",
-            `Ground taxiway impact between ${a.callsign} and ${b.callsign}`
-          );
-          continue;
+      if (isSurfaceA && isSurfaceB && !bothParkedAtGate && altDiff <= 28) {
+        // Safe physical collision envelope:
+        // - If one plane is stationary at gate (speed 0), only actual physical contact (<= 0.012 NM ~22m) triggers collision
+        // - Between two moving aircraft on taxiways, standard taxiway clearance (<= 0.024 NM ~44m) applies
+        const oneParkedAtGate =
+          (a.state === "AT_GATE" && a.speed === 0) ||
+          (b.state === "AT_GATE" && b.speed === 0);
+        const groundCollisionLimit = oneParkedAtGate ? 0.012 : 0.024;
+
+        if (dist <= groundCollisionLimit) {
+          if (a.speed > 0 || b.speed > 0 || a.state !== "AT_GATE" || b.state !== "AT_GATE") {
+            declareAircraftCollision(
+              state,
+              a,
+              b,
+              "GROUND",
+              `Ground taxiway impact between ${a.callsign} and ${b.callsign}`
+            );
+            continue;
+          }
         }
       }
 
