@@ -1,5 +1,5 @@
 import React from "react";
-import { ArrowRight, Check, Play, Zap, X } from "lucide-react";
+import { ArrowRight, Check, Play, Radio, Zap, X } from "lucide-react";
 import type { Aircraft } from "../types/atc.ts";
 import { useAtcStore } from "../store/atcStore.ts";
 import { formatAltitudeReadout } from "../utils/telemetry.ts";
@@ -90,6 +90,7 @@ export const MobileAircraftQuickCard: React.FC<MobileAircraftQuickCardProps> = (
           <span>OPEN CLEARANCES</span>
         </button>
 
+        {/* Single Predicted 1-Click Action Button */}
         {aircraft.state === "AT_GATE" && (
           <button
             onClick={() => {
@@ -107,23 +108,70 @@ export const MobileAircraftQuickCard: React.FC<MobileAircraftQuickCardProps> = (
           </button>
         )}
 
-        {(aircraft.state === "HOLDING_SHORT" || aircraft.holdingAtRunway) && (
-          <button
-            onClick={() => {
-              issueClearance({
-                aircraftId: aircraft.id,
-                controller: "TOWER",
-                type: "TAKEOFF",
-                parameters: { runway: (aircraft.holdingAtRunway ?? aircraft.targetRunway)! },
-              });
-            }}
-            className="py-2 px-3 rounded-lg border border-emerald-500/50 bg-emerald-500/20 text-emerald-400 font-bold text-xs flex items-center gap-1 cursor-pointer"
-          >
-            <ArrowRight className="w-3 h-3" />
-            <span>TAKEOFF</span>
-          </button>
-        )}
+        {/* When Ground controller finishes taxi and plane is holding short ready for Tower handover */}
+        {aircraft.controller === "GROUND" &&
+          (aircraft.state === "HOLDING_SHORT" ||
+            aircraft.holdingAtRunway ||
+            (aircraft.state === "HOLD_POSITION" &&
+              aircraft.routeStepIndex >= (aircraft.assignedRouteNodeIds?.length ?? 1) - 1)) && (
+            <button
+              onClick={() => {
+                issueClearance({
+                  aircraftId: aircraft.id,
+                  controller: "GROUND",
+                  type: "HANDOFF",
+                  parameters: { targetController: "TOWER" },
+                });
+              }}
+              className="py-2 px-3 rounded-lg border border-sky-500/50 bg-sky-500/20 text-sky-400 font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
+            >
+              <Radio className="w-3 h-3" />
+              <span>CONTACT TWR</span>
+            </button>
+          )}
 
+        {/* When under Tower control holding short -> Takeoff */}
+        {aircraft.controller === "TOWER" &&
+          (aircraft.state === "HOLDING_SHORT" ||
+            aircraft.holdingAtRunway ||
+            aircraft.state === "LINE_UP_WAIT") && (
+            <button
+              onClick={() => {
+                issueClearance({
+                  aircraftId: aircraft.id,
+                  controller: "TOWER",
+                  type: "TAKEOFF",
+                  parameters: { runway: (aircraft.holdingAtRunway ?? aircraft.targetRunway)! },
+                });
+              }}
+              className="py-2 px-3 rounded-lg border border-emerald-500/50 bg-emerald-500/20 text-emerald-400 font-bold text-xs flex items-center gap-1 cursor-pointer"
+            >
+              <ArrowRight className="w-3 h-3" />
+              <span>TAKEOFF</span>
+            </button>
+          )}
+
+        {/* When airborne on departure climb -> Contact Departure */}
+        {aircraft.flightKind === "DEPARTURE" &&
+          aircraft.controller === "TOWER" &&
+          (aircraft.state === "CLIMB" || aircraft.altitude > sim.airport.elevationFt + 500) && (
+            <button
+              onClick={() => {
+                issueClearance({
+                  aircraftId: aircraft.id,
+                  controller: "TOWER",
+                  type: "HANDOFF",
+                  parameters: { targetController: "DEPARTURE" },
+                });
+              }}
+              className="py-2 px-3 rounded-lg border border-sky-500/50 bg-sky-500/20 text-sky-400 font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
+            >
+              <Radio className="w-3 h-3" />
+              <span>CONTACT DEP</span>
+            </button>
+          )}
+
+        {/* When on Approach / Final -> Land */}
         {(aircraft.state === "FINAL" || aircraft.state === "APPROACH") && (
           <button
             onClick={() => {
@@ -138,6 +186,44 @@ export const MobileAircraftQuickCard: React.FC<MobileAircraftQuickCardProps> = (
           >
             <Check className="w-3 h-3" />
             <span>LAND</span>
+          </button>
+        )}
+
+        {/* When landed and rollout on runway -> Vacate Runway */}
+        {(aircraft.state === "ROLLOUT" || aircraft.state === "TOUCHDOWN") && (
+          <button
+            onClick={() => {
+              issueClearance({
+                aircraftId: aircraft.id,
+                controller: "TOWER",
+                type: "VACATE_RUNWAY",
+              });
+            }}
+            className="py-2 px-3 rounded-lg border border-amber-500/50 bg-amber-500/20 text-amber-400 font-bold text-xs flex items-center gap-1 cursor-pointer"
+          >
+            <ArrowRight className="w-3 h-3" />
+            <span>VACATE</span>
+          </button>
+        )}
+
+        {/* When vacated clear of active runway -> Contact Ground */}
+        {(aircraft.state === "VACATING_RUNWAY" ||
+          (aircraft.flightKind === "ARRIVAL" &&
+            aircraft.controller === "TOWER" &&
+            aircraft.state === "HOLD_POSITION")) && (
+          <button
+            onClick={() => {
+              issueClearance({
+                aircraftId: aircraft.id,
+                controller: "TOWER",
+                type: "HANDOFF",
+                parameters: { targetController: "GROUND" },
+              });
+            }}
+            className="py-2 px-3 rounded-lg border border-amber-500/50 bg-amber-500/20 text-amber-400 font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-sm"
+          >
+            <Radio className="w-3 h-3" />
+            <span>CONTACT GND</span>
           </button>
         )}
       </div>
