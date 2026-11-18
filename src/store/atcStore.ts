@@ -139,9 +139,17 @@ export function getPresetCameraForStation(
   }
 }
 
+export interface GlobalLoadingState {
+  active: boolean;
+  message?: string;
+  submessage?: string;
+}
+
 interface AtcStore {
   appMode: AppMode;
   setAppMode: (mode: AppMode) => void;
+  globalLoading: GlobalLoadingState | null;
+  setGlobalLoading: (active: boolean, message?: string, submessage?: string) => void;
   isOnline: boolean;
   setOnline: (online: boolean) => void;
 
@@ -645,13 +653,63 @@ async function resolveAirportBundle(
 
 export const useAtcStore = create<AtcStore>((set, get) => ({
   appMode: "LANDING",
+  globalLoading: null,
+  setGlobalLoading: (active, message, submessage) => {
+    if (!active) {
+      set({ globalLoading: null });
+    } else {
+      set({ globalLoading: { active: true, message, submessage } });
+    }
+  },
   setAppMode: (mode) => {
     radioAudio.stopAllSpeech();
     speechPtt.cancel();
     if (mode === "SIMULATION") {
       get().sim.paused = false;
     }
-    set({ appMode: mode, showAirportSelector: mode === "GLOBAL_MAP" });
+    const modeInfo: Record<AppMode, { msg: string; sub: string }> = {
+      LANDING: {
+        msg: "Returning to Operations Terminal",
+        sub: "TRANSITING AIRSPACE · DISCONNECTING SCOPES",
+      },
+      GLOBAL_MAP: {
+        msg: "Loading Global Airspace & FIR Charts",
+        sub: "PARSING AIRFIELD VECTORS & RUNWAY GEOMETRY",
+      },
+      SIMULATION: {
+        msg: "Establishing Radar Control Scope",
+        sub: "CALIBRATING AIRSPACE SECTORS & FREQUENCIES",
+      },
+      LIVE_OBSERVATION: {
+        msg: "Synchronizing Global ADS-B Traffic",
+        sub: "STREAMING LIVE TRANSPONDER TELEMETRY",
+      },
+      AIRPORT_EDITOR: {
+        msg: "Loading Airport CAD Suite",
+        sub: "INITIALIZING VECTOR SURFACE LAYERS",
+      },
+      MULTIPLAYER_LOBBY: {
+        msg: "Connecting to ATC Relay Center",
+        sub: "DISCOVERING MULTIPLAYER CONTROL TOWERS",
+      },
+    };
+    const info = modeInfo[mode] || {
+      msg: "Loading Airspace Data...",
+      sub: "CRUISING FLIGHT LEVEL",
+    };
+
+    set({
+      appMode: mode,
+      showAirportSelector: mode === "GLOBAL_MAP",
+      globalLoading: { active: true, message: info.msg, submessage: info.sub },
+    });
+
+    setTimeout(() => {
+      const cur = get().globalLoading;
+      if (cur?.message === info.msg) {
+        set({ globalLoading: null });
+      }
+    }, 450);
   },
   isOnline: typeof navigator === "undefined" ? true : navigator.onLine,
   setOnline: (online) => set({ isOnline: online }),
@@ -836,6 +894,13 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
   ) => {
     if (switchToSimulation) {
       radioAudio.stopAllSpeech();
+      set({
+        globalLoading: {
+          active: true,
+          message: `Entering ${record.icao} Radar Control`,
+          submessage: "RESOLVING AIRFIELD GEOMETRY & RUNWAY VECTORS",
+        },
+      });
     }
     set({ airportDetailLoading: true, airportDetailError: null });
 
@@ -920,6 +985,12 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
         at: 0,
       },
     });
+
+    if (switchToSimulation) {
+      setTimeout(() => {
+        set({ globalLoading: null });
+      }, 450);
+    }
   },
 
   pollLiveTraffic: async () => {
@@ -1622,6 +1693,11 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
         appMode: "SIMULATION",
         showAirportSelector: false,
         tickVersion: s.tickVersion + 1,
+        globalLoading: {
+          active: true,
+          message: `Resuming ${sim.airport.icao} Radar Control`,
+          submessage: "SYNCHRONIZING ACTIVE FLIGHT STRIPS",
+        },
         lastFeedback: {
           ok: true,
           text: `Resumed session at ${sim.airport.name} (${sim.airport.icao}) in ${
@@ -1630,6 +1706,9 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
           at: sim.time,
         },
       }));
+      setTimeout(() => {
+        set({ globalLoading: null });
+      }, 450);
       return;
     }
 
@@ -1655,6 +1734,11 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
       selectedAirportRecord: LEGACY_IDS.has(airportId) ? null : get().selectedAirportRecord,
       camera: getPresetCameraForStation(initialRole, fresh.airport),
       hoverPreviewRoute: null,
+      globalLoading: {
+        active: true,
+        message: `Establishing ${airportId} Radar Control`,
+        submessage: "CALIBRATING RUNWAYS & APPROACH CORRIDORS",
+      },
       lastFeedback: {
         ok: true,
         text: `Loaded ${fresh.airport.name} (${fresh.airport.icao}) in ${
@@ -1663,6 +1747,9 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
         at: 0,
       },
     });
+    setTimeout(() => {
+      set({ globalLoading: null });
+    }, 450);
   },
 
   openAirportSelector: () => {
@@ -1674,7 +1761,15 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
       appMode: "GLOBAL_MAP",
       showAirportSelector: true,
       tickVersion: s.tickVersion + 1,
+      globalLoading: {
+        active: true,
+        message: "Opening World Airport Catalog",
+        submessage: "MAPPING GLOBAL AIRPORTS & AIRWAYS",
+      },
     }));
+    setTimeout(() => {
+      set({ globalLoading: null });
+    }, 450);
   },
 
   forgetSavedAirport: () => {

@@ -28,6 +28,7 @@ import {
   X,
 } from "lucide-react";
 import { apiClient } from "../services/apiClient.ts";
+import { PlaneFlightLoader } from "./PlaneFlightLoader.tsx";
 import { useAtcStore } from "../store/atcStore.ts";
 import { LocalClockBadge } from "./LocalClockBadge.tsx";
 import type {
@@ -1354,22 +1355,11 @@ export const GlobalAirportMap: React.FC = () => {
 
       {/* Starting Multiplayer Session Modal / Loading Overlay */}
       {isCreatingMultiplayer && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[var(--atc-panel)] border border-[var(--atc-cyan-border)] rounded-xl p-6 shadow-2xl max-w-sm w-full flex flex-col items-center gap-3 text-center">
-            <Loader2 className="w-8 h-8 text-[var(--atc-cyan)] animate-spin" />
-            <div>
-              <h3 className="text-sm font-bold uppercase tracking-wider text-[var(--atc-text)]">
-                Starting Multiplayer Session...
-              </h3>
-              <p className="text-xs text-[var(--atc-muted)] mt-1 font-mono">
-                Provisioning room at {selectedAirportRecord?.icao ?? "VIDP"} · 5 ATC Stations
-              </p>
-            </div>
-            <p className="text-[11px] text-[var(--atc-cyan)] animate-pulse font-mono">
-              Connecting to AirCommand Multiplayer Relay...
-            </p>
-          </div>
-        </div>
+        <PlaneFlightLoader
+          message="Starting Multiplayer Session..."
+          submessage={`Provisioning room at ${selectedAirportRecord?.icao ?? "VIDP"} · 5 ATC Stations`}
+          fullscreen={true}
+        />
       )}
     </div>
   );
