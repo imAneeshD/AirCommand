@@ -14,7 +14,7 @@ import {
 import type { Aircraft, RunwayId } from "../types/atc.ts";
 import { useAtcStore } from "../store/atcStore.ts";
 import { hashCallsign } from "../data/aircraftCatalog.ts";
-import { controllerFrequency } from "../engine/decisionEngine.ts";
+import { controllerFrequency, formatSpokenDestination } from "../engine/decisionEngine.ts";
 
 interface IfrFlightPlanModalProps {
   aircraft: Aircraft | null;
@@ -315,7 +315,7 @@ export const IfrFlightPlanModal: React.FC<IfrFlightPlanModalProps> = ({
                   Spoken Clearance Preview
                 </div>
                 <p className="text-[10px] text-[var(--atc-text-secondary)] italic leading-relaxed">
-                  "{aircraft.spokenCallsign}, cleared to {aircraft.destinationName ?? aircraft.destinationIcao ?? "destination"} via {modalSid} departure, runway {modalRwy}, climb and maintain {modalAlt.toLocaleString()} feet, departure {controllerFrequency("DEPARTURE", sim.airport, "DEPARTURE")}, squawk {modalSquawk}."
+                  "{aircraft.spokenCallsign}, cleared to {formatSpokenDestination(aircraft.destinationName ?? aircraft.destinationIcao ?? "destination")} via {modalSid} departure, runway {modalRwy}, climb and maintain {modalAlt.toLocaleString()} feet, departure {controllerFrequency("DEPARTURE", sim.airport, "DEPARTURE")}, squawk {modalSquawk}."
                 </p>
               </div>
             </div>
@@ -339,7 +339,7 @@ export const IfrFlightPlanModal: React.FC<IfrFlightPlanModalProps> = ({
             </div>
             <p className="text-[11px] leading-relaxed opacity-90">
               {isCleared
-                ? `Cleared to ${fp?.destinationIcao ?? aircraft.destinationIcao} via ${fp?.sidFix ?? "SID"}, climb and maintain ${fp?.assignedAltitude ?? "5,000 ft"}, departure ${fp?.departureFrequency ?? "124.70"}, squawk ${fp?.assignedBeacon ?? aircraft.squawk}. Ready for pushback with Ground.`
+                ? `Cleared to ${formatSpokenDestination(fp?.destinationName ?? aircraft.destinationName ?? fp?.destinationIcao ?? aircraft.destinationIcao ?? "destination")} via ${fp?.sidFix ?? "SID"}, climb and maintain ${fp?.assignedAltitude ?? "5,000 ft"}, departure ${fp?.departureFrequency ?? "124.70"}, squawk ${fp?.assignedBeacon ?? aircraft.squawk}. Ready for pushback with Ground.`
                 : "Aircraft is at gate awaiting IFR route clearance copy from Clearance Delivery controller."}
             </p>
           </div>

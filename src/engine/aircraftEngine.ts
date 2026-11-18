@@ -9,7 +9,7 @@ import { hashCallsign } from "../data/aircraftCatalog.ts";
 import type { Aircraft, RunwayId, RunwaySpec, SimulationState, TaxiNode } from "../types/atc.ts";
 import { formatGateIcao } from "../utils/natoPhonetics.ts";
 import { completeClearancesOfType, nextId } from "./clearanceEngine.ts";
-import { addRadioMessage, controllerCallsign } from "./decisionEngine.ts";
+import { addRadioMessage, controllerCallsign, formatSpokenDestination } from "./decisionEngine.ts";
 import { canAircraftExecuteAction } from "./validationEngine.ts";
 
 export function resolveCrashLocation(
@@ -303,7 +303,8 @@ export function updateAircraftStates(state: SimulationState): void {
           ac.flightKind === "DEPARTURE" &&
           (!ac.flightPlan || ac.flightPlan.clearanceStatus !== "CLEARED")
         ) {
-          const dest = ac.destinationName ?? ac.destinationIcao ?? "destination";
+          const rawDest = ac.destinationName ?? ac.destinationIcao ?? "destination";
+          const dest = formatSpokenDestination(rawDest);
           issuePilotRequestIfNeeded(
             state,
             ac,

@@ -50,13 +50,21 @@ export function formatAtcSpeech(rawText: string): string {
     }
   }
 
-  // Strip bracketed metadata tags like [READBACK ERROR], [TOWER LIGHT GUN TO UAE101], etc.
-  text = text.replace(/\[[^\]]*\]/g, " ").trim();
+  // Strip parenthetical and bracketed codes/acronyms completely so TTS never pronounces bracketed codes like "(SDF)" or "(MIA)"
+  while (/\([^()]*\)/.test(text)) {
+    text = text.replace(/\s*\([^()]*\)/g, " ").trim();
+  }
+  while (/\{[^{}]*\}/.test(text)) {
+    text = text.replace(/\s*\{[^{}]*\}/g, " ").trim();
+  }
+  while (/\[[^\[\]]*\]/.test(text)) {
+    text = text.replace(/\s*\[[^\[\]]*\]/g, " ").trim();
+  }
 
   // Strip or translate directional arrows into natural speech ("to") so TTS NEVER pronounces "right pointing arrow"
   text = text.replace(/\s*(?:[-=]+>|→|⇒|↦)\s*/g, " to ");
 
-  // Strip brackets, parentheses, middle dots, and special punctuation that speech synthesizers read aloud
+  // Strip remaining stray brackets, parentheses, middle dots, and special punctuation
   text = text.replace(/[\(\)\[\]\{\}]/g, " ");
   text = text.replace(/[\u00B7\u2022|~*#_—–]/g, " ");
   text = text.replace(/\s*:\s*/g, ", ");
