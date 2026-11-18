@@ -42,10 +42,10 @@ export const PlaneFlightLoader: React.FC<PlaneFlightLoaderProps> = ({
 
   return (
     <div className={containerClasses} role="status" aria-live="polite">
-      {/* Background ambient radial glow */}
-      <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_at_center,_rgba(34,211,238,0.08)_0%,_transparent_70%)]" />
+      {/* Ambient background glow */}
+      <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_at_center,_rgba(56,189,248,0.10)_0%,_transparent_70%)]" />
 
-      {/* Main Plane in Air Canvas Scene */}
+      {/* Main Doodle Plane Flight Canvas Scene */}
       <div className="relative w-full max-w-[560px] h-[220px] sm:h-[260px] flex items-center justify-center overflow-hidden rounded-2xl border border-[var(--atc-border-strong)]/40 bg-gradient-to-b from-[#061122] via-[#08152c] to-[#040914] shadow-2xl">
         <PlaneSkyScene />
       </div>
@@ -83,54 +83,48 @@ export const PlaneFlightLoader: React.FC<PlaneFlightLoaderProps> = ({
 };
 
 /**
- * Animated Sky Scene with clouds, contrails, wind streaks, and a cruising airliner.
+ * Animated Sky Scene featuring the hand-drawn doodle airplane GIF flight loop,
+ * floating clouds, slipstream streaks, and radar grid.
  */
 function PlaneSkyScene({ compact = false }: { compact?: boolean }) {
-  const width = compact ? 280 : 540;
-  const height = compact ? 100 : 220;
-
   return (
     <div className="relative w-full h-full overflow-hidden flex items-center justify-center">
-      {/* Inline styles for custom keyframe animations */}
+      {/* Custom keyframe animations for the doodle GIF feel */}
       <style>{`
-        @keyframes planeCruise {
+        @keyframes doodleFly {
           0% { transform: translateY(0px) rotate(0deg); }
-          25% { transform: translateY(-7px) rotate(-1.5deg); }
-          50% { transform: translateY(-2px) rotate(0.5deg); }
-          75% { transform: translateY(6px) rotate(1.2deg); }
+          25% { transform: translateY(-7px) rotate(-1.8deg); }
+          50% { transform: translateY(-2px) rotate(0.4deg); }
+          75% { transform: translateY(6px) rotate(1.4deg); }
           100% { transform: translateY(0px) rotate(0deg); }
         }
 
-        @keyframes cloudDriftSlow {
-          0% { transform: translateX(110%); }
-          100% { transform: translateX(-120%); }
+        @keyframes doodleCloudPuff {
+          0%, 100% { transform: scale(1) translateY(0); }
+          50% { transform: scale(1.05) translateY(-2px); }
         }
 
-        @keyframes cloudDriftMed {
-          0% { transform: translateX(110%); }
-          100% { transform: translateX(-130%); }
+        @keyframes doodleTrailStream {
+          0% { transform: translateX(0); opacity: 0.85; }
+          50% { transform: translateX(-16px); opacity: 0.45; }
+          100% { transform: translateX(-32px); opacity: 0; }
         }
 
-        @keyframes cloudDriftFast {
-          0% { transform: translateX(110%); }
-          100% { transform: translateX(-140%); }
+        @keyframes doodleWindSpeed {
+          0% { transform: translateX(200px); opacity: 0; }
+          15% { opacity: 0.8; }
+          85% { opacity: 0.8; }
+          100% { transform: translateX(-240px); opacity: 0; }
         }
 
-        @keyframes windStreak {
-          0% { transform: translateX(120%); opacity: 0; }
-          20% { opacity: 0.7; }
-          80% { opacity: 0.7; }
-          100% { transform: translateX(-120%); opacity: 0; }
+        @keyframes doodleCloudDriftSlow {
+          0% { transform: translateX(240px); }
+          100% { transform: translateX(-260px); }
         }
 
-        @keyframes jetExhaust {
-          0%, 100% { opacity: 0.55; transform: scaleX(0.9); }
-          50% { opacity: 0.95; transform: scaleX(1.15); }
-        }
-
-        @keyframes beaconBlink {
-          0%, 85%, 100% { opacity: 0.15; }
-          90% { opacity: 1; }
+        @keyframes doodleCloudDriftFast {
+          0% { transform: translateX(240px); }
+          100% { transform: translateX(-260px); }
         }
 
         @keyframes radarSweep {
@@ -140,357 +134,275 @@ function PlaneSkyScene({ compact = false }: { compact?: boolean }) {
         }
       `}</style>
 
+      {/* Radar Coordinate Grid */}
+      <div className="absolute inset-0 opacity-[0.06] bg-[linear-gradient(to_right,#38bdf8_1px,transparent_1px),linear-gradient(to_bottom,#38bdf8_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none" />
+
       {/* Atmospheric Horizon Haze */}
       <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-cyan-950/20 via-blue-950/10 to-transparent pointer-events-none" />
 
-      {/* Faint Grid / Radar Altitude Lines */}
-      <div className="absolute inset-0 opacity-[0.07] bg-[linear-gradient(to_right,#38bdf8_1px,transparent_1px),linear-gradient(to_bottom,#38bdf8_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none" />
-
-      {/* Background Distant Cloud Layer 1 (Slow) */}
+      {/* Drifting Background Doodle Clouds */}
       <div
-        className="absolute w-36 h-12 text-slate-400/15 pointer-events-none"
+        className="absolute w-28 h-10 text-cyan-200/15 pointer-events-none"
         style={{
-          top: "15%",
-          animation: "cloudDriftSlow 20s linear infinite",
+          top: "14%",
+          animation: "doodleCloudDriftSlow 18s linear infinite",
           animationDelay: "-3s",
         }}
       >
-        <CloudSvg />
+        <DoodleBackgroundCloudSvg />
       </div>
 
       <div
-        className="absolute w-44 h-14 text-slate-400/15 pointer-events-none"
+        className="absolute w-36 h-12 text-slate-300/15 pointer-events-none"
         style={{
-          top: "60%",
-          animation: "cloudDriftSlow 24s linear infinite",
-          animationDelay: "-14s",
+          top: "65%",
+          animation: "doodleCloudDriftFast 13s linear infinite",
+          animationDelay: "-8s",
         }}
       >
-        <CloudSvg />
+        <DoodleBackgroundCloudSvg />
       </div>
 
-      {/* Mid-level Cloud Layer 2 (Medium Speed) */}
+      {/* High-Speed Wind / Slipstream Streaks (Doodle Hand-drawn Dashes) */}
       <div
-        className="absolute w-40 h-14 text-slate-300/25 pointer-events-none"
+        className="absolute w-28 h-[2px] bg-gradient-to-l from-transparent via-cyan-400/50 to-transparent pointer-events-none"
         style={{
-          top: "28%",
-          animation: "cloudDriftMed 14s linear infinite",
-          animationDelay: "-7s",
-        }}
-      >
-        <CloudSvg />
-      </div>
-
-      <div
-        className="absolute w-48 h-16 text-slate-300/20 pointer-events-none"
-        style={{
-          top: "68%",
-          animation: "cloudDriftMed 16s linear infinite",
-          animationDelay: "-1s",
-        }}
-      >
-        <CloudSvg />
-      </div>
-
-      {/* High-Speed Wind / Slipstream Streaks */}
-      <div
-        className="absolute w-32 h-[1px] bg-gradient-to-l from-transparent via-cyan-400/40 to-transparent pointer-events-none"
-        style={{
-          top: "24%",
-          animation: "windStreak 2.2s linear infinite",
+          top: "22%",
+          animation: "doodleWindSpeed 2.2s linear infinite",
           animationDelay: "0.2s",
         }}
       />
       <div
-        className="absolute w-48 h-[1.5px] bg-gradient-to-l from-transparent via-cyan-300/50 to-transparent pointer-events-none"
+        className="absolute w-40 h-[2.5px] bg-gradient-to-l from-transparent via-cyan-300/60 to-transparent pointer-events-none"
         style={{
-          top: "42%",
-          animation: "windStreak 1.7s linear infinite",
+          top: "38%",
+          animation: "doodleWindSpeed 1.8s linear infinite",
           animationDelay: "0.9s",
         }}
       />
       <div
-        className="absolute w-40 h-[1px] bg-gradient-to-l from-transparent via-cyan-400/40 to-transparent pointer-events-none"
+        className="absolute w-32 h-[2px] bg-gradient-to-l from-transparent via-sky-400/50 to-transparent pointer-events-none"
         style={{
-          top: "76%",
-          animation: "windStreak 2.5s linear infinite",
+          top: "78%",
+          animation: "doodleWindSpeed 2.5s linear infinite",
           animationDelay: "1.4s",
         }}
       />
 
-      {/* Cruising Airliner Component */}
+      {/* Cruising Doodle Airplane */}
       <div
         className="relative z-10 flex items-center justify-center"
         style={{
-          animation: "planeCruise 5s ease-in-out infinite",
+          animation: "doodleFly 4.5s ease-in-out infinite",
         }}
       >
-        <AirlinerFlightSvg compact={compact} />
-      </div>
-
-      {/* Foreground Cloud Layer 3 (Faster, Passing Close Below) */}
-      <div
-        className="absolute w-56 h-18 text-cyan-200/25 pointer-events-none z-20"
-        style={{
-          top: "72%",
-          animation: "cloudDriftFast 9s linear infinite",
-          animationDelay: "-4s",
-        }}
-      >
-        <CloudSvg />
+        <DoodleAirplaneSvg compact={compact} />
       </div>
     </div>
   );
 }
 
 /**
- * Detailed SVG vector graphic of a modern commercial airliner in flight with contrails, engines, and strobe lights.
+ * Hand-drawn Doodle Airplane SVG recreated exactly from the user's reference doodle.
+ * Features:
+ * - Line art stroke: #305586 with round caps & joins
+ * - Fuselage: Crisp #ffffff body with #c7edf6 underbelly shading
+ * - Top Far Wing & Bottom Near Wing matching user doodle contours
+ * - Slanted cockpit visor + 3 passenger cabin windows (#249ad0 cyan)
+ * - Trailing contrail dashes behind tail
+ * - Doodle cloud puffs underneath with animated breathing pulse
  */
-function AirlinerFlightSvg({ compact }: { compact?: boolean }) {
-  const scale = compact ? 0.62 : 1;
-  const w = 320 * scale;
-  const h = 110 * scale;
+export function DoodleAirplaneSvg({ compact = false }: { compact?: boolean }) {
+  const scale = compact ? 0.6 : 1;
+  const w = 340 * scale;
+  const h = 190 * scale;
 
   return (
     <svg
       width={w}
       height={h}
-      viewBox="0 0 320 110"
+      viewBox="0 0 340 190"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
-      className="drop-shadow-[0_8px_20px_rgba(34,211,238,0.25)] select-none"
+      className="drop-shadow-[0_12px_24px_rgba(0,0,0,0.5)] select-none"
     >
       <defs>
-        {/* Fuselage metallic lighting gradient */}
-        <linearGradient id="fuselageGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stopColor="#f8fafc" />
-          <stop offset="35%" stopColor="#e2e8f0" />
-          <stop offset="70%" stopColor="#94a3b8" />
-          <stop offset="100%" stopColor="#475569" />
-        </linearGradient>
-
-        {/* Wing gradient */}
-        <linearGradient id="wingGrad" x1="0%" y1="0%" x2="100%" y2="50%">
-          <stop offset="0%" stopColor="#cbd5e1" />
-          <stop offset="60%" stopColor="#94a3b8" />
-          <stop offset="100%" stopColor="#64748b" />
-        </linearGradient>
-
-        {/* Engine nacelle gradient */}
-        <linearGradient id="engineGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stopColor="#1e293b" />
-          <stop offset="40%" stopColor="#475569" />
-          <stop offset="85%" stopColor="#334155" />
-          <stop offset="100%" stopColor="#0f172a" />
-        </linearGradient>
-
-        {/* Jet engine thrust glow */}
-        <linearGradient id="jetThrustGrad" x1="100%" y1="50%" x2="0%" y2="50%">
-          <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.95" />
-          <stop offset="40%" stopColor="#06b6d4" stopOpacity="0.65" />
-          <stop offset="100%" stopColor="#0284c7" stopOpacity="0" />
-        </linearGradient>
-
-        {/* Contrail vapor stream */}
-        <linearGradient id="contrailGrad" x1="100%" y1="50%" x2="0%" y2="50%">
-          <stop offset="0%" stopColor="#e0f2fe" stopOpacity="0.8" />
-          <stop offset="40%" stopColor="#bae6fd" stopOpacity="0.4" />
-          <stop offset="85%" stopColor="#7dd3fc" stopOpacity="0.1" />
-          <stop offset="100%" stopColor="#38bdf8" stopOpacity="0" />
-        </linearGradient>
-
-        {/* Cockpit windshield glass sheen */}
-        <linearGradient id="cockpitGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#0ea5e9" />
-          <stop offset="60%" stopColor="#0369a1" />
-          <stop offset="100%" stopColor="#082f49" />
-        </linearGradient>
+        {/* Soft shadow / glow filter */}
+        <filter id="doodleGlow" x="-20%" y="-20%" width="140%" height="140%">
+          <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="#0284c7" floodOpacity="0.3" />
+        </filter>
       </defs>
 
-      {/* Upper Contrail from Wingtip */}
+      {/* Speed Contrail Dashes Trailing Behind Tail */}
+      <g>
+        {/* Main Contrail Dash matching doodle */}
+        <line
+          x1="16"
+          y1="52"
+          x2="54"
+          y2="52"
+          stroke="#305586"
+          strokeWidth="4.5"
+          strokeLinecap="round"
+        />
+        {/* Animated Stream Dash behind */}
+        <line
+          x1="-14"
+          y1="52"
+          x2="6"
+          y2="52"
+          stroke="#38bdf8"
+          strokeWidth="3.2"
+          strokeLinecap="round"
+          style={{ animation: "doodleTrailStream 1.5s ease-out infinite" }}
+        />
+      </g>
+
+      {/* Far Wing (Top Wing - behind fuselage) */}
       <path
-        d="M 50 38 L -30 36 C -50 36 -70 34 -90 33 L -90 41 C -70 41 -50 40 -30 40 Z"
-        fill="url(#contrailGrad)"
-        className="opacity-75"
-      />
-
-      {/* Engine Exhaust Contrail Stream */}
-      <path
-        d="M 120 70 L -20 67 C -60 67 -80 64 -110 63 L -110 74 C -80 74 -60 72 -20 72 Z"
-        fill="url(#contrailGrad)"
-        className="opacity-85"
-      />
-
-      {/* Jet Engine Cyan Thrust Cone */}
-      <ellipse
-        cx="116"
-        cy="70"
-        rx="16"
-        ry="4.5"
-        fill="url(#jetThrustGrad)"
-        style={{
-          transformOrigin: "120px 70px",
-          animation: "jetExhaust 0.8s ease-in-out infinite",
-        }}
-      />
-
-      {/* Horizontal Stabilizer (Tail Plane) */}
-      <polygon
-        points="52,42 22,46 16,51 46,47"
-        fill="#94a3b8"
-        stroke="#475569"
-        strokeWidth="1"
-      />
-
-      {/* Vertical Stabilizer (Tail Fin) */}
-      <polygon
-        points="70,44 32,8 46,8 86,43"
-        fill="url(#wingGrad)"
-        stroke="#334155"
-        strokeWidth="1.2"
-      />
-      {/* Airline Fin Accent Stripe */}
-      <polygon
-        points="52,14 42,9 47,8 60,14"
-        fill="#0284c7"
-      />
-
-      {/* Tail Fin White Strobe Beacon */}
-      <circle
-        cx="39"
-        cy="8"
-        r="2.5"
+        d="M 172 63 C 170 38 174 24 186 24 C 196 24 218 52 232 63 Z"
         fill="#ffffff"
-        style={{ animation: "beaconBlink 1.1s infinite" }}
+        stroke="#305586"
+        strokeWidth="4.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      {/* Far Wing Soft Sky-Cyan Shading */}
+      <path
+        d="M 174 58 C 173 40 176 28 185 27 C 190 27 202 44 215 58 Z"
+        fill="#c7edf6"
       />
 
-      {/* Main Fuselage Body */}
+      {/* Main Fuselage Outline & Body */}
       <path
         d="
-          M 46 48
-          C 40 48 35 50 30 52
-          C 25 54 20 56 18 57
-          C 22 58 35 59 52 59
-          L 230 59
-          C 258 59 284 56 295 52
-          C 285 47 252 45 220 45
-          L 66 45
+          M 76 68
+          C 73 42 70 20 80 18
+          C 90 16 97 45 110 65
+          C 142 63 192 61 245 66
+          C 278 70 300 78 304 88
+          C 306 97 292 108 266 112
+          C 205 116 138 111 86 94
+          C 74 88 74 76 76 68
           Z
         "
-        fill="url(#fuselageGrad)"
-        stroke="#334155"
-        strokeWidth="1.2"
+        fill="#ffffff"
+        stroke="#305586"
+        strokeWidth="4.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
 
-      {/* Nose Aerodynamic Radome Tip */}
+      {/* Soft Underbelly Cyan Shading Contour */}
       <path
-        d="M 285 50 C 293 51 297 52 297 52 C 297 52 293 54 285 55 Z"
-        fill="#64748b"
+        d="
+          M 77 74
+          C 78 84 94 94 135 102
+          C 190 110 252 110 295 93
+          C 292 101 268 110 236 112
+          C 176 114 116 109 84 93
+          C 76 87 75 79 77 74
+          Z
+        "
+        fill="#c7edf6"
       />
 
-      {/* Cockpit Windshield Visor */}
-      <polygon
-        points="268,47 280,49 278,52 266,51"
-        fill="url(#cockpitGrad)"
-        stroke="#0c4a6e"
-        strokeWidth="0.8"
+      {/* Cockpit Windshield Visor (Forward-slanted rounded rect) */}
+      <path
+        d="M 276 80 L 292 78 C 298 81 298 86 292 90 L 277 89 C 275 86 275 83 276 80 Z"
+        fill="#ffffff"
+        stroke="#305586"
+        strokeWidth="3.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M 279 82 L 290 80 C 294 82 294 85 290 87 L 279 87 Z"
+        fill="#249ad0"
       />
 
-      {/* Passenger Cabin Window Row */}
-      {Array.from({ length: 18 }).map((_, i) => {
-        const x = 75 + i * 9.5;
-        // Skip over the wing box
-        if (x >= 148 && x <= 162) return null;
-        return (
-          <rect
-            key={i}
-            x={x}
-            y={49}
-            width="4.5"
-            height="3.2"
-            rx="1.4"
-            fill="#0284c7"
-            className="opacity-90"
-          />
-        );
-      })}
+      {/* Passenger Cabin Windows (3 rounded dots with radar-blue center) */}
+      <circle cx="236" cy="85" r="4" fill="#249ad0" stroke="#305586" strokeWidth="2.5" />
+      <circle cx="250" cy="85" r="4" fill="#249ad0" stroke="#305586" strokeWidth="2.5" />
+      <circle cx="264" cy="85" r="4" fill="#249ad0" stroke="#305586" strokeWidth="2.5" />
 
-      {/* Main Swept Wing */}
-      <polygon
-        points="136,54 186,54 150,88 126,88"
-        fill="url(#wingGrad)"
-        stroke="#334155"
-        strokeWidth="1.2"
+      {/* Near Wing (Bottom Wing - in front of fuselage) */}
+      <path
+        d="
+          M 235 94
+          C 225 110 198 146 182 158
+          C 173 164 165 158 170 146
+          C 182 120 200 96 208 88
+          Z
+        "
+        fill="#ffffff"
+        stroke="#305586"
+        strokeWidth="4.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
-
-      {/* Upward Cant Winglet */}
-      <polygon
-        points="126,88 122,80 125,78 129,86"
-        fill="#0284c7"
-      />
-
-      {/* Port Navigation Light (Red Strobe at Winglet) */}
-      <circle
-        cx="123"
-        cy="79"
-        r="2"
-        fill="#ef4444"
-        style={{ animation: "beaconBlink 0.9s infinite" }}
+      {/* Near Wing Soft Cyan Shading */}
+      <path
+        d="
+          M 221 98
+          C 212 114 192 144 180 154
+          C 175 158 170 154 173 145
+          C 182 124 196 102 204 95
+          Z
+        "
+        fill="#c7edf6"
       />
 
-      {/* Turbofan Jet Engine Pod */}
-      <rect
-        x="126"
-        y="64"
-        width="34"
-        height="12"
-        rx="5.5"
-        fill="url(#engineGrad)"
-        stroke="#1e293b"
-        strokeWidth="1.2"
-      />
-      {/* Engine Intake Cowling Rim */}
-      <ellipse
-        cx="158"
-        cy="70"
-        rx="3.5"
-        ry="5.5"
-        fill="#0f172a"
-        stroke="#64748b"
-        strokeWidth="1"
-      />
-      {/* Engine Fan Spinner Hub */}
-      <circle
-        cx="158"
-        cy="70"
-        r="1.8"
-        fill="#38bdf8"
-      />
-
-      {/* Fuselage Belly Red Flashing Beacon */}
-      <circle
-        cx="160"
-        cy="60"
-        r="2.2"
-        fill="#ef4444"
-        style={{ animation: "beaconBlink 1.4s infinite" }}
-      />
+      {/* Doodle Clouds Underneath the Airplane */}
+      <g
+        style={{
+          transformOrigin: "200px 165px",
+          animation: "doodleCloudPuff 3.8s ease-in-out infinite",
+        }}
+      >
+        <path
+          d="
+            M 166 168
+            C 173 154 191 154 200 163
+            C 207 148 233 146 246 162
+            C 251 166 256 168 261 168
+          "
+          fill="none"
+          stroke="#305586"
+          strokeWidth="4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        {/* Cloud Base Slipstream Dash */}
+        <line
+          x1="160"
+          y1="170"
+          x2="192"
+          y2="170"
+          stroke="#305586"
+          strokeWidth="4"
+          strokeLinecap="round"
+        />
+      </g>
     </svg>
   );
 }
 
 /**
- * Reusable Stylized Cloud SVG
+ * Reusable Stylized Hand-Drawn Doodle Cloud SVG for background drift
  */
-function CloudSvg() {
+function DoodleBackgroundCloudSvg() {
   return (
     <svg
       viewBox="0 0 120 48"
       fill="currentColor"
       xmlns="http://www.w3.org/2000/svg"
-      className="w-full h-full filter blur-[1px]"
+      className="w-full h-full filter blur-[0.5px]"
     >
-      <path d="M 20 40 C 12 40 6 34 6 26 C 6 18 13 13 21 14 C 26 6 37 2 48 5 C 57 -1 69 0 76 6 C 84 4 93 8 96 16 C 105 16 112 23 112 30 C 112 37 106 42 98 42 L 20 42 Z" />
+      <path
+        d="M 20 40 C 12 40 6 34 6 26 C 6 18 13 13 21 14 C 26 6 37 2 48 5 C 57 -1 69 0 76 6 C 84 4 93 8 96 16 C 105 16 112 23 112 30 C 112 37 106 42 98 42 L 20 42 Z"
+        opacity="0.5"
+      />
     </svg>
   );
 }
