@@ -3,7 +3,7 @@ import http from "node:http";
 import path from "node:path";
 import { WebSocketServer } from "ws";
 import type { AirportDataQuality, AirportGeoJsonCollection, ClearanceCommandInput, ControllerRole, DifficultyLevel, ScenarioId } from "../src/types/atc.ts";
-import { DatabaseService } from "./db/DatabaseService.ts";
+import { DatabaseService, type UserSessionRecord } from "./db/DatabaseService.ts";
 import { ADSBProviderService, OpenSkyProvider } from "./services/ADSBProviderService.ts";
 import { AircraftPhotoService } from "./services/AircraftPhotoService.ts";
 import { AirportGeometryService } from "./services/AirportGeometryService.ts";
@@ -26,6 +26,8 @@ const adsbService = new ADSBProviderService(new OpenSkyProvider(), openSkyMetada
 const photoService = new AircraftPhotoService();
 const roomService = new MultiplayerRoomService(db, geomService);
 roomService.startClockLoop();
+
+const SESSIONS_JSONL_PATH = path.resolve("server/data/user_sessions.jsonl");
 
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
@@ -169,6 +171,172 @@ const server = http.createServer(async (req, res) => {
   try {
     if (pathname === "/api/health" && req.method === "GET") {
       sendJson(res, 200, { ok: true, airports: db.getAirportCount(), serverTime: Date.now() });
+      return;
+    }
+
+    // Record user simulation session with email, duration, and airport stats
+    if (pathname === "/api/sessions/record" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      const email = typeof body.email === "string" ? body.email.trim() : "";
+      if (!email || !email.includes("@")) {
+        sendJson(res, 400, { ok: false, error: "Valid email address is required to track session." });
+        return;
+      }
+
+      const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || undefined;
+      const userAgent = (req.headers["user-agent"] as string) || undefined;
+      const sessionId = typeof body.sessionId === "string" ? body.sessionId : `ses_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const id = typeof body.id === "string" ? body.id : sessionId;
+      const startedAt = typeof body.startedAt === "string" ? body.startedAt : new Date().toISOString();
+      const endedAt = typeof body.endedAt === "string" ? body.endedAt : new Date().toISOString();
+      const durationSeconds = typeof body.durationSeconds === "number" ? Math.max(0, Math.round(body.durationSeconds)) : 0;
+      const airportIcao = typeof body.airportIcao === "string" ? body.airportIcao.toUpperCase() : "UNKNOWN";
+      const airportName = typeof body.airportName === "string" ? body.airportName : airportIcao;
+      const scenario = typeof body.scenario === "string" ? body.scenario : "NORMAL_OPS";
+      const role = typeof body.role === "string" ? body.role : "ALL";
+      const departuresCompleted = typeof body.departuresCompleted === "number" ? body.departuresCompleted : 0;
+      const arrivalsCompleted = typeof body.arrivalsCompleted === "number" ? body.arrivalsCompleted : 0;
+      const clearancesIssued = typeof body.clearancesIssued === "number" ? body.clearancesIssued : 0;
+      const safetyScore = typeof body.safetyScore === "number" ? body.safetyScore : 100;
+      const conflicts = typeof body.conflicts === "number" ? body.conflicts : 0;
+
+      const record: UserSessionRecord = {
+        id,
+        email,
+        sessionId,
+        startedAt,
+        endedAt,
+        durationSeconds,
+        airportIcao,
+        airportName,
+        scenario,
+        role,
+        departuresCompleted,
+        arrivalsCompleted,
+        clearancesIssued,
+        safetyScore,
+        conflicts,
+        clientIp,
+        userAgent,
+        payloadJson: JSON.stringify(body),
+        createdAt: new Date().toISOString(),
+      };
+
+      // 1. Save to SQLite database
+      db.saveUserSession(record);
+
+      // 2. Append to append-only JSONL file (instant, tamper-resistant, human-readable)
+      try {
+        fs.mkdirSync(path.dirname(SESSIONS_JSONL_PATH), { recursive: true });
+        fs.appendFileSync(SESSIONS_JSONL_PATH, JSON.stringify(record) + "\n", "utf8");
+      } catch (err) {
+        console.error("[AirCommand Server] Failed to append session to jsonl:", err);
+      }
+
+      sendJson(res, 200, { ok: true, id, message: "Session successfully recorded" });
+      return;
+    }
+
+    // Secure Admin export endpoint to download the session tracking data as JSON or CSV
+    if (pathname === "/api/admin/sessions/export" && req.method === "GET") {
+      const adminKey = (req.headers["x-admin-key"] as string) || reqUrl.searchParams.get("key");
+      const validKey = process.env.ADMIN_SECRET_KEY || "aircommand-admin-secret-2026";
+      if (!adminKey || adminKey !== validKey) {
+        sendJson(res, 401, { error: "Unauthorized: Invalid or missing admin key (?key=... or x-admin-key header required)" });
+        return;
+      }
+
+      const format = reqUrl.searchParams.get("format") || "json";
+      const limit = Number(reqUrl.searchParams.get("limit") || "5000");
+      const sessions = db.getAllUserSessions(limit);
+      const dateStr = new Date().toISOString().slice(0, 10);
+
+      if (format.toLowerCase() === "csv") {
+        const headers = [
+          "id",
+          "email",
+          "sessionId",
+          "startedAt",
+          "endedAt",
+          "durationSeconds",
+          "airportIcao",
+          "airportName",
+          "scenario",
+          "role",
+          "departuresCompleted",
+          "arrivalsCompleted",
+          "clearancesIssued",
+          "safetyScore",
+          "conflicts",
+          "createdAt"
+        ];
+        const escapeCsv = (val: unknown) => {
+          const str = String(val ?? "");
+          return `"${str.replace(/"/g, '""')}"`;
+        };
+        const rows = [headers.join(",")];
+        for (const s of sessions) {
+          rows.push([
+            escapeCsv(s.id),
+            escapeCsv(s.email),
+            escapeCsv(s.sessionId),
+            escapeCsv(s.startedAt),
+            escapeCsv(s.endedAt),
+            s.durationSeconds,
+            escapeCsv(s.airportIcao),
+            escapeCsv(s.airportName),
+            escapeCsv(s.scenario),
+            escapeCsv(s.role),
+            s.departuresCompleted,
+            s.arrivalsCompleted,
+            s.clearancesIssued,
+            s.safetyScore,
+            s.conflicts,
+            escapeCsv(s.createdAt)
+          ].join(","));
+        }
+        res.writeHead(200, {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": `attachment; filename="aircommand_sessions_${dateStr}.csv"`,
+          "Access-Control-Allow-Origin": "*",
+        });
+        res.end(rows.join("\n"));
+        return;
+      }
+
+      // Default: JSON download
+      const payload = JSON.stringify({
+        exportedAt: new Date().toISOString(),
+        totalCount: sessions.length,
+        sessions,
+      }, null, 2);
+      res.writeHead(200, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Disposition": `attachment; filename="aircommand_sessions_${dateStr}.json"`,
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end(payload);
+      return;
+    }
+
+    // Quick Admin Stats
+    if (pathname === "/api/admin/sessions/stats" && req.method === "GET") {
+      const adminKey = (req.headers["x-admin-key"] as string) || reqUrl.searchParams.get("key");
+      const validKey = process.env.ADMIN_SECRET_KEY || "aircommand-admin-secret-2026";
+      if (!adminKey || adminKey !== validKey) {
+        sendJson(res, 401, { error: "Unauthorized: Invalid or missing admin key" });
+        return;
+      }
+      const stats = db.getUserSessionStats();
+      const recent = db.getAllUserSessions(10);
+      sendJson(res, 200, {
+        ok: true,
+        stats: {
+          ...stats,
+          totalHours: Math.round((stats.totalDurationSeconds / 3600) * 10) / 10,
+        },
+        recentSessions: recent,
+      });
       return;
     }
 

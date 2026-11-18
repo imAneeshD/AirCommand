@@ -15,6 +15,28 @@ const DB_PATH = process.env.AIRCOMMAND_DB_PATH
   ? path.resolve(process.env.AIRCOMMAND_DB_PATH)
   : path.join(DATA_DIR, "aircommand.db");
 
+export interface UserSessionRecord {
+  id: string;
+  email: string;
+  sessionId: string;
+  startedAt: string;
+  endedAt: string;
+  durationSeconds: number;
+  airportIcao: string;
+  airportName: string;
+  scenario: string;
+  role: string;
+  departuresCompleted: number;
+  arrivalsCompleted: number;
+  clearancesIssued: number;
+  safetyScore: number;
+  conflicts: number;
+  clientIp?: string;
+  userAgent?: string;
+  payloadJson?: string;
+  createdAt?: string;
+}
+
 export class DatabaseService {
   private db: DatabaseSync;
 
@@ -88,6 +110,32 @@ export class DatabaseService {
         report_json TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS user_sessions (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        ended_at TEXT NOT NULL,
+        duration_seconds INTEGER NOT NULL DEFAULT 0,
+        airport_icao TEXT NOT NULL,
+        airport_name TEXT NOT NULL,
+        scenario TEXT NOT NULL,
+        role TEXT NOT NULL,
+        departures_completed INTEGER NOT NULL DEFAULT 0,
+        arrivals_completed INTEGER NOT NULL DEFAULT 0,
+        clearances_issued INTEGER NOT NULL DEFAULT 0,
+        safety_score INTEGER NOT NULL DEFAULT 100,
+        conflicts INTEGER NOT NULL DEFAULT 0,
+        client_ip TEXT,
+        user_agent TEXT,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_user_sessions_email ON user_sessions(email);
+      CREATE INDEX IF NOT EXISTS idx_user_sessions_created_at ON user_sessions(created_at);
+      CREATE INDEX IF NOT EXISTS idx_user_sessions_airport ON user_sessions(airport_icao);
     `);
   }
 
@@ -346,6 +394,94 @@ export class DatabaseService {
         JSON.stringify(report),
         new Date().toISOString()
       );
+  }
+
+  saveUserSession(record: UserSessionRecord): void {
+    const now = new Date().toISOString();
+    const payload = record.payloadJson || JSON.stringify(record);
+    this.db
+      .prepare(
+        `INSERT INTO user_sessions (
+           id, email, session_id, started_at, ended_at, duration_seconds,
+           airport_icao, airport_name, scenario, role, departures_completed,
+           arrivals_completed, clearances_issued, safety_score, conflicts,
+           client_ip, user_agent, payload_json, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           ended_at = excluded.ended_at,
+           duration_seconds = excluded.duration_seconds,
+           departures_completed = excluded.departures_completed,
+           arrivals_completed = excluded.arrivals_completed,
+           clearances_issued = excluded.clearances_issued,
+           safety_score = excluded.safety_score,
+           conflicts = excluded.conflicts,
+           payload_json = excluded.payload_json`
+      )
+      .run(
+        record.id,
+        record.email,
+        record.sessionId,
+        record.startedAt,
+        record.endedAt,
+        record.durationSeconds,
+        record.airportIcao,
+        record.airportName,
+        record.scenario,
+        record.role,
+        record.departuresCompleted,
+        record.arrivalsCompleted,
+        record.clearancesIssued,
+        record.safetyScore,
+        record.conflicts,
+        record.clientIp || null,
+        record.userAgent || null,
+        payload,
+        record.createdAt || now
+      );
+  }
+
+  getAllUserSessions(limit = 2000): UserSessionRecord[] {
+    const rows = this.db
+      .prepare("SELECT * FROM user_sessions ORDER BY created_at DESC LIMIT ?")
+      .all(limit) as any[];
+    return rows.map((r) => ({
+      id: String(r.id),
+      email: String(r.email),
+      sessionId: String(r.session_id),
+      startedAt: String(r.started_at),
+      endedAt: String(r.ended_at),
+      durationSeconds: Number(r.duration_seconds || 0),
+      airportIcao: String(r.airport_icao),
+      airportName: String(r.airport_name),
+      scenario: String(r.scenario),
+      role: String(r.role),
+      departuresCompleted: Number(r.departures_completed || 0),
+      arrivalsCompleted: Number(r.arrivals_completed || 0),
+      clearancesIssued: Number(r.clearances_issued || 0),
+      safetyScore: Number(r.safety_score || 100),
+      conflicts: Number(r.conflicts || 0),
+      clientIp: r.client_ip ? String(r.client_ip) : undefined,
+      userAgent: r.user_agent ? String(r.user_agent) : undefined,
+      payloadJson: r.payload_json ? String(r.payload_json) : undefined,
+      createdAt: String(r.created_at),
+    }));
+  }
+
+  getUserSessionStats(): { totalSessions: number; uniqueUsers: number; totalDurationSeconds: number } {
+    const row = this.db
+      .prepare(
+        `SELECT 
+           COUNT(*) as totalSessions,
+           COUNT(DISTINCT email) as uniqueUsers,
+           COALESCE(SUM(duration_seconds), 0) as totalDurationSeconds
+         FROM user_sessions`
+      )
+      .get() as any;
+    return {
+      totalSessions: Number(row?.totalSessions || 0),
+      uniqueUsers: Number(row?.uniqueUsers || 0),
+      totalDurationSeconds: Number(row?.totalDurationSeconds || 0),
+    };
   }
 
   close(): void {

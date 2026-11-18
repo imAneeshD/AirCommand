@@ -178,3 +178,28 @@ export function saveMinimizedPanels(state: MinimizedPanelsState): void {
     // Ignore
   }
 }
+
+const USER_EMAIL_KEY = "aircommand_user_email_v1";
+
+export function loadSavedUserEmail(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(USER_EMAIL_KEY);
+    return raw && raw.includes("@") ? raw.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveUserEmail(email: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (email && email.includes("@")) {
+      window.localStorage.setItem(USER_EMAIL_KEY, email.trim());
+    } else {
+      window.localStorage.removeItem(USER_EMAIL_KEY);
+    }
+  } catch {
+    // Ignore
+  }
+}

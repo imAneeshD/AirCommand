@@ -26,6 +26,8 @@ import type { ControllerRole, PlayerRoleMode, ScenarioId } from "../types/atc.ts
 import { LocalClockBadge } from "./LocalClockBadge.tsx";
 import { RadioVoiceMenu } from "./RadioVoiceMenu.tsx";
 import { VoicePttButton } from "./VoicePttButton.tsx";
+import { UserEmailSessionModal } from "./UserEmailSessionModal.tsx";
+import { loadSavedUserEmail } from "../utils/storage.ts";
 
 const STATIONS: Array<{
   role: PlayerRoleMode;
@@ -92,6 +94,7 @@ export const TopBar: React.FC = () => {
 
   const isMpActive = Boolean(roomState && roomState.status === "ACTIVE");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [mobileStationOpen, setMobileStationOpen] = useState(false);
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement | null>(null);
@@ -456,6 +459,27 @@ export const TopBar: React.FC = () => {
                     {sim.metrics.safetyScore}%
                   </span>
                 </div>
+              </div>
+
+              {/* Controller Credentials / Logbook Sync */}
+              <div className="p-2 rounded-lg bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] flex items-center justify-between">
+                <div className="min-w-0 pr-2">
+                  <div className="text-[9px] uppercase tracking-wider text-[var(--atc-muted)] font-bold">
+                    CONTROLLER LOGBOOK
+                  </div>
+                  <div className="text-[11px] font-mono text-[var(--atc-cyan)] truncate font-semibold">
+                    {loadSavedUserEmail() || "Guest (Not tracked)"}
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setSettingsOpen(false);
+                    setEmailModalOpen(true);
+                  }}
+                  className="px-2 py-1 rounded text-[10px] font-bold bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-400 border border-cyan-500/30 transition-colors whitespace-nowrap cursor-pointer"
+                >
+                  {loadSavedUserEmail() ? "Edit" : "Set Email"}
+                </button>
               </div>
 
               {/* Traffic Scenario Picker */}
@@ -909,6 +933,11 @@ export const TopBar: React.FC = () => {
           </div>
         </div>
       )}
+
+      <UserEmailSessionModal
+        isOpen={emailModalOpen}
+        onClose={() => setEmailModalOpen(false)}
+      />
     </>
   );
 };
