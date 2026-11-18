@@ -237,7 +237,7 @@ test("Tower controller receives and accepts incoming handoff from Approach for a
   assert.match(arrival.pendingRequest?.message ?? "", /Tower/);
 });
 
-test("Holding short runway: Ground request is HANDOFF to Tower, next required option is Tower handoff", () => {
+test("Holding short runway: handoff to Tower is automated, pilot directly reports ready for departure on Tower", () => {
   const sim = createScenarioSimulation("LIGHT");
   const dep = Object.values(sim.aircraft).find((a) => a.flightKind === "DEPARTURE")!;
   assert.ok(dep, "Must have a departure aircraft");
@@ -248,27 +248,12 @@ test("Holding short runway: Ground request is HANDOFF to Tower, next required op
   dep.holdingShortReason = "DEPARTURE_RUNWAY";
   dep.controller = "GROUND";
 
-  // Stepping simulation: pilot should request Tower frequency from Ground (not takeoff from Ground)
+  // Stepping simulation: handoff is automated — aircraft transitions to Tower and requests departure clearance directly
   stepSimulation(sim, 0.5);
-  assert.equal(dep.pendingRequest?.type, "HANDOFF");
-  assert.equal(dep.pendingRequest?.controller, "GROUND");
-  assert.match(dep.pendingRequest?.message ?? "", /request Tower frequency/);
-
-  // Ground issues handoff to Tower
-  const ho = submitClearanceDecision(
-    sim,
-    {
-      aircraftId: dep.id,
-      controller: "GROUND",
-      type: "HANDOFF",
-      parameters: { targetController: "TOWER", bypassPending: true },
-    },
-    "PLAYER"
-  );
-  assert.ok(ho.ok);
-
-  stepUntilCondition(sim, () => dep.controller === "TOWER");
   assert.equal(dep.controller, "TOWER");
+  assert.equal(dep.pendingRequest?.type, "TAKEOFF");
+  assert.equal(dep.pendingRequest?.controller, "TOWER");
+  assert.match(dep.pendingRequest?.message ?? "", /ready for departure/);
 });
 
 test("Single active role with other roles autonomous: auto controllers progress aircraft without getting stuck", () => {

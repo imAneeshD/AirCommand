@@ -314,27 +314,38 @@ export function updateAircraftStates(state: SimulationState): void {
             ac.targetRunway,
             ac.gateId
           );
-        } else if (ac.controller === "GROUND") {
-          if (ac.requiresPushback) {
-            issuePilotRequestIfNeeded(
-              state,
-              ac,
-              "PUSHBACK",
-              "GROUND",
-              `${gndName}, ${ac.spokenCallsign} at gate ${spokenGate}, request pushback.`,
-              ac.targetRunway,
-              ac.gateId
-            );
-          } else {
-            issuePilotRequestIfNeeded(
-              state,
-              ac,
-              "TAXI",
-              "GROUND",
-              `${gndName}, ${ac.spokenCallsign} at gate ${spokenGate}, ready to taxi.`,
-              ac.targetRunway,
-              ac.gateId
-            );
+        } else if (ac.flightKind === "DEPARTURE") {
+          // Automated handoff: Once IFR clearance is obtained, automatically transfer to Ground if currently Delivery
+          if (
+            ac.controller === "DELIVERY" &&
+            state.config.activePlayerStation !== "DELIVERY" &&
+            (state.config.stationControl?.DELIVERY === "AUTONOMOUS" || state.config.autoManageOtherStations)
+          ) {
+            ac.controller = "GROUND";
+            ac.lastTransmissionAt = state.time;
+          }
+          if (ac.controller === "GROUND") {
+            if (ac.requiresPushback) {
+              issuePilotRequestIfNeeded(
+                state,
+                ac,
+                "PUSHBACK",
+                "GROUND",
+                `${gndName}, ${ac.spokenCallsign} at gate ${spokenGate}, request pushback.`,
+                ac.targetRunway,
+                ac.gateId
+              );
+            } else {
+              issuePilotRequestIfNeeded(
+                state,
+                ac,
+                "TAXI",
+                "GROUND",
+                `${gndName}, ${ac.spokenCallsign} at gate ${spokenGate}, ready to taxi.`,
+                ac.targetRunway,
+                ac.gateId
+              );
+            }
           }
         }
         break;
@@ -379,28 +390,37 @@ export function updateAircraftStates(state: SimulationState): void {
             );
           }
         } else if (ac.holdingShortReason === "DEPARTURE_RUNWAY") {
-          const reqType = ac.controller === "GROUND" ? "HANDOFF" : "TAKEOFF";
-          const targetCtrl = ac.controller === "GROUND" ? "GROUND" : "TOWER";
-          const msg =
-            ac.controller === "GROUND"
-              ? `${controllerCallsign("GROUND", state.airport)}, ${ac.spokenCallsign}, holding short runway ${runwaySpokenName(ac.targetRunway)}, ready for departure, request Tower frequency.`
-              : `${controllerCallsign("TOWER", state.airport)}, ${ac.spokenCallsign}, holding short runway ${runwaySpokenName(ac.targetRunway)}, ready for departure.`;
+          // Automated handoff: When departure reaches runway hold-short point,
+          // frequency automatically transitions to Tower without requiring manual handoff.
+          if (ac.controller === "GROUND" || ac.controller === "DELIVERY") {
+            ac.controller = "TOWER";
+            ac.lastTransmissionAt = state.time;
+          }
+          const towerName = controllerCallsign("TOWER", state.airport, ac.flightKind);
+          const msg = `${towerName}, ${ac.spokenCallsign}, holding short runway ${runwaySpokenName(ac.targetRunway)}, ready for departure.`;
           issuePilotRequestIfNeeded(
             state,
             ac,
-            reqType,
-            targetCtrl,
+            "TAKEOFF",
+            "TOWER",
             msg,
             ac.targetRunway
           );
         } else if (ac.flightKind === "ARRIVAL" && ac.holdingShortReason === "ROUTE_END") {
+          // Automated handoff: When arrival vacates runway after landing,
+          // frequency automatically transitions to Ground control without requiring manual handoff.
+          if (ac.controller === "TOWER") {
+            ac.controller = "GROUND";
+            ac.lastTransmissionAt = state.time;
+          }
+          const groundName = controllerCallsign("GROUND", state.airport, ac.flightKind);
           const spokenGate = ac.gateId ? formatGateIcao(ac.gateId) : "";
           issuePilotRequestIfNeeded(
             state,
             ac,
             "GATE_TAXI",
-            ac.controller,
-            `${controllerCallsign(ac.controller, state.airport)}, ${ac.spokenCallsign}, clear of runway, request taxi to gate ${spokenGate}.`,
+            "GROUND",
+            `${groundName}, ${ac.spokenCallsign}, clear of runway, request taxi to gate ${spokenGate}.`,
             undefined,
             ac.gateId
           );
@@ -547,6 +567,26 @@ export function updateAircraftStates(state: SimulationState): void {
       }
 
       case "CLIMB": {
+        // Automated handoff: When departure climbs safely above airport elevation (+1000 ft),
+        // frequency automatically transitions to Departure control under autonomous tower or auto-station assist.
+        if (
+          ac.controller === "TOWER" &&
+          ac.altitude >= elev + 1000 &&
+          (state.config.stationControl?.TOWER === "AUTONOMOUS" || state.config.autoManageOtherStations)
+        ) {
+          ac.controller = "DEPARTURE";
+          ac.lastTransmissionAt = state.time;
+          const altRounded = Math.max(500, Math.round(ac.altitude / 100) * 100);
+          const msgText = `${depName}, ${ac.spokenCallsign}, passing ${altRounded} feet, climbing ${ac.assignedAltitude ?? 3000}.`;
+          issuePilotRequestIfNeeded(
+            state,
+            ac,
+            "CLIMB_HIGHER",
+            "DEPARTURE",
+            msgText,
+            ac.targetRunway
+          );
+        }
         if (
           ac.assignedAltitude !== null &&
           Math.abs(ac.altitude - ac.assignedAltitude) < 80 &&
@@ -654,6 +694,12 @@ export function updateAircraftStates(state: SimulationState): void {
         }
 
         const along = alongRunwayNm(rwy, ac.x, ac.y);
+        // Automated handoff: When established on final within 6 NM,
+        // frequency automatically transitions to Tower without requiring manual handoff.
+        if ((ac.controller === "DEPARTURE" || ac.controller === "CENTER") && along >= -6.0 && along < -0.35) {
+          ac.controller = "TOWER";
+          ac.lastTransmissionAt = state.time;
+        }
         if (ac.controller === "TOWER" && along >= -6.0 && along < -0.35) {
           issuePilotRequestIfNeeded(
             state,
