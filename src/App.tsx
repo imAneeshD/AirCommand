@@ -15,9 +15,12 @@ import { RadioCommsLog } from "./components/RadioCommsLog.tsx";
 import { TopBar } from "./components/TopBar.tsx";
 import { VerificationModal } from "./components/VerificationModal.tsx";
 import { PlaneFlightLoader } from "./components/PlaneFlightLoader.tsx";
+import { UserEmailSessionModal } from "./components/UserEmailSessionModal.tsx";
 import { useAtcStore } from "./store/atcStore.ts";
 import { radioAudio } from "./utils/radioAudio.ts";
 import { speechPtt } from "./utils/speechRecognitionPtt.ts";
+import { sessionTracker } from "./utils/sessionTracker.ts";
+import { loadSavedUserEmail } from "./utils/storage.ts";
 
 export function App() {
   const appMode = useAtcStore((s) => s.appMode);
@@ -40,6 +43,24 @@ export function App() {
   const globalLoading = useAtcStore((s) => s.globalLoading);
 
   const [mobileSheetExpanded, setMobileSheetExpanded] = useState(false);
+  const [showEmailModal, setShowEmailModal] = useState(false);
+
+  // Auto-start session tracking & prompt for controller email logbook when entering simulation
+  useEffect(() => {
+    if (appMode !== "SIMULATION") {
+      sessionTracker.endSession();
+      return;
+    }
+
+    if (!loadSavedUserEmail()) {
+      setShowEmailModal(true);
+    }
+    sessionTracker.startSession(sim, () => useAtcStore.getState().sim);
+
+    return () => {
+      sessionTracker.endSession();
+    };
+  }, [appMode]);
 
   useEffect(() => {
     setMobileSheetExpanded(false);
@@ -291,6 +312,10 @@ export function App() {
 
       <VerificationModal />
       <PostSessionModal />
+      <UserEmailSessionModal
+        isOpen={showEmailModal}
+        onClose={() => setShowEmailModal(false)}
+      />
 
       {/* Global Animated Plane in Air Loading Screen */}
       {globalLoading?.active && (

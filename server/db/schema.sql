@@ -67,3 +67,29 @@ CREATE TABLE IF NOT EXISTS session_scores (
   report_json JSONB NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS user_sessions (
+  id VARCHAR(64) PRIMARY KEY,
+  email TEXT NOT NULL,
+  session_id VARCHAR(64) NOT NULL,
+  started_at TIMESTAMPTZ NOT NULL,
+  ended_at TIMESTAMPTZ NOT NULL,
+  duration_seconds INTEGER NOT NULL DEFAULT 0,
+  airport_icao VARCHAR(8) NOT NULL,
+  airport_name TEXT NOT NULL,
+  scenario VARCHAR(32) NOT NULL,
+  role VARCHAR(24) NOT NULL,
+  departures_completed INTEGER NOT NULL DEFAULT 0,
+  arrivals_completed INTEGER NOT NULL DEFAULT 0,
+  clearances_issued INTEGER NOT NULL DEFAULT 0,
+  safety_score INTEGER NOT NULL DEFAULT 100,
+  conflicts INTEGER NOT NULL DEFAULT 0,
+  client_ip TEXT,
+  user_agent TEXT,
+  payload_json JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_sessions_email ON user_sessions(email);
+CREATE INDEX IF NOT EXISTS idx_user_sessions_created_at ON user_sessions(created_at);
+CREATE INDEX IF NOT EXISTS idx_user_sessions_airport ON user_sessions(airport_icao);
