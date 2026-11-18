@@ -390,22 +390,39 @@ export function updateAircraftStates(state: SimulationState): void {
             );
           }
         } else if (ac.holdingShortReason === "DEPARTURE_RUNWAY") {
-          // Automated handoff: When departure reaches runway hold-short point,
-          // frequency automatically transitions to Tower without requiring manual handoff.
-          if (ac.controller === "GROUND" || ac.controller === "DELIVERY") {
-            ac.controller = "TOWER";
-            ac.lastTransmissionAt = state.time;
+          // If the player is actively controlling GROUND, do NOT auto-switch to Tower!
+          // The Ground controller must manually issue the handoff clearance.
+          const isPlayerGround =
+            state.config.activePlayerStation === "GROUND" ||
+            state.config.stationControl?.["GROUND"] === "PLAYER";
+
+          if (isPlayerGround && (ac.controller === "GROUND" || ac.controller === "DELIVERY")) {
+            const gndName = controllerCallsign(ac.controller, state.airport, ac.flightKind);
+            const msg = `${gndName}, ${ac.spokenCallsign}, holding short runway ${runwaySpokenName(ac.targetRunway)}, ready for Tower.`;
+            issuePilotRequestIfNeeded(
+              state,
+              ac,
+              "HANDOFF",
+              ac.controller,
+              msg,
+              ac.targetRunway
+            );
+          } else {
+            if (ac.controller === "GROUND" || ac.controller === "DELIVERY") {
+              ac.controller = "TOWER";
+              ac.lastTransmissionAt = state.time;
+            }
+            const towerName = controllerCallsign("TOWER", state.airport, ac.flightKind);
+            const msg = `${towerName}, ${ac.spokenCallsign}, holding short runway ${runwaySpokenName(ac.targetRunway)}, ready for departure.`;
+            issuePilotRequestIfNeeded(
+              state,
+              ac,
+              "TAKEOFF",
+              "TOWER",
+              msg,
+              ac.targetRunway
+            );
           }
-          const towerName = controllerCallsign("TOWER", state.airport, ac.flightKind);
-          const msg = `${towerName}, ${ac.spokenCallsign}, holding short runway ${runwaySpokenName(ac.targetRunway)}, ready for departure.`;
-          issuePilotRequestIfNeeded(
-            state,
-            ac,
-            "TAKEOFF",
-            "TOWER",
-            msg,
-            ac.targetRunway
-          );
         } else if (ac.holdingShortReason === "ROUTE_END") {
           // Automated handoff: When aircraft vacates runway after landing or aborted takeoff,
           // frequency automatically transitions to Ground control without requiring manual handoff.

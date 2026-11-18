@@ -713,17 +713,31 @@ function hasRecentDepartureClimbOnRunway(
   excludeId: string
 ): boolean {
   const rwySpec = state.airport.runways[runway];
+  const oppId = rwySpec?.oppositeId;
   for (const id of state.aircraftOrder) {
     if (id === excludeId) continue;
     const other = state.aircraft[id];
     if (!other || other.flightKind !== "DEPARTURE") continue;
+    const isThisOrOpp =
+      other.targetRunway === runway || (oppId && other.targetRunway === oppId);
+    if (!isThisOrOpp) continue;
+
+    const hasPendingTakeoffOrLineUp = other.clearances?.some(
+      (c) =>
+        (c.type === "TAKEOFF" || c.type === "LINE_UP") &&
+        (c.active ||
+          c.lifecycle === "ACTIVE" ||
+          c.lifecycle === "ISSUED" ||
+          c.lifecycle === "READBACK_PENDING")
+    );
+    if (hasPendingTakeoffOrLineUp) return true;
+
     const along = rwySpec ? alongRunwayNm(rwySpec, other.x, other.y) : 0;
     if (
-      other.targetRunway === runway &&
-      (other.state === "TAKEOFF_CLEARED" ||
-        other.state === "TAKEOFF_ROLL" ||
-        other.state === "ROTATE" ||
-        (other.state === "CLIMB" && along < 4.5))
+      other.state === "TAKEOFF_CLEARED" ||
+      other.state === "TAKEOFF_ROLL" ||
+      other.state === "ROTATE" ||
+      (other.state === "CLIMB" && along < 4.5)
     ) {
       return true;
     }
