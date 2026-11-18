@@ -776,8 +776,67 @@ export function submitClearanceDecision(
     case "APPROACH": {
       const runway = (params.runway as RunwayId | undefined) ?? aircraft.targetRunway;
       params.runway = runway;
-      phraseology = `${aircraft.spokenCallsign}, cleared ILS runway ${runwaySpokenName(runway)} approach.`;
-      expectedReadback = `Cleared ILS runway ${runwaySpokenName(runway)} approach, ${aircraft.spokenCallsign}.`;
+
+      const segments: string[] = [];
+      const readbackSegments: string[] = [];
+
+      // Direct fix if specified
+      if (params.fixId) {
+        const fixId = String(params.fixId);
+        params.fixId = fixId;
+        const spokenFix = formatFixIcao(fixId);
+        segments.push(`cleared direct ${spokenFix}`);
+        readbackSegments.push(`direct ${spokenFix}`);
+      }
+
+      // Heading vector if specified
+      if (params.heading !== undefined && params.heading !== null) {
+        const hdg = ((Number(params.heading) % 360) + 360) % 360;
+        const normalizedHdg = hdg === 0 ? 360 : hdg;
+        params.heading = normalizedHdg;
+        const turnDir = (params.turnDirection as "LEFT" | "RIGHT" | "NEAREST" | undefined) ?? "NEAREST";
+        params.turnDirection = turnDir;
+        const turnText =
+          turnDir === "LEFT"
+            ? "turn left heading"
+            : turnDir === "RIGHT"
+            ? "turn right heading"
+            : "fly heading";
+        const hdgStr = String(Math.round(normalizedHdg)).padStart(3, "0");
+        segments.push(`${turnText} ${hdgStr}`);
+        readbackSegments.push(`${turnText === "fly heading" ? "heading" : turnText} ${hdgStr}`);
+      }
+
+      // Altitude if specified
+      if (params.altitude !== undefined && params.altitude !== null) {
+        const alt = Math.max(1500, Math.min(18000, Math.round(Number(params.altitude))));
+        params.altitude = alt;
+        const verb =
+          alt >= aircraft.altitude ? "climb and maintain" : "descend and maintain";
+        segments.push(`${verb} ${alt}`);
+        readbackSegments.push(`${verb} ${alt}`);
+      }
+
+      // Speed if specified
+      if (params.speed !== undefined && params.speed !== null) {
+        const spd = Math.max(130, Math.min(300, Math.round(Number(params.speed))));
+        params.speed = spd;
+        const verb =
+          spd > aircraft.speed
+            ? "increase speed to"
+            : spd < aircraft.speed
+            ? "reduce speed to"
+            : "maintain";
+        segments.push(`${verb} ${spd} knots`);
+        readbackSegments.push(`speed ${spd} knots`);
+      }
+
+      // Cleared ILS approach
+      segments.push(`cleared ILS runway ${runwaySpokenName(runway)} approach`);
+      readbackSegments.push(`cleared ILS runway ${runwaySpokenName(runway)} approach`);
+
+      phraseology = `${aircraft.spokenCallsign}, ${segments.join(", ")}.`;
+      expectedReadback = `${readbackSegments.join(", ")}, ${aircraft.spokenCallsign}.`;
       break;
     }
 
@@ -794,8 +853,25 @@ export function submitClearanceDecision(
           ? "turn right heading"
           : "fly heading";
       const hdgStr = String(Math.round(normalizedHdg)).padStart(3, "0");
-      phraseology = `${aircraft.spokenCallsign}, ${turnText} ${hdgStr}.`;
-      expectedReadback = `${turnText === "fly heading" ? "Heading" : turnText} ${hdgStr}, ${aircraft.spokenCallsign}.`;
+      const parts: string[] = [`${turnText} ${hdgStr}`];
+      const readbackParts: string[] = [`${turnText === "fly heading" ? "Heading" : turnText} ${hdgStr}`];
+
+      if (params.altitude !== undefined && params.altitude !== null) {
+        const alt = Math.max(1500, Math.min(18000, Math.round(Number(params.altitude))));
+        params.altitude = alt;
+        const verb = alt >= aircraft.altitude ? "climb and maintain" : "descend and maintain";
+        parts.push(`${verb} ${alt}`);
+        readbackParts.push(`${verb} ${alt}`);
+      }
+      if (params.speed !== undefined && params.speed !== null) {
+        const spd = Math.max(130, Math.min(300, Math.round(Number(params.speed))));
+        params.speed = spd;
+        parts.push(`speed ${spd} knots`);
+        readbackParts.push(`speed ${spd} knots`);
+      }
+
+      phraseology = `${aircraft.spokenCallsign}, ${parts.join(", ")}.`;
+      expectedReadback = `${readbackParts.join(", ")}, ${aircraft.spokenCallsign}.`;
       break;
     }
 
@@ -804,8 +880,25 @@ export function submitClearanceDecision(
       params.altitude = alt;
       const verb =
         alt >= aircraft.altitude ? "climb and maintain" : "descend and maintain";
-      phraseology = `${aircraft.spokenCallsign}, ${verb} ${alt}.`;
-      expectedReadback = `${verb} ${alt}, ${aircraft.spokenCallsign}.`;
+      const parts: string[] = [`${verb} ${alt}`];
+      const readbackParts: string[] = [`${verb} ${alt}`];
+
+      if (params.speed !== undefined && params.speed !== null) {
+        const spd = Math.max(130, Math.min(300, Math.round(Number(params.speed))));
+        params.speed = spd;
+        parts.push(`speed ${spd} knots`);
+        readbackParts.push(`speed ${spd} knots`);
+      }
+      if (params.fixId) {
+        const fixId = String(params.fixId);
+        params.fixId = fixId;
+        const spokenFix = formatFixIcao(fixId);
+        parts.push(`cleared direct ${spokenFix}`);
+        readbackParts.push(`direct ${spokenFix}`);
+      }
+
+      phraseology = `${aircraft.spokenCallsign}, ${parts.join(", ")}.`;
+      expectedReadback = `${readbackParts.join(", ")}, ${aircraft.spokenCallsign}.`;
       break;
     }
 
@@ -1265,7 +1358,23 @@ function applyAcknowledgedClearance(
       const rwy = clearance.parameters.runway as RunwayId;
       aircraft.assignedApproach = rwy;
       aircraft.targetRunway = rwy;
-      aircraft.assignedDirectFix = state.airport.iafByRunway[rwy] ?? null;
+      if (clearance.parameters.fixId) {
+        aircraft.assignedDirectFix = String(clearance.parameters.fixId);
+      } else {
+        aircraft.assignedDirectFix = state.airport.iafByRunway[rwy] ?? null;
+      }
+      if (clearance.parameters.heading !== undefined && clearance.parameters.heading !== null) {
+        aircraft.assignedHeading = Number(clearance.parameters.heading);
+        aircraft.assignedTurnDirection =
+          (clearance.parameters.turnDirection as "LEFT" | "RIGHT" | "NEAREST") ?? "NEAREST";
+      }
+      if (clearance.parameters.altitude !== undefined && clearance.parameters.altitude !== null) {
+        aircraft.assignedAltitude = Number(clearance.parameters.altitude);
+      }
+      if (clearance.parameters.speed !== undefined && clearance.parameters.speed !== null) {
+        aircraft.assignedSpeed = Number(clearance.parameters.speed);
+      }
+
       if (
         (aircraft.state === "GO_AROUND" || aircraft.state === "MISSED_APPROACH") &&
         aircraft.altitude >= state.airport.elevationFt + 800
@@ -1274,8 +1383,12 @@ function applyAcknowledgedClearance(
         aircraft.state = "APPROACH";
         aircraft.stateEnteredAt = state.time;
         aircraft.minimumsGoAroundTriggered = false;
-        aircraft.assignedAltitude = baseAlt + 2500;
-        aircraft.assignedSpeed = Math.min(aircraft.assignedSpeed ?? 180, 180);
+        if (aircraft.assignedAltitude === null) {
+          aircraft.assignedAltitude = baseAlt + 2500;
+        }
+        if (aircraft.assignedSpeed === null) {
+          aircraft.assignedSpeed = Math.min(aircraft.assignedSpeed ?? 180, 180);
+        }
       }
       if (
         aircraft.pendingRequest?.type === "APPROACH_CLEARANCE" ||
@@ -1292,6 +1405,12 @@ function applyAcknowledgedClearance(
       aircraft.assignedTurnDirection =
         (clearance.parameters.turnDirection as "LEFT" | "RIGHT" | "NEAREST") ?? "NEAREST";
       aircraft.assignedDirectFix = null;
+      if (clearance.parameters.altitude !== undefined && clearance.parameters.altitude !== null) {
+        aircraft.assignedAltitude = Number(clearance.parameters.altitude);
+      }
+      if (clearance.parameters.speed !== undefined && clearance.parameters.speed !== null) {
+        aircraft.assignedSpeed = Number(clearance.parameters.speed);
+      }
       // Breaking off approach / go-around to fly ATC radar vectors
       if (
         aircraft.state === "FINAL" ||
@@ -1312,6 +1431,12 @@ function applyAcknowledgedClearance(
 
     case "ALTITUDE": {
       aircraft.assignedAltitude = Number(clearance.parameters.altitude);
+      if (clearance.parameters.speed !== undefined && clearance.parameters.speed !== null) {
+        aircraft.assignedSpeed = Number(clearance.parameters.speed);
+      }
+      if (clearance.parameters.fixId) {
+        aircraft.assignedDirectFix = String(clearance.parameters.fixId);
+      }
       // If on final approach and given a climb or level-off instruction, break glideslope dive
       if (
         (aircraft.state === "FINAL" || aircraft.state === "CLEARED_TO_LAND") &&

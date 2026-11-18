@@ -2177,38 +2177,16 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                   aircraftId: ac.id,
                   controller: "DEPARTURE",
                   type: "ALTITUDE",
-                  parameters: { altitude: depAppGuidance.recommendedAltitude },
+                  parameters: {
+                    altitude: depAppGuidance.recommendedAltitude,
+                    speed: depAppGuidance.recommendedSpeed,
+                    fixId: depAppGuidance.recommendedDirectFix,
+                  },
                 });
-                issueClearance({
-                  aircraftId: ac.id,
-                  controller: "DEPARTURE",
-                  type: "SPEED",
-                  parameters: { speed: depAppGuidance.recommendedSpeed },
-                });
-                if (depAppGuidance.recommendedDirectFix) {
-                  issueClearance({
-                    aircraftId: ac.id,
-                    controller: "DEPARTURE",
-                    type: "DIRECT",
-                    parameters: { fixId: depAppGuidance.recommendedDirectFix },
-                  });
-                }
                 return;
               }
 
-              // Go-Around / Arrival recovery back to runway
-              issueClearance({
-                aircraftId: ac.id,
-                controller: "DEPARTURE",
-                type: "ALTITUDE",
-                parameters: { altitude: depAppGuidance.recommendedAltitude },
-              });
-              issueClearance({
-                aircraftId: ac.id,
-                controller: "DEPARTURE",
-                type: "SPEED",
-                parameters: { speed: depAppGuidance.recommendedSpeed },
-              });
+              // Go-Around / Arrival recovery back to runway: ALL IN ONE COMMAND
               if (depAppGuidance.needsPatternTurn) {
                 issueClearance({
                   aircraftId: ac.id,
@@ -2217,24 +2195,26 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                   parameters: {
                     heading: depAppGuidance.recommendedHeading,
                     turnDirection: depAppGuidance.recommendedTurnDirection,
+                    altitude: depAppGuidance.recommendedAltitude,
+                    speed: depAppGuidance.recommendedSpeed,
                   },
                 });
-              } else {
-                if (depAppGuidance.recommendedDirectFix) {
-                  issueClearance({
-                    aircraftId: ac.id,
-                    controller: "DEPARTURE",
-                    type: "DIRECT",
-                    parameters: { fixId: depAppGuidance.recommendedDirectFix },
-                  });
-                }
-                issueClearance({
-                  aircraftId: ac.id,
-                  controller: "DEPARTURE",
-                  type: "APPROACH",
-                  parameters: { runway: depAppGuidance.recommendedRunway },
-                });
+                return;
               }
+
+              issueClearance({
+                aircraftId: ac.id,
+                controller: "DEPARTURE",
+                type: "APPROACH",
+                parameters: {
+                  runway: selectedApproachRunway ?? depAppGuidance.recommendedRunway,
+                  altitude: depAppGuidance.recommendedAltitude,
+                  speed: depAppGuidance.recommendedSpeed,
+                  fixId: depAppGuidance.recommendedDirectFix,
+                  heading: depAppGuidance.recommendedHeading,
+                  turnDirection: depAppGuidance.recommendedTurnDirection,
+                },
+              });
             };
 
             return (
@@ -2290,6 +2270,14 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                   <div className="text-[10px] font-mono text-[var(--atc-text)] leading-relaxed">
                     {depAppGuidance.stepSummary}
                   </div>
+
+                  {depAppGuidance.mode !== "GROUND_PREFLIGHT" && (
+                    <div className="p-1.5 rounded bg-[var(--atc-surface)] border border-[var(--atc-border)] text-[9.5px] font-mono text-[var(--atc-text-secondary)] italic leading-tight">
+                      {depAppGuidance.mode === "DEPARTURE_CLIMB"
+                        ? `"${ac.spokenCallsign}, climb and maintain ${depAppGuidance.recommendedAltitude}, speed ${depAppGuidance.recommendedSpeed} knots${depAppGuidance.recommendedDirectFix ? `, direct ${depAppGuidance.recommendedDirectFix}` : ""}."`
+                        : `"${ac.spokenCallsign}, ${depAppGuidance.recommendedDirectFix ? `direct ${depAppGuidance.recommendedDirectFix}, ` : ""}${depAppGuidance.needsPatternTurn ? `heading ${recHdgStr}°, ` : ""}descend and maintain ${depAppGuidance.recommendedAltitude}, speed ${depAppGuidance.recommendedSpeed} knots, cleared ILS runway ${selectedApproachRunway ?? depAppGuidance.recommendedRunway} approach."`}
+                    </div>
+                  )}
 
                   {depAppGuidance.mode !== "GROUND_PREFLIGHT" && (
                     <button
@@ -2482,7 +2470,14 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                               aircraftId: ac.id,
                               controller: "DEPARTURE",
                               type: "APPROACH",
-                              parameters: { runway: rwy },
+                              parameters: {
+                                runway: rwy,
+                                altitude: depAppGuidance.recommendedAltitude,
+                                speed: depAppGuidance.recommendedSpeed,
+                                fixId: depAppGuidance.recommendedDirectFix,
+                                heading: depAppGuidance.needsPatternTurn ? depAppGuidance.recommendedHeading : undefined,
+                                turnDirection: depAppGuidance.needsPatternTurn ? depAppGuidance.recommendedTurnDirection : undefined,
+                              },
                             }, `ILS_${rwy}`)
                           }
                           className={`py-1.5 rounded border font-mono text-[11px] font-semibold disabled:opacity-35 disabled:cursor-not-allowed ${

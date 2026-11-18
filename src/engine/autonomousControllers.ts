@@ -814,7 +814,7 @@ function runAutonomousDeparture(state: SimulationState): void {
         );
       }
 
-      // 2. Clear ILS Approach when within intercept corridor
+      // 2. Clear ILS Approach when within intercept corridor - ALL IN ONE COMMAND
       if (ac.assignedApproach === null && along >= -13.5 && along <= -2.5) {
         submitClearanceDecision(
           state,
@@ -822,7 +822,14 @@ function runAutonomousDeparture(state: SimulationState): void {
             aircraftId: ac.id,
             controller: "DEPARTURE",
             type: "APPROACH",
-            parameters: { runway: rwy },
+            parameters: {
+              runway: rwy,
+              heading: guidance.recommendedHeading,
+              turnDirection: guidance.recommendedTurnDirection,
+              altitude: baseAlt + 2500,
+              speed: 165,
+              fixId: guidance.recommendedDirectFix,
+            },
           },
           "AUTONOMOUS"
         );
