@@ -3,7 +3,7 @@ services:
     name: aircommand
     runtime: docker
     repo: https://github.com/imAneeshD/AirCommand
-    branch: dev
+    branch: main
     plan: free
     dockerfilePath: ./Dockerfile
     dockerContext: .
