@@ -307,6 +307,18 @@ function dispatchRadioMessagesAudio(
     if (spokenRadioMsgIds.has(msg.id)) {
       continue;
     }
+    // Never speak system messages, inter-controller coordination, handoff requests, or auto transmission notices
+    if (
+      msg.category === "SYSTEM" ||
+      msg.sender === "SYSTEM" ||
+      msg.sender === "CONSOLE" ||
+      /\[(?:HANDOFF REQUEST|AUTO|SYSTEM|INTERCOM|COORDINATION)\]/i.test(msg.text) ||
+      /\b(?:Awaiting acceptance|Transfer from .* to .*)\b/i.test(msg.text) ||
+      /\bPlayer assumed\b/i.test(msg.text)
+    ) {
+      spokenRadioMsgIds.add(msg.id);
+      continue;
+    }
     if (!shouldHearControllerAudio(sim.config.activePlayerStation, msg.controller)) {
       continue;
     }

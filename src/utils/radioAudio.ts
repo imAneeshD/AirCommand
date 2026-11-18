@@ -33,21 +33,15 @@ export function formatAtcSpeech(rawText: string): string {
   let text = rawText.trim();
   if (!text) return "";
 
-  // Convert handoff request notices into authentic ATC intercom coordination speech
-  if (/\[HANDOFF REQUEST\]/i.test(text)) {
-    const match = text.match(/\[HANDOFF REQUEST\]\s*([^:(]+)(?:\s*\(([^)]+)\))?(?::\s*([^.]+))?/i);
-    if (match) {
-      const callsign = (match[1] ?? "").trim();
-      const stations = (match[2] ?? match[3] ?? "").trim();
-      const parts = stations.split(/\s*(?:→|->|\bto\b|requesting transfer to)\s*/i);
-      if (parts.length >= 2) {
-        const fromStn = parts[0].replace(/^(?:Transfer\s+from\s+)/i, "").trim();
-        const toStn = parts[1].replace(/(?:\.\s*Awaiting.*)$/i, "").trim();
-        text = `${toStn}, ${fromStn}: Handoff request, ${callsign}.`;
-      } else {
-        text = `Handoff request, ${callsign}.`;
-      }
-    }
+  // Never read aloud auto transmission notices, handoff requests, system messages, or coordination logs
+  if (
+    /\[HANDOFF REQUEST\]/i.test(text) ||
+    /\bAwaiting acceptance\b/i.test(text) ||
+    /\bPlayer assumed\b/i.test(text) ||
+    /\[(?:AUTO|SYSTEM|INTERCOM|COORDINATION)\]/i.test(text) ||
+    /\bTransfer from\s+.*\s+to\s+.*\b/i.test(text)
+  ) {
+    return "";
   }
 
   // Strip parenthetical and bracketed codes/acronyms completely so TTS never pronounces bracketed codes like "(SDF)" or "(MIA)"
