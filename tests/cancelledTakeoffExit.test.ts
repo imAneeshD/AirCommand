@@ -1,11 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createAirportById, runwayPoint } from "../src/data/asteriaAirport.ts";
+import { createAirportById, runwayPoint, getSuggestedTaxiRoutes } from "../src/data/asteriaAirport.ts";
 import { createBaseSimulation, createDepartureAircraft, stepSimulation } from "../src/engine/simulation.ts";
 import { submitClearanceDecision, acknowledgeSyncClearance, clearStoppedRunwayEmergency } from "../src/engine/decisionEngine.ts";
 import { canAircraftExecuteAction } from "../src/engine/validationEngine.ts";
 
-test("Cancelled/Aborted takeoff: departure aircraft stopped on runway can vacate cleanly via exit taxiway", () => {
+test("Cancelled/Aborted takeoff: departure aircraft stopped on runway can vacate cleanly via exit taxiway and taxi back", () => {
   const airport = createAirportById("VOBL");
   const sim = createBaseSimulation("NORMAL_OPS", "TOWER", "VOBL", airport);
   const gateId = airport.gateIds[0];
@@ -75,6 +75,42 @@ test("Cancelled/Aborted takeoff: departure aircraft stopped on runway can vacate
 
   assert.equal(ac.state, "HOLDING_SHORT", `Expected aircraft to vacate runway to HOLDING_SHORT, got ${ac.state}`);
   assert.notEqual(ac.currentNodeId, undefined, "Aircraft should have reached an exit hold short node");
+  assert.equal(ac.controller, "GROUND", "Aircraft should automatically be handed off to Ground after vacating");
+  assert.equal(ac.holdingShortReason, "ROUTE_END", "Aircraft holding short reason should be ROUTE_END, not DEPARTURE_RUNWAY");
+
+  // Verify that Ground can route aircraft back to departure runway 09R
+  const routes = getSuggestedTaxiRoutes(
+    sim.airport,
+    ac.currentNodeId!,
+    "09R",
+    ac.gateId,
+    false,
+    sim,
+    ac.id
+  );
+  assert.ok(routes.length > 0, "Should find taxi routes from exit back to runway 09R");
+  const chosenRoute = routes.find((r) => r.conflictLevel !== "BLOCKED") ?? routes[0];
+
+  const taxiBackRes = submitClearanceDecision(sim, {
+    aircraftId: ac.id,
+    controller: "GROUND",
+    type: "TAXI",
+    parameters: {
+      runway: "09R",
+      routeTaxiways: chosenRoute.taxiways,
+      destinationNodeId: chosenRoute.destinationNodeId,
+      routeNodeIds: chosenRoute.nodeIds,
+    },
+  }, "PLAYER");
+  assert.equal(taxiBackRes.ok, true, `TAXI back to runway failed: ${taxiBackRes.reason}`);
+  if (taxiBackRes.clearance) {
+    acknowledgeSyncClearance(sim, taxiBackRes.clearance.id);
+  }
+
+  // Step simulation forward: aircraft must taxi forward along taxiway
+  stepSimulation(sim, 2.0);
+  assert.equal(ac.state, "TAXIING");
+  assert.ok(ac.speed > 0, "Aircraft should be rolling along taxiway back to runway");
 });
 
 test("Emergency ARFF & Tug clears disabled aircraft safely off runway to hold short point", () => {
