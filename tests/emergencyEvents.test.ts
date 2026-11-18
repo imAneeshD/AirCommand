@@ -6,6 +6,7 @@ import {
   EMERGENCY_DEFINITIONS,
 } from "../src/engine/emergencyEventsEngine.ts";
 import { createScenarioSimulation, stepSimulation } from "../src/engine/simulation.ts";
+import { getResolvedAircraftDetails } from "../src/data/aircraftCatalog.ts";
 
 test("Emergency definitions cover Low Fuel, Turbulence, Single Engine, Dual Engine, Bird Strike, Hydraulic, Cabin Pressure, and Medical", () => {
   const types = [
@@ -38,6 +39,16 @@ test("LOW_FUEL emergency: sets Squawk 7700, MAYDAY message, and emergency operat
   assert.equal(ac.squawk, "7700");
   assert.ok(ac.pendingRequest);
   assert.match(ac.pendingRequest.message, /emergency fuel|fuel emergency/i);
+  assert.ok(
+    ac.fuelRemainingPct !== undefined && ac.fuelRemainingPct <= 10,
+    `Low fuel emergency must set critical fuel <= 10%, got ${ac.fuelRemainingPct}%`
+  );
+
+  const details = getResolvedAircraftDetails(ac, sim.airport);
+  assert.ok(
+    details.fuelRemainingPct <= 10,
+    `Resolved aircraft details must reflect critical fuel <= 10%, got ${details.fuelRemainingPct}%`
+  );
 });
 
 test("TURBULENCE_WINDSHEAR emergency on final: triggers immediate go-around and climbs out", () => {

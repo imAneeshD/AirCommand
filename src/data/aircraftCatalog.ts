@@ -1223,7 +1223,12 @@ export function getResolvedAircraftDetails(ac: Aircraft, airport: AirportLayout)
     registration: ac.registration ?? fallback.registration,
     cruiseFlightLevel: ac.cruiseFlightLevel ?? fallback.cruiseFlightLevel,
     soulsOnBoard: ac.soulsOnBoard ?? fallback.soulsOnBoard,
-    fuelRemainingPct: ac.fuelRemainingPct ?? fallback.fuelRemainingPct,
+    fuelRemainingPct:
+      ac.emergencyType === "LOW_FUEL"
+        ? ac.fuelRemainingPct !== undefined && ac.fuelRemainingPct <= 10
+          ? ac.fuelRemainingPct
+          : 6
+        : (ac.fuelRemainingPct ?? fallback.fuelRemainingPct),
   };
 }
 

@@ -494,11 +494,25 @@ export const RadioCommsLog: React.FC<{ mobileMode?: boolean }> = ({
                     <span className="font-semibold">{resolved.soulsOnBoard}</span>
                   </span>
                   <span className="inline-flex items-center gap-1 text-[var(--atc-text-secondary)]">
-                    <Fuel className="w-3 h-3 text-[var(--atc-amber)]" />
-                    <span className="font-semibold">{resolved.fuelRemainingPct}%</span>
+                    <Fuel
+                      className={`w-3 h-3 ${
+                        resolved.fuelRemainingPct <= 10
+                          ? "text-red-500 animate-pulse"
+                          : "text-[var(--atc-amber)]"
+                      }`}
+                    />
+                    <span
+                      className={`font-semibold ${
+                        resolved.fuelRemainingPct <= 10 ? "text-red-400 font-bold" : ""
+                      }`}
+                    >
+                      {resolved.fuelRemainingPct}%
+                    </span>
                     <span className="w-8 h-1.5 rounded-full bg-[var(--atc-surface-alt)] border border-[var(--atc-border)] overflow-hidden inline-block">
                       <span
-                        className="block h-full bg-[var(--atc-amber)]"
+                        className={`block h-full ${
+                          resolved.fuelRemainingPct <= 10 ? "bg-red-500" : "bg-[var(--atc-amber)]"
+                        }`}
                         style={{ width: `${Math.max(5, Math.min(100, resolved.fuelRemainingPct))}%` }}
                       />
                     </span>
