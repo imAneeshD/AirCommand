@@ -463,7 +463,10 @@ export function submitClearanceDecision(
       const targetRunway = (params.runway as RunwayId | undefined) ?? aircraft.targetRunway;
       let destinationNodeId = params.destinationNodeId as string | undefined;
 
-      if (!destinationNodeId) {
+      if (params.gate && typeof params.gate === "string") {
+        aircraft.gateId = params.gate;
+        destinationNodeId = `GATE_${params.gate}`;
+      } else if (!destinationNodeId) {
         if (aircraft.flightKind === "ARRIVAL" && aircraft.gateId) {
           destinationNodeId = `GATE_${aircraft.gateId}`;
         } else {
