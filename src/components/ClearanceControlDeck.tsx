@@ -706,7 +706,7 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
           <div className="flex items-center justify-between text-[9px] font-mono uppercase text-[var(--atc-muted)]">
             <span>Assign Gate / Stand:</span>
             {physicallyOccupiedGates.has(effectiveArrivalGate) && (
-              <span className="text-red-400 font-bold flex items-center gap-1">
+              <span className="text-[var(--atc-red)] font-bold flex items-center gap-1">
                 <AlertTriangle className="w-2.5 h-2.5" /> Stand Occupied
               </span>
             )}
@@ -723,10 +723,10 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                   className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition-colors shrink-0 flex items-center gap-1 cursor-pointer ${
                     isSelected
                       ? isOccupied
-                        ? "bg-red-950/80 border-red-500 text-red-200 font-bold"
+                        ? "bg-[var(--atc-red-bg)] border-[var(--atc-red-border)] text-[var(--atc-red)] font-bold"
                         : "bg-[var(--atc-accent-bg)] border-[var(--atc-accent-border)] text-[var(--atc-accent-text)] font-bold shadow-xs"
                       : isOccupied
-                      ? "bg-[var(--atc-surface)] border-red-500/40 text-red-400 opacity-60 hover:opacity-100"
+                      ? "bg-[var(--atc-surface)] border-[var(--atc-red-border)] text-[var(--atc-red)] opacity-80 hover:opacity-100"
                       : "bg-[var(--atc-surface)] border-[var(--atc-border)] text-[var(--atc-muted)] hover:text-[var(--atc-text)] hover:border-[var(--atc-border-hover)]"
                   }`}
                   title={isOccupied ? `Stand ${gid} is currently occupied by another aircraft` : `Stand ${gid} is free`}
@@ -1147,9 +1147,9 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
         ) : null}
 
         {ac.state !== "CRASHED" && ac.operationMode === "EMERGENCY_OPERATION" && ac.emergencyType !== "NONE" && (
-          <div className="rounded-lg border border-red-500 bg-red-950/40 p-3 space-y-2 font-mono shadow-md animate-pulse">
+          <div className="rounded-lg border border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] p-3 space-y-2 font-mono shadow-md">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-red-400 font-extrabold text-xs">
+              <div className="flex items-center gap-1.5 text-[var(--atc-red)] font-extrabold text-xs">
                 <AlertTriangle className="w-4 h-4 shrink-0" />
                 <span className="uppercase tracking-wide">
                   {ac.emergencyType === "DUAL_ENGINE_FAILURE"
@@ -1163,11 +1163,11 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                     : `IN-FLIGHT EMERGENCY · ${ac.emergencyType.replace(/_/g, " ")}`}
                 </span>
               </div>
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-600 text-white font-bold shrink-0">
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-600 text-white font-bold shrink-0 shadow-xs">
                 SQUAWK 7700
               </span>
             </div>
-            <div className="text-[11px] text-red-200 leading-snug">
+            <div className="text-[11px] text-[var(--atc-text)] font-semibold leading-snug">
               {ac.emergencyType === "LOW_FUEL"
                 ? `CRITICAL EMERGENCY FUEL: ${ac.fuelRemainingPct ?? 6}% (${Math.round((ac.fuelRemainingPct ?? 6) * 1.5)} minutes reserves remaining). Immediate priority approach vectors required.`
                 : ac.pendingRequest?.message ?? `Aircraft declared in-flight emergency (${ac.emergencyType}). Priority vectors and runway clearance requested.`}
@@ -1176,9 +1176,9 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
         )}
 
         {ac.state === "CRASHED" ? (
-          <div className="rounded-lg border border-red-500 bg-red-950/40 p-3 space-y-3 font-mono shadow-lg">
+          <div className="rounded-lg border border-[var(--atc-red-border)] bg-[var(--atc-red-bg)] p-3 space-y-3 font-mono shadow-lg">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-red-400 font-extrabold text-xs">
+              <div className="flex items-center gap-1.5 text-[var(--atc-red)] font-extrabold text-xs">
                 <AlertOctagon className="w-4 h-4 animate-pulse" />
                 <span>
                   {ac.crashDetails?.locationKind === "APRON"
@@ -1190,12 +1190,12 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                     : "CRASH ALARM · RUNWAY EXCURSION"}
                 </span>
               </div>
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-600 text-white font-bold">
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-600 text-white font-bold shadow-xs">
                 MAYDAY 7700
               </span>
             </div>
 
-            <div className="text-[11px] text-red-200 leading-snug">
+            <div className="text-[11px] text-[var(--atc-text)] font-semibold leading-snug">
               {ac.crashDetails?.reason ?? "Off-runway ground collision / excursion detected at high speed."}
             </div>
 
@@ -1238,7 +1238,7 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                     onClick={() => haltRunwayOperations(rwyId ?? "", ac.id)}
                     className={`w-full py-2 px-2.5 rounded-md text-xs font-bold transition-all flex items-center justify-center gap-2 ${
                       isHalted
-                        ? "bg-amber-950/60 border border-amber-500/80 text-amber-300 cursor-default"
+                        ? "bg-[var(--atc-amber-bg)] border border-[var(--atc-amber-border)] text-[var(--atc-amber)] cursor-default"
                         : "bg-amber-600 hover:bg-amber-500 text-white shadow-md cursor-pointer"
                     }`}
                   >
@@ -1276,7 +1276,7 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                 onClick={() => requestMedicalEvacuation(ac.id)}
                 className={`w-full py-2 px-2.5 rounded-md text-xs font-bold transition-all flex items-center justify-center gap-2 ${
                   ac.crashDetails?.medicalRequested
-                    ? "bg-cyan-950/60 border border-cyan-500/80 text-cyan-300 cursor-default"
+                    ? "bg-[var(--atc-cyan-bg)] border border-[var(--atc-cyan-border)] text-[var(--atc-cyan)] cursor-default"
                     : "bg-cyan-600 hover:bg-cyan-500 text-slate-950 shadow-md cursor-pointer"
                 }`}
               >
@@ -2134,8 +2134,8 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                 return (
                   <div className="space-y-2">
                     {(ac.state === "GO_AROUND" || ac.state === "MISSED_APPROACH") && (
-                      <div className="p-2.5 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-300 text-xs space-y-1.5">
-                        <div className="font-bold flex items-center gap-1.5 text-amber-400">
+                      <div className="p-2.5 rounded-md border border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] text-[var(--atc-amber)] text-xs space-y-1.5">
+                        <div className="font-bold flex items-center gap-1.5 text-[var(--atc-amber)]">
                           <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                           <span>MISSED APPROACH IN PROGRESS</span>
                         </div>
@@ -2152,7 +2152,7 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                             }, "HANDOFF_APP")
                           }
                           disabled={nordoLocked || isCommandDisabled("HANDOFF_APP")}
-                          className="w-full py-1.5 px-2 rounded bg-amber-500/25 hover:bg-amber-500/35 border border-amber-400/60 text-amber-200 font-mono text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                          className="w-full py-1.5 px-2 rounded bg-[var(--atc-surface)] hover:bg-[var(--atc-surface-alt)] border border-[var(--atc-amber-border)] text-[var(--atc-amber)] font-mono text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
                         >
                           <Radio className="w-3.5 h-3.5" />
                           HAND OFF TO APPROACH ({controllerFrequency("DEPARTURE", sim.airport, "ARRIVAL")})
@@ -2235,7 +2235,7 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                     }
                     className={`py-1.5 px-2 rounded-md border font-mono text-[11px] font-semibold transition-all disabled:opacity-35 disabled:cursor-not-allowed ${
                       (ac.state === "GO_AROUND" || ac.state === "MISSED_APPROACH") && ac.controller === "TOWER"
-                        ? "border-amber-400 bg-amber-500/25 text-amber-300 animate-pulse font-bold shadow-sm cursor-pointer"
+                        ? "border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] text-[var(--atc-amber)] font-bold shadow-xs cursor-pointer"
                         : "border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)]"
                     }`}
                   >
@@ -2287,7 +2287,7 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                     title="Airborne after takeoff — transfer to Departure Control for climb & SID"
                     className={`py-1.5 px-2 rounded-md border font-mono text-[11px] font-semibold transition-all disabled:opacity-35 disabled:cursor-not-allowed ${
                       (ac.state === "GO_AROUND" || ac.state === "MISSED_APPROACH") && ac.controller === "TOWER"
-                        ? "border-amber-400 bg-amber-500/25 text-amber-300 animate-pulse font-bold shadow-sm cursor-pointer"
+                        ? "border-[var(--atc-amber-border)] bg-[var(--atc-amber-bg)] text-[var(--atc-amber)] font-bold shadow-xs cursor-pointer"
                         : "border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:opacity-90 text-[var(--atc-cyan)]"
                     }`}
                   >
