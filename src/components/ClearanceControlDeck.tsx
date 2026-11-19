@@ -29,7 +29,8 @@ import {
   getRunwayExitOptions,
   getSuggestedTaxiRoutes,
 } from "../data/asteriaAirport.ts";
-import { hashCallsign } from "../data/aircraftCatalog.ts";
+import { getResolvedAircraftDetails, hashCallsign } from "../data/aircraftCatalog.ts";
+import { AircraftPhotoFrame } from "./AircraftPhotoFrame.tsx";
 import { getAircraftPhaseLabel } from "../engine/simulation.ts";
 import {
   canAircraftExecuteAction,
@@ -76,8 +77,12 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
   const setHoverPreviewRoute = useAtcStore((s) => s.setHoverPreviewRoute);
   const minimized = useAtcStore((s) => s.minimizedPanels.right);
   const togglePanelMinimized = useAtcStore((s) => s.togglePanelMinimized);
+  const theme = useAtcStore((s) => s.theme);
 
   const ac = sim.selectedAircraftId ? sim.aircraft[sim.selectedAircraftId] : null;
+  const resolvedVisual = useMemo(() => {
+    return ac ? getResolvedAircraftDetails(ac, sim.airport) : null;
+  }, [ac, sim.airport]);
   const activeRole = sim.config.activePlayerStation;
   const fallbackRole: ControllerRole = activeRole === "ALL" ? "TOWER" : activeRole;
 
@@ -863,6 +868,20 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
             </button>
           )}
         </div>
+
+        {/* Technical Aircraft CAD Blueprint Showcase (Click anywhere to open full specifications popup) */}
+        {resolvedVisual && (
+          <div className="mt-2.5 rounded-lg overflow-hidden border border-[var(--atc-border)] shadow-sm">
+            <AircraftPhotoFrame
+              aircraft={ac}
+              spec={resolvedVisual.spec}
+              livery={resolvedVisual.livery}
+              registration={resolvedVisual.registration}
+              elevationFt={sim.airport.elevationFt}
+              theme={theme}
+            />
+          </div>
+        )}
 
         {/* Compact Status & Movement Gate Pill */}
         <div className="mt-2.5 flex items-center justify-between gap-2 text-[10px] font-mono">

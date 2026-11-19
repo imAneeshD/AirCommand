@@ -15,6 +15,7 @@ interface AircraftSideProfileProps {
   elevationFt: number;
   theme: "light" | "dark";
   embedded?: boolean;
+  isLoadingPhoto?: boolean;
 }
 
 type AirframeCategory =
@@ -53,6 +54,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
   elevationFt,
   theme,
   embedded = false,
+  isLoadingPhoto = false,
 }) => {
   const isLight = theme === "light";
   const agl = getAglAltitudeFt(aircraft, elevationFt);
@@ -75,14 +77,14 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
   const safeId = aircraft.id.replace(/[^a-zA-Z0-9]/g, "");
   const gradId = `hull_${safeId}`;
   const gradHighlightId = `hull_hi_${safeId}`;
-  const skyId = `sky_${safeId}`;
   const metalLipId = `lip_${safeId}`;
   const propBlurId = `prop_${safeId}`;
+  const gridPatternId = `cad_grid_${safeId}`;
 
   // Ground plane baseline is y = 96
   const groundY = 96;
 
-  // Window generators
+  // Window generators (realistic tinted airliner passenger windows)
   const renderCabinWindows = (
     y: number,
     startX: number,
@@ -103,11 +105,11 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
           x={x}
           y={y}
           width="2.6"
-          height="3.6"
+          height="3.8"
           rx="1"
-          fill="#0f172a"
-          stroke="rgba(255,255,255,0.22)"
-          strokeWidth="0.3"
+          fill="#0a121e"
+          stroke="rgba(255,255,255,0.24)"
+          strokeWidth="0.35"
         />
       );
     }
@@ -125,10 +127,9 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
           height={height}
           rx="1.4"
           fill="none"
-          stroke="rgba(100, 116, 139, 0.45)"
-          strokeWidth="0.65"
+          stroke="rgba(100, 116, 139, 0.55)"
+          strokeWidth="0.75"
         />
-        {/* Door window */}
         {!isCargo && (
           <rect
             x={x + width / 2 - 0.75}
@@ -136,23 +137,22 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
             width="1.5"
             height="2.4"
             rx="0.6"
-            fill="#0f172a"
+            fill="#090d16"
           />
         )}
-        {/* Door handle latch line */}
         <line
           x1={x + width - 1}
           y1={topY + height * 0.52}
           x2={x + width - 1}
           y2={topY + height * 0.62}
           stroke="#475569"
-          strokeWidth="0.6"
+          strokeWidth="0.7"
         />
       </g>
     );
   };
 
-  // Render Cargo Loading Doors (for freighters or bellies)
+  // Render Cargo Loading Doors (for freighters)
   const renderCargoDoor = (x: number, y: number, w: number, h: number) => {
     return (
       <g key={`cargodoor_${x}_${y}`}>
@@ -164,7 +164,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
           rx="1.5"
           fill="none"
           stroke="#f59e0b"
-          strokeWidth="0.75"
+          strokeWidth="0.8"
           strokeDasharray="3 1.5"
         />
         <text
@@ -182,7 +182,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
     );
   };
 
-  // Render Engine Turbofan Nacelle
+  // Render Precision Engine Turbofan Nacelle
   const renderTurbofan = (
     x: number,
     y: number,
@@ -190,20 +190,20 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
     h: number,
     scale = 1
   ) => {
-    const intakeLipW = 3.6 * scale;
+    const intakeLipW = 3.8 * scale;
     const spinnerCx = x + w - 1.2;
     const spinnerCy = y + h / 2;
 
     return (
       <g key={`eng_${x}_${y}`}>
-        {/* Engine Pylon Mount to Wing */}
+        {/* Pylon Mount to Wing */}
         <path
           d={`M ${x + 4} ${y - 4} L ${x + w - 6} ${y - 4} L ${x + w - 10} ${y} L ${x + 6} ${y} Z`}
           fill="#475569"
           stroke="#334155"
-          strokeWidth="0.5"
+          strokeWidth="0.6"
         />
-        {/* Primary Nacelle Cowling */}
+        {/* Primary Cowl */}
         <rect
           x={x}
           y={y}
@@ -211,10 +211,10 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
           height={h}
           rx={h * 0.35}
           fill={livery.nacelle}
-          stroke={isLight ? "rgba(15,23,42,0.3)" : "rgba(255,255,255,0.2)"}
-          strokeWidth="0.75"
+          stroke={isLight ? "rgba(15,23,42,0.35)" : "rgba(255,255,255,0.25)"}
+          strokeWidth="0.8"
         />
-        {/* Intake Cowling Chrome Lip */}
+        {/* Chrome Intake Lip */}
         <rect
           x={x + w - intakeLipW}
           y={y + 0.3}
@@ -225,26 +225,26 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
           stroke="#94a3b8"
           strokeWidth="0.4"
         />
-        {/* Dark Fan Turbine Face */}
+        {/* Dark Fan Turbine Core */}
         <ellipse
           cx={x + w - intakeLipW}
           cy={y + h / 2}
-          rx={1.2 * scale}
+          rx={1.3 * scale}
           ry={h * 0.44}
-          fill="#090d16"
+          fill="#06090e"
         />
-        {/* Spinner Cone with white spiral dot */}
+        {/* Spinner Cone with white spiral indicator */}
         <path
-          d={`M ${spinnerCx - 3.5} ${spinnerCy - 1.2} L ${spinnerCx} ${spinnerCy} L ${spinnerCx - 3.5} ${spinnerCy + 1.2} Z`}
-          fill="#e2e8f0"
+          d={`M ${spinnerCx - 3.8} ${spinnerCy - 1.2} L ${spinnerCx} ${spinnerCy} L ${spinnerCx - 3.8} ${spinnerCy + 1.2} Z`}
+          fill="#f1f5f9"
         />
         <circle cx={spinnerCx - 1.2} cy={spinnerCy} r="0.5" fill="#38bdf8" />
-        {/* Exhaust Nozzle & Cone */}
+        {/* Turbine Exhaust Cone */}
         <path
           d={`M ${x} ${y + 1.8} L ${x - 5 * scale} ${y + 3.2} L ${x - 5 * scale} ${y + h - 3.2} L ${x} ${y + h - 1.8} Z`}
           fill="#334155"
           stroke="#1e293b"
-          strokeWidth="0.5"
+          strokeWidth="0.6"
         />
         <path
           d={`M ${x - 5 * scale} ${y + h * 0.38} L ${x - 8.5 * scale} ${spinnerCy} L ${x - 5 * scale} ${y + h * 0.62} Z`}
@@ -254,51 +254,51 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
     );
   };
 
-  // Render Turboprop Nacelle with spinning propeller
+  // Render Turboprop Nacelle with spinning propeller blur
   const renderTurboprop = (x: number, y: number, w: number, h: number) => {
-    const spinnerTipX = x + w + 5;
+    const spinnerTipX = x + w + 5.5;
     const spinnerCy = y + h / 2;
 
     return (
       <g key={`turboprop_${x}_${y}`}>
-        {/* Nacelle Cowl */}
+        {/* Nacelle Cowling */}
         <rect
           x={x}
           y={y}
           width={w}
           height={h}
-          rx="3.2"
+          rx="3.5"
           fill={livery.nacelle}
-          stroke={isLight ? "rgba(15,23,42,0.3)" : "rgba(255,255,255,0.2)"}
-          strokeWidth="0.75"
+          stroke={isLight ? "rgba(15,23,42,0.35)" : "rgba(255,255,255,0.25)"}
+          strokeWidth="0.8"
         />
-        {/* Lower Chin Air Scoop */}
+        {/* Chin Air Scoop */}
         <path
           d={`M ${x + 6} ${y + h} L ${x + w - 2} ${y + h} L ${x + w} ${y + h + 2} L ${x + 4} ${y + h + 2} Z`}
           fill="#334155"
         />
-        {/* Aerodynamic Propeller Spinner Cone */}
+        {/* Propeller Spinner Cone */}
         <path
           d={`M ${x + w} ${y + 1.2} C ${x + w + 4} ${y + 1.8}, ${spinnerTipX} ${spinnerCy}, ${spinnerTipX} ${spinnerCy} C ${spinnerTipX} ${spinnerCy}, ${x + w + 4} ${y + h - 1.8}, ${x + w} ${y + h - 1.2} Z`}
           fill="#f8fafc"
           stroke="#94a3b8"
           strokeWidth="0.5"
         />
-        {/* Spinning Propeller Disc (Motion Blur) */}
+        {/* Spinning Propeller Motion Blur Disc */}
         <ellipse
           cx={x + w + 2.5}
           cy={spinnerCy}
           rx="1.8"
           ry="19"
           fill={`url(#${propBlurId})`}
-          stroke="rgba(251, 191, 36, 0.45)"
+          stroke="rgba(251, 191, 36, 0.55)"
           strokeWidth="0.8"
           strokeDasharray="3 3"
         />
-        {/* Propeller Blade Tips (Yellow Caution Arcs) */}
-        <circle cx={x + w + 2.5} cy={spinnerCy - 17.5} r="1.3" fill="#fbbf24" />
-        <circle cx={x + w + 2.5} cy={spinnerCy + 17.5} r="1.3" fill="#fbbf24" />
-        {/* Aft Exhaust Pipe */}
+        {/* Propeller Blade Tips (Yellow Safety Arcs) */}
+        <circle cx={x + w + 2.5} cy={spinnerCy - 17.5} r="1.4" fill="#fbbf24" />
+        <circle cx={x + w + 2.5} cy={spinnerCy + 17.5} r="1.4" fill="#fbbf24" />
+        {/* Exhaust Stubs */}
         <path
           d={`M ${x} ${y + 2} L ${x - 4} ${y + 3.5} L ${x - 4} ${y + h - 3.5} L ${x} ${y + h - 2} Z`}
           fill="#475569"
@@ -307,7 +307,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
     );
   };
 
-  // Render Landing Gear
+  // Render Realistic Landing Gear
   const renderLandingGear = (
     noseX: number,
     mainX: number,
@@ -321,9 +321,9 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
 
     return (
       <g key="landing_gear" strokeLinecap="round" strokeLinejoin="round">
-        {/* Nose Gear Strut & Dual Wheels */}
+        {/* Nose Gear Assembly */}
         <g>
-          {/* Main oleo strut */}
+          {/* Main oleo shock strut */}
           <line
             x1={noseX}
             y1={strutTopY}
@@ -332,21 +332,21 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
             stroke={strutStroke}
             strokeWidth="2.4"
           />
-          {/* Torque link scissors */}
+          {/* Torque scissor links */}
           <polyline
             points={`${noseX},${strutTopY + 5} ${noseX + 3.2},${strutTopY + 9} ${noseX},${strutTopY + 13}`}
             fill="none"
             stroke="#64748b"
             strokeWidth="1.2"
           />
-          {/* Nose gear taxi lights */}
+          {/* Dual taxi lights */}
           <circle cx={noseX - 1.2} cy={strutTopY + 7} r="1.1" fill="#fef08a" />
-          {/* Nose wheel tire & rim */}
+          {/* Tire & alloy wheel rim */}
           <circle
             cx={noseX}
             cy={wheelCenterY}
             r="3.5"
-            fill="#0f172a"
+            fill="#090d16"
             stroke="#334155"
             strokeWidth="1"
           />
@@ -358,9 +358,9 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
           />
         </g>
 
-        {/* Main Landing Gear */}
+        {/* Main Gear Assembly */}
         <g>
-          {/* Main gear vertical strut */}
+          {/* Vertical strut */}
           <line
             x1={mainX}
             y1={strutTopY}
@@ -369,7 +369,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
             stroke={strutStroke}
             strokeWidth="3.2"
           />
-          {/* Angled main gear doors */}
+          {/* Angled gear door */}
           <line
             x1={mainX - 8}
             y1={strutTopY + 1}
@@ -380,7 +380,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
           />
 
           {bogies === "TRIPLE_AXLE" && (
-            /* Boeing 777 6-wheel triple-axle truck */
+            /* 777 6-wheel triple-axle truck */
             <g>
               <line
                 x1={mainX - 12}
@@ -396,7 +396,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                     cx={mainX + offset}
                     cy={wheelCenterY}
                     r={wheelR}
-                    fill="#0f172a"
+                    fill="#090d16"
                     stroke="#1e293b"
                     strokeWidth="1"
                   />
@@ -408,7 +408,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
           )}
 
           {bogies === "DUAL_AXLE" && (
-            /* A380, B747, A350, B787 4-wheel dual-axle truck */
+            /* A380, 747, A350, 787 4-wheel dual-axle truck */
             <g>
               <line
                 x1={mainX - 7}
@@ -424,7 +424,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                     cx={mainX + offset}
                     cy={wheelCenterY}
                     r={wheelR}
-                    fill="#0f172a"
+                    fill="#090d16"
                     stroke="#1e293b"
                     strokeWidth="1"
                   />
@@ -436,13 +436,13 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
           )}
 
           {bogies === "SINGLE" && (
-            /* Narrowbody A320, B738 single-axle dual wheel */
+            /* A320, 737 single-axle dual-wheel */
             <g>
               <circle
                 cx={mainX}
                 cy={wheelCenterY}
                 r={wheelR + 0.2}
-                fill="#0f172a"
+                fill="#090d16"
                 stroke="#1e293b"
                 strokeWidth="1"
               />
@@ -458,7 +458,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                 cx={mainX - 5}
                 cy={wheelCenterY}
                 r={wheelR}
-                fill="#0f172a"
+                fill="#090d16"
                 stroke="#1e293b"
                 strokeWidth="1"
               />
@@ -467,7 +467,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                 cx={mainX + 5}
                 cy={wheelCenterY}
                 r={wheelR}
-                fill="#0f172a"
+                fill="#090d16"
                 stroke="#1e293b"
                 strokeWidth="1"
               />
@@ -483,8 +483,8 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
     <div
       className={
         embedded
-          ? "relative w-full h-full overflow-hidden bg-[var(--atc-surface-alt)] select-none"
-          : "relative rounded-lg border border-[var(--atc-border)] overflow-hidden bg-[var(--atc-surface-alt)] shadow-sm select-none"
+          ? "relative w-full h-full overflow-hidden bg-[#0a121e] select-none"
+          : "relative rounded-lg border border-[var(--atc-border)] overflow-hidden bg-[#0a121e] shadow-sm select-none"
       }
     >
       <svg
@@ -492,37 +492,30 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
         preserveAspectRatio="xMidYMid meet"
         className={embedded ? "w-full h-full block" : "w-full h-[120px] block"}
         role="img"
-        aria-label={`${livery.airlineName} ${spec.model} aircraft side profile`}
+        aria-label={`${livery.airlineName} ${spec.model} technical aeronautical blueprint`}
       >
         <defs>
-          {/* Studio backdrop lighting gradient */}
-          <linearGradient id={skyId} x1="0" y1="0" x2="0" y2="1">
-            <stop
-              offset="0%"
-              stopColor={
-                isLight
-                  ? onGround
-                    ? "#e2dbcc"
-                    : "#dbeafe"
-                  : onGround
-                  ? "#0b1524"
-                  : "#0a1c34"
-              }
+          {/* Technical Aeronautical Blueprint Grid Pattern */}
+          <pattern
+            id={gridPatternId}
+            width="20"
+            height="20"
+            patternUnits="userSpaceOnUse"
+          >
+            <path
+              d="M 20 0 L 0 0 0 20"
+              fill="none"
+              stroke={isLight ? "rgba(100,116,139,0.12)" : "rgba(56,189,248,0.06)"}
+              strokeWidth="0.5"
             />
-            <stop
-              offset="70%"
-              stopColor={
-                isLight
-                  ? onGround
-                    ? "#f4efe4"
-                    : "#eff6ff"
-                  : onGround
-                  ? "#111f35"
-                  : "#102644"
-              }
+            {/* Fine 10px minor tick */}
+            <circle
+              cx="10"
+              cy="10"
+              r="0.5"
+              fill={isLight ? "rgba(100,116,139,0.18)" : "rgba(56,189,248,0.12)"}
             />
-            <stop offset="100%" stopColor={isLight ? "#e5ddd0" : "#091220"} />
-          </linearGradient>
+          </pattern>
 
           {/* Fuselage Cylindrical Curvature Shading */}
           <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
@@ -533,12 +526,12 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
 
           {/* Fuselage Top Highlight for 3D Crown Reflection */}
           <linearGradient id={gradHighlightId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="rgba(255,255,255,0.45)" />
+            <stop offset="0%" stopColor="rgba(255,255,255,0.48)" />
             <stop offset="25%" stopColor="rgba(255,255,255,0.12)" />
             <stop offset="100%" stopColor="rgba(255,255,255,0)" />
           </linearGradient>
 
-          {/* Polished Chrome Intake Lip */}
+          {/* Polished Titanium / Chrome Intake Lip */}
           <linearGradient id={metalLipId} x1="0" y1="0" x2="1" y2="0">
             <stop offset="0%" stopColor="#94a3b8" />
             <stop offset="45%" stopColor="#f8fafc" />
@@ -555,53 +548,62 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
           </radialGradient>
         </defs>
 
-        {/* Backdrop: Aviation Tarmac / Sky Horizon */}
-        <rect x="0" y="0" width="380" height="120" fill={`url(#${skyId})`} />
+        {/* Backdrop: Aeronautical Dark Slate / Technical Blueprint */}
+        <rect
+          x="0"
+          y="0"
+          width="380"
+          height="120"
+          fill={isLight ? "#f8fafc" : "#090f1a"}
+        />
+        <rect
+          x="0"
+          y="0"
+          width="380"
+          height="120"
+          fill={`url(#${gridPatternId})`}
+        />
 
-        {onGround ? (
-          <>
-            {/* Airport Tarmac Pavement */}
-            <rect
-              x="0"
-              y={groundY}
-              width="380"
-              height={120 - groundY}
-              fill={isLight ? "#cfc7b4" : "#080e18"}
-            />
-            {/* Tarmac Edge Seam */}
-            <line
-              x1="0"
-              y1={groundY}
-              x2="380"
-              y2={groundY}
-              stroke={isLight ? "#b8ad96" : "#1a2c47"}
-              strokeWidth="1.2"
-            />
-            {/* Yellow Taxiway Centerline */}
-            <line
-              x1="8"
-              y1={groundY + 12}
-              x2="372"
-              y2={groundY + 12}
-              stroke={isLight ? "rgba(217, 119, 6, 0.6)" : "rgba(245, 158, 11, 0.48)"}
-              strokeWidth="2"
-              strokeDasharray="14 10"
-            />
-            {/* Realistic Soft Contact Shadow under Gear & Fuselage */}
-            <ellipse
-              cx="224"
-              cy={groundY + 1}
-              rx="125"
-              ry="4"
-              fill={isLight ? "rgba(28, 25, 23, 0.24)" : "rgba(0, 0, 0, 0.55)"}
-            />
-          </>
-        ) : (
-          /* Subtle Cirrus Clouds in flight */
-          <g opacity={isLight ? 0.45 : 0.15}>
-            <ellipse cx="80" cy="100" rx="54" ry="7" fill={isLight ? "#ffffff" : "#93c5fd"} />
-            <ellipse cx="280" cy="106" rx="72" ry="9" fill={isLight ? "#ffffff" : "#93c5fd"} />
-          </g>
+        {/* Precision Engineering Dimension Lines & Datum Markers */}
+        <g
+          stroke={isLight ? "rgba(100,116,139,0.25)" : "rgba(56,189,248,0.18)"}
+          strokeWidth="0.6"
+          strokeDasharray="2 2"
+        >
+          {/* Horizontal Reference Baseline (Ground plane) */}
+          <line x1="10" y1={groundY} x2="370" y2={groundY} strokeWidth="0.8" strokeDasharray="none" />
+          {/* Engineering dimension ticks */}
+          <line x1="60" y1={groundY - 4} x2="60" y2={groundY + 4} strokeDasharray="none" />
+          <line x1="340" y1={groundY - 4} x2="340" y2={groundY + 4} strokeDasharray="none" />
+          {/* Vertical Centerline Datum */}
+          <line x1="200" y1="12" x2="200" y2={groundY} />
+        </g>
+
+        {/* Technical Blueprint Typography Callouts in Background */}
+        <g
+          fontFamily="monospace"
+          fontSize="5"
+          fill={isLight ? "rgba(71,85,105,0.45)" : "rgba(148,163,184,0.35)"}
+          letterSpacing="0.8"
+        >
+          <text x="14" y="114">ELEVATION VIEW · SCALE 1:200</text>
+          <text x="200" y="114" textAnchor="middle">
+            L: {spec.length} • B: {spec.wingspan}
+          </text>
+          <text x="366" y="114" textAnchor="end">
+            ICAO {spec.code}
+          </text>
+        </g>
+
+        {/* Soft Precision Aircraft Ground Contact Shadow */}
+        {onGround && (
+          <ellipse
+            cx="224"
+            cy={groundY + 0.5}
+            rx="124"
+            ry="2.5"
+            fill={isLight ? "rgba(15, 23, 42, 0.22)" : "rgba(0, 0, 0, 0.7)"}
+          />
         )}
 
         {/* =========================================================================
@@ -627,21 +629,21 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
               <path
                 d="M 94 36 L 42 12 L 62 12 L 132 40 Z"
                 fill={livery.tailBg}
-                stroke={isLight ? "rgba(15,23,42,0.2)" : "rgba(255,255,255,0.18)"}
+                stroke={isLight ? "rgba(15,23,42,0.25)" : "rgba(255,255,255,0.22)"}
                 strokeWidth="0.8"
               />
-              {/* Airline Tail Emblem Swatch */}
+              {/* Tail Livery Swatch */}
               <path
                 d="M 52 16 L 68 16 L 122 39 L 104 39 Z"
                 fill={livery.tailAccent}
               />
-              {/* Rudder split hinge line */}
-              <line x1="58" y1="12" x2="108" y2="38" stroke="rgba(0,0,0,0.15)" strokeWidth="0.6" />
+              {/* Rudder hinge seam */}
+              <line x1="58" y1="12" x2="108" y2="38" stroke="rgba(0,0,0,0.18)" strokeWidth="0.6" />
 
               {/* Landing Gear */}
               {renderLandingGear(314, 192, 76, "DUAL_AXLE")}
 
-              {/* Main Double-Deck Fuselage (taller profile, bulbous nose) */}
+              {/* Main Double-Deck Fuselage */}
               <path
                 d="M 72 62
                    L 102 36
@@ -651,10 +653,10 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                    L 112 78
                    L 66 64 Z"
                 fill={`url(#${gradId})`}
-                stroke={isLight ? "rgba(30, 41, 59, 0.3)" : "rgba(226, 232, 240, 0.28)"}
+                stroke={isLight ? "rgba(30, 41, 59, 0.4)" : "rgba(226, 232, 240, 0.35)"}
                 strokeWidth="1"
               />
-              {/* Top Crown Highlight */}
+              {/* Top Crown Metallic Highlight */}
               <path
                 d="M 102 36 L 302 36 C 322 36, 336 42, 340 48 L 102 44 Z"
                 fill={`url(#${gradHighlightId})`}
@@ -667,10 +669,10 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                 opacity="0.9"
               />
 
-              {/* Cockpit Windshield (A380 cockpit is uniquely between upper & main deck) */}
+              {/* Cockpit Windshield (between upper & main deck) */}
               <path
                 d="M 326 49 L 338 51.5 L 341 55.5 L 326 55.5 Z"
-                fill="#0f172a"
+                fill="#070c14"
                 stroke="#64748b"
                 strokeWidth="0.6"
               />
@@ -688,7 +690,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
               {renderDoor(206, 54, 14)}
               {renderDoor(304, 54, 14)}
 
-              {/* Airline Billboard Title on Upper Fuselage */}
+              {/* Airline Billboard Title */}
               <text
                 x="218"
                 y="52"
@@ -718,16 +720,13 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                 stroke="#64748b"
                 strokeWidth="0.6"
               />
-              {/* Outer winglet fence */}
               <polygon
                 points="136,80 134,88 139,87 138,81"
                 fill={livery.tailAccent}
               />
 
-              {/* 4 Massive High-Bypass Turbofans (2 on visible wing side!) */}
-              {/* Outer Engine #1 */}
+              {/* 4 Massive High-Bypass Turbofans (2 on visible wing side) */}
               {renderTurbofan(172, 76, 24, 11.5, 0.9)}
-              {/* Inner Engine #2 */}
               {renderTurbofan(214, 80, 28, 13.5, 1.05)}
 
               {/* Horizontal Tailplane (near side) */}
@@ -751,11 +750,11 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                 fill={livery.tailBg}
                 opacity="0.75"
               />
-              {/* Tall Swept Boeing Vertical Fin */}
+              {/* Swept Boeing Vertical Fin */}
               <path
                 d="M 92 38 L 44 14 L 62 14 L 136 44 Z"
                 fill={livery.tailBg}
-                stroke={isLight ? "rgba(15,23,42,0.2)" : "rgba(255,255,255,0.18)"}
+                stroke={isLight ? "rgba(15,23,42,0.25)" : "rgba(255,255,255,0.22)"}
                 strokeWidth="0.8"
               />
               <path
@@ -766,7 +765,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
               {/* Landing Gear */}
               {renderLandingGear(314, 194, 73, "DUAL_AXLE")}
 
-              {/* Boeing 747 Fuselage with Iconic Upper Deck Hump */}
+              {/* Boeing 747 Fuselage with Upper Deck Hump */}
               <path
                 d="M 70 60
                    L 98 44
@@ -778,7 +777,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                    L 108 75
                    L 66 63 Z"
                 fill={`url(#${gradId})`}
-                stroke={isLight ? "rgba(30, 41, 59, 0.3)" : "rgba(226, 232, 240, 0.28)"}
+                stroke={isLight ? "rgba(30, 41, 59, 0.4)" : "rgba(226, 232, 240, 0.35)"}
                 strokeWidth="1"
               />
               <path
@@ -786,32 +785,32 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                 fill={`url(#${gradHighlightId})`}
               />
 
-              {/* Livery Cheatline */}
+              {/* Cheatline */}
               <path
                 d="M 96 70 L 312 70 L 310 72.5 L 94 72.5 Z"
                 fill={livery.cheatline}
                 opacity="0.9"
               />
 
-              {/* 747 Upper-Deck Cockpit Windows */}
+              {/* 747 Cockpit Windows */}
               <path
                 d="M 314 41 L 328 43 L 331 47 L 314 47 Z"
-                fill="#0f172a"
+                fill="#070c14"
                 stroke="#64748b"
                 strokeWidth="0.6"
               />
               <line x1="322" y1="42" x2="322" y2="47" stroke={livery.fuselage} strokeWidth="0.8" />
 
-              {/* Upper Deck Windows (Hump) & Main Deck Windows */}
+              {/* Upper Deck & Main Deck Windows */}
               {!isCargo && renderCabinWindows(41, 266, 300, 5.5)}
               {renderCabinWindows(58, 110, 306, 6, 186, 204)}
 
-              {/* 747 Doors */}
+              {/* Doors */}
               {renderDoor(112, 51, 14)}
               {renderDoor(202, 51, 14)}
               {renderDoor(300, 51, 14)}
 
-              {/* Cargo Front Nose Visor Seam Line (for freighters) */}
+              {/* Cargo Nose Visor Seam Line */}
               {isCargo && (
                 <>
                   <path
@@ -847,14 +846,13 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                 {registration}
               </text>
 
-              {/* Swept Wing with Winglet / Raked Wingtip */}
+              {/* Swept Wing with Winglet */}
               <path
                 d="M 164 71 L 230 71 L 216 79 L 138 79 Z"
                 fill={isLight ? "#cbd5e1" : "#475569"}
                 stroke="#64748b"
                 strokeWidth="0.6"
               />
-              {/* Winglet on wingtip */}
               <polygon
                 points="138,76 134,64 138,64 142,76"
                 fill={livery.tailAccent}
@@ -876,11 +874,11 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
 
           {/* =====================================================================
               CASE 3: MILITARY HEAVY TRANSPORT (C-17, C-130, A400M)
-              High-Wing, T-Tail, Fuselage Sponson Gear, Swept Rear Ramp
+              High-Wing, T-Tail, Sponson Gear, Swept Rear Ramp
               ===================================================================== */}
           {category === "MILITARY_HIGH_WING" && (
             <g id="military_heavy">
-              {/* High T-Tail Stabilizer mounted on top of the fin */}
+              {/* High T-Tail Stabilizer */}
               <path
                 d="M 86 15 L 42 12 L 44 9 L 92 12 Z"
                 fill={livery.tailBg}
@@ -891,7 +889,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
               <path
                 d="M 86 42 L 56 12 L 72 12 L 126 42 Z"
                 fill={livery.tailBg}
-                stroke={isLight ? "rgba(15,23,42,0.3)" : "rgba(255,255,255,0.2)"}
+                stroke={isLight ? "rgba(15,23,42,0.3)" : "rgba(255,255,255,0.22)"}
                 strokeWidth="0.8"
               />
               <path
@@ -899,7 +897,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                 fill={livery.tailAccent}
               />
 
-              {/* High-Wing Shoulder Cap */}
+              {/* High-Wing Shoulder */}
               <path
                 d="M 172 40 L 254 40 L 244 48 L 162 48 Z"
                 fill="#475569"
@@ -907,10 +905,10 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                 strokeWidth="0.7"
               />
 
-              {/* Landing Gear: Sponson blister with multi-wheel bogies */}
+              {/* Landing Gear */}
               {renderLandingGear(312, 198, 76, "SPONSON")}
 
-              {/* Heavy Cargo Fuselage: Swept-up aft ramp & blunt nose */}
+              {/* Fuselage with Upswept Ramp */}
               <path
                 d="M 78 50
                    L 124 42
@@ -920,10 +918,10 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                    L 134 76
                    L 74 54 Z"
                 fill={`url(#${gradId})`}
-                stroke={isLight ? "rgba(30, 41, 59, 0.35)" : "rgba(226, 232, 240, 0.3)"}
+                stroke={isLight ? "rgba(30, 41, 59, 0.4)" : "rgba(226, 232, 240, 0.35)"}
                 strokeWidth="1"
               />
-              {/* Lower Fuselage Landing Gear Sponson Blister */}
+              {/* Sponson Pod */}
               <path
                 d="M 174 72 Q 200 68 226 72 L 224 78 Q 200 81 176 78 Z"
                 fill="#334155"
@@ -931,7 +929,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                 strokeWidth="0.7"
               />
 
-              {/* Rear Cargo Loading Ramp Seam */}
+              {/* Rear Ramp Seam */}
               <line
                 x1="86"
                 y1="52"
@@ -942,19 +940,17 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                 strokeDasharray="2 1.5"
               />
 
-              {/* Cockpit Glazing */}
+              {/* Cockpit */}
               <path
                 d="M 324 48 L 336 50.5 L 338 54.5 L 324 54.5 Z"
-                fill="#0f172a"
+                fill="#070c14"
                 stroke="#64748b"
                 strokeWidth="0.6"
               />
 
-              {/* Paratroop Doors & Crew Entry */}
               {renderDoor(304, 50, 14)}
               {renderDoor(116, 54, 12)}
 
-              {/* Military Insignia & Registration */}
               <text
                 x="220"
                 y="58"
@@ -977,7 +973,6 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                 {registration}
               </text>
 
-              {/* 4 Turbofans / Turboprops suspended under High Wing */}
               {spec.code === "C130" || spec.code === "A400" ? (
                 <>
                   {renderTurboprop(180, 48, 22, 9)}
@@ -1009,7 +1004,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
               <path
                 d="M 90 48 L 64 16 L 78 16 L 128 48 Z"
                 fill={livery.tailBg}
-                stroke={isLight ? "rgba(15,23,42,0.25)" : "rgba(255,255,255,0.2)"}
+                stroke={isLight ? "rgba(15,23,42,0.3)" : "rgba(255,255,255,0.22)"}
                 strokeWidth="0.8"
               />
               <path
@@ -1017,7 +1012,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                 fill={livery.tailAccent}
               />
 
-              {/* High-Wing Center Section */}
+              {/* High-Wing Section */}
               <path
                 d="M 176 46 L 244 46 L 238 52 L 170 52 Z"
                 fill="#475569"
@@ -1025,7 +1020,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                 strokeWidth="0.6"
               />
 
-              {/* Landing Gear: Belly Sponson Housing */}
+              {/* Landing Gear */}
               {renderLandingGear(310, 196, 73, "SPONSON")}
 
               {/* Turboprop Fuselage */}
@@ -1038,7 +1033,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                    L 116 73
                    L 76 60 Z"
                 fill={`url(#${gradId})`}
-                stroke={isLight ? "rgba(30, 41, 59, 0.3)" : "rgba(226, 232, 240, 0.28)"}
+                stroke={isLight ? "rgba(30, 41, 59, 0.35)" : "rgba(226, 232, 240, 0.3)"}
                 strokeWidth="1"
               />
               <path
@@ -1046,7 +1041,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                 fill={`url(#${gradHighlightId})`}
               />
 
-              {/* Lower Fuselage Landing Gear Sponson Pod */}
+              {/* Sponson Pod */}
               <path
                 d="M 182 70 Q 198 67 214 70 L 212 75 Q 198 77 184 75 Z"
                 fill="#334155"
@@ -1061,18 +1056,18 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                 opacity="0.9"
               />
 
-              {/* Cockpit Windshield (Turboprop 4-pane cockpit with side windows) */}
+              {/* Cockpit Windshield */}
               <path
                 d="M 320 53 L 332 55 L 334 58.5 L 320 58.5 Z"
-                fill="#0f172a"
+                fill="#070c14"
                 stroke="#64748b"
                 strokeWidth="0.6"
               />
 
-              {/* Passenger Windows */}
+              {/* Windows */}
               {renderCabinWindows(56, 122, 298, 5.8, 184, 204)}
 
-              {/* Doors: Forward Passenger & Rear Service */}
+              {/* Doors */}
               {renderDoor(120, 52, 14)}
               {renderDoor(294, 52, 14)}
 
@@ -1099,13 +1094,13 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                 {registration}
               </text>
 
-              {/* Turboprop Engine Mounted Under High Wing with Spinning Propeller */}
+              {/* Turboprop Engine with Spinning Propeller Blur */}
               {renderTurboprop(184, 49, 26, 10.5)}
             </g>
           )}
 
           {/* =====================================================================
-              CASE 5: MD-11 TRI-JET HEAVY (Tail-Mounted #2 Engine Pod + Wing Turbofans)
+              CASE 5: MD-11 TRI-JET HEAVY (Tail-Mounted #2 Engine + Wing Turbofans)
               ===================================================================== */}
           {category === "TRIJET_MD11" && (
             <g id="md11_trijet">
@@ -1115,11 +1110,11 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                 fill={livery.tailBg}
                 opacity="0.75"
               />
-              {/* Tail Vertical Fin sitting above the #2 Engine */}
+              {/* Tail Vertical Fin */}
               <path
                 d="M 88 32 L 48 14 L 64 14 L 124 38 Z"
                 fill={livery.tailBg}
-                stroke={isLight ? "rgba(15,23,42,0.2)" : "rgba(255,255,255,0.18)"}
+                stroke={isLight ? "rgba(15,23,42,0.25)" : "rgba(255,255,255,0.22)"}
                 strokeWidth="0.8"
               />
               <path
@@ -1127,7 +1122,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                 fill={livery.tailAccent}
               />
 
-              {/* ICONIC #2 DORSAL TAIL ENGINE POD */}
+              {/* #2 DORSAL TAIL ENGINE POD */}
               <g id="tail_engine_2">
                 <rect
                   x="72"
@@ -1139,10 +1134,8 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                   stroke="#475569"
                   strokeWidth="0.8"
                 />
-                {/* Intake Lip & Fan */}
                 <ellipse cx="116" cy="40.5" rx="2" ry="5.8" fill="#334155" />
                 <rect x="114" y="34.5" width="3.5" height="12" rx="2" fill={`url(#${metalLipId})`} />
-                {/* Exhaust Bullet Cone */}
                 <path
                   d="M 72 36.5 L 63 38.5 L 63 42.5 L 72 44.5 Z"
                   fill="#1e293b"
@@ -1153,7 +1146,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
               {/* Landing Gear */}
               {renderLandingGear(312, 194, 73, "DUAL_AXLE")}
 
-              {/* Widebody Fuselage */}
+              {/* Fuselage */}
               <path
                 d="M 70 60
                    L 102 46
@@ -1163,7 +1156,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                    L 108 75
                    L 66 63 Z"
                 fill={`url(#${gradId})`}
-                stroke={isLight ? "rgba(30, 41, 59, 0.3)" : "rgba(226, 232, 240, 0.28)"}
+                stroke={isLight ? "rgba(30, 41, 59, 0.4)" : "rgba(226, 232, 240, 0.35)"}
                 strokeWidth="1"
               />
               <path
@@ -1181,7 +1174,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
               {/* Cockpit Windshield */}
               <path
                 d="M 322 51 L 334 53 L 336 57 L 322 57 Z"
-                fill="#0f172a"
+                fill="#070c14"
                 stroke="#64748b"
                 strokeWidth="0.6"
               />
@@ -1224,7 +1217,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                 {registration}
               </text>
 
-              {/* Wing & Tall Blended Winglets */}
+              {/* Wing & Blended Winglets */}
               <path
                 d="M 164 71 L 230 71 L 216 79 L 138 79 Z"
                 fill={isLight ? "#cbd5e1" : "#475569"}
@@ -1236,7 +1229,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                 fill={livery.tailAccent}
               />
 
-              {/* Underwing Turbofan Engine */}
+              {/* Underwing Turbofan */}
               {renderTurbofan(196, 73, 29, 13.5, 1.1)}
 
               {/* Near Horizontal Stabilizer */}
@@ -1251,7 +1244,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
 
           {/* =====================================================================
               CASE 6: TWIN-AISLE WIDEBODY (B777, B787, A350, A330)
-              Large Fuselage, Massive Twin Engines, Multi-Wheel Bogies, Raked Wingtips
+              Deep Fuselage, Massive Engines, Multi-Wheel Bogies, Raked Wingtips
               ===================================================================== */}
           {category === "WIDEBODY_TWIN" && (
             <g id="widebody_twin">
@@ -1265,7 +1258,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
               <path
                 d="M 94 40 L 48 16 L 66 16 L 134 44 Z"
                 fill={livery.tailBg}
-                stroke={isLight ? "rgba(15,23,42,0.2)" : "rgba(255,255,255,0.18)"}
+                stroke={isLight ? "rgba(15,23,42,0.25)" : "rgba(255,255,255,0.22)"}
                 strokeWidth="0.8"
               />
               <path
@@ -1273,7 +1266,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                 fill={livery.tailAccent}
               />
 
-              {/* Landing Gear: 777 has 6-wheel triple-axle, others have dual-axle */}
+              {/* Landing Gear */}
               {renderLandingGear(
                 314,
                 194,
@@ -1293,7 +1286,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                    L 108 75
                    L 66 63 Z"
                 fill={`url(#${gradId})`}
-                stroke={isLight ? "rgba(30, 41, 59, 0.3)" : "rgba(226, 232, 240, 0.28)"}
+                stroke={isLight ? "rgba(30, 41, 59, 0.4)" : "rgba(226, 232, 240, 0.35)"}
                 strokeWidth="1"
               />
               <path
@@ -1308,10 +1301,10 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                 opacity="0.9"
               />
 
-              {/* Modern Cockpit Glazing (A350 "sunglasses" or 787 4-pane visor) */}
+              {/* Modern Glass Cockpit Windshield */}
               <path
                 d="M 322 51 L 334 53 L 336 57 L 322 57 Z"
-                fill="#0f172a"
+                fill="#070c14"
                 stroke="#64748b"
                 strokeWidth="0.6"
               />
@@ -1355,7 +1348,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                 {registration}
               </text>
 
-              {/* Wing & Aerodynamic Winglet */}
+              {/* Wing & Raked Wingtip */}
               <path
                 d="M 164 71 L 230 71 L 216 79 L 138 79 Z"
                 fill={isLight ? "#cbd5e1" : "#475569"}
@@ -1396,7 +1389,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
               <path
                 d="M 94 44 L 52 18 L 68 18 L 132 46 Z"
                 fill={livery.tailBg}
-                stroke={isLight ? "rgba(15,23,42,0.2)" : "rgba(255,255,255,0.18)"}
+                stroke={isLight ? "rgba(15,23,42,0.25)" : "rgba(255,255,255,0.22)"}
                 strokeWidth="0.8"
               />
               <path
@@ -1417,7 +1410,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                    L 112 73
                    L 72 63 Z"
                 fill={`url(#${gradId})`}
-                stroke={isLight ? "rgba(30, 41, 59, 0.3)" : "rgba(226, 232, 240, 0.28)"}
+                stroke={isLight ? "rgba(30, 41, 59, 0.4)" : "rgba(226, 232, 240, 0.35)"}
                 strokeWidth="1"
               />
               <path
@@ -1435,7 +1428,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
               {/* Cockpit Windshield */}
               <path
                 d="M 318 53 L 330 55 L 332 58.5 L 318 58.5 Z"
-                fill="#0f172a"
+                fill="#070c14"
                 stroke="#64748b"
                 strokeWidth="0.6"
               />
@@ -1490,7 +1483,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
                 fill={livery.tailAccent}
               />
 
-              {/* CFM LEAP-1B / CFM56 Underwing Turbofan */}
+              {/* CFM LEAP / CFM56 Underwing Turbofan */}
               {renderTurbofan(192, 70, 26, 12, 1)}
 
               {/* Near Horizontal Stabilizer */}
@@ -1504,7 +1497,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
           )}
 
           {/* =====================================================================
-              SHARED REALISTIC LIGHTING EFFECTS
+              PRECISION LIGHTING EFFECTS
               ===================================================================== */}
           {/* Upper Fuselage Red Anti-Collision Beacon */}
           <circle
@@ -1518,19 +1511,42 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
             cy="46"
             r={isEmergency ? "4.5" : "3"}
             fill="#ef4444"
-            opacity="0.35"
+            opacity="0.4"
           />
 
           {/* Tail Cone White Strobe */}
           <circle cx="68" cy="62" r="1.2" fill="#f8fafc" />
 
-          {/* Wingtip Green Navigation Light (Starboard facing viewer) */}
+          {/* Wingtip Green Navigation Light */}
           <circle cx="140" cy="74" r="1.3" fill="#22c55e" />
         </g>
+
+        {/* High-Tech Avionics Scan Line (during photometric photo fetching) */}
+        {isLoadingPhoto && (
+          <g className="animate-pulse">
+            <line
+              x1="220"
+              y1="4"
+              x2="220"
+              y2="116"
+              stroke="#38bdf8"
+              strokeWidth="1.5"
+              opacity="0.8"
+            />
+            <rect
+              x="200"
+              y="4"
+              width="40"
+              height="112"
+              fill="url(#cad_scan_grad)"
+              opacity="0.25"
+            />
+          </g>
+        )}
       </svg>
 
       {/* =========================================================================
-          HIGH-CONTRAST FROSTED FLIGHT DECK CHIPS (Clear of aircraft graphics)
+          HIGH-CONTRAST FROSTED FLIGHT DECK CHIPS
           ========================================================================= */}
       {/* Top Left: Aircraft Model & Registration */}
       <div className="absolute top-2 left-2.5 flex items-center gap-1.5 z-10 pointer-events-none">

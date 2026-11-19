@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { Camera, Layers } from "lucide-react";
+import { Camera, Layers, Maximize2 } from "lucide-react";
 import type { AircraftTypeSpec, AirlineLivery } from "../data/aircraftCatalog.ts";
 import { apiClient, type AircraftPhotoResponse } from "../services/apiClient.ts";
 import type { Aircraft } from "../types/atc.ts";
 import { AircraftSideProfile } from "./AircraftSideProfile.tsx";
+import { AircraftDetailModal } from "./AircraftDetailModal.tsx";
 
 interface AircraftPhotoFrameProps {
   aircraft?: Aircraft;
@@ -34,6 +35,7 @@ export const AircraftPhotoFrame: React.FC<AircraftPhotoFrameProps> = ({
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgError, setImgError] = useState(false);
   const [viewMode, setViewMode] = useState<"PHOTO" | "SVG">("PHOTO");
+  const [showDetailModal, setShowDetailModal] = useState(false);
 
   useEffect(() => {
     setImgLoaded(false);
@@ -78,6 +80,7 @@ export const AircraftPhotoFrame: React.FC<AircraftPhotoFrameProps> = ({
 
   const hasCandidatePhoto = Boolean(photo?.found && photo.url && !imgError);
   const showRealPhoto = hasCandidatePhoto && viewMode === "PHOTO" && imgLoaded;
+  const isLoadingPhoto = photo === null && !imgError;
 
   const fallbackAircraft: Aircraft = aircraft ?? {
     id: effectiveIcao24 || registration || spec.code,
@@ -123,94 +126,139 @@ export const AircraftPhotoFrame: React.FC<AircraftPhotoFrameProps> = ({
   };
 
   return (
-    <div className="relative rounded-lg border border-[var(--atc-border)] overflow-hidden bg-[var(--atc-surface-alt)] shadow-sm h-[132px]">
-      {/* Fallback / Existing Vector Profile (always ready immediately and shown whenever photo is unavailable or SVG selected) */}
+    <>
       <div
-        className={`w-full h-full transition-opacity duration-200 ${
-          showRealPhoto ? "opacity-0 pointer-events-none" : "opacity-100"
-        }`}
+        onClick={() => setShowDetailModal(true)}
+        title="Click to view full aircraft specifications, telemetry & high-res view"
+        className="group relative rounded-lg border border-[var(--atc-border)] hover:border-[var(--atc-accent)] overflow-hidden bg-[var(--atc-surface-alt)] shadow-sm h-[132px] cursor-pointer transition-all"
       >
-        <AircraftSideProfile
-          aircraft={fallbackAircraft}
-          spec={spec}
-          livery={livery}
-          registration={registration}
-          elevationFt={elevationFt}
-          theme={theme}
-          embedded
-        />
-      </div>
-
-      {/* Real Aircraft Photograph Overlay */}
-      {hasCandidatePhoto && photo?.url && (
+        {/* Technical Blueprint Profile (precision CAD elevation blueprint) */}
         <div
-          className={`absolute inset-0 transition-opacity duration-300 ${
-            showRealPhoto ? "opacity-100" : "opacity-0 pointer-events-none"
+          className={`w-full h-full transition-opacity duration-200 ${
+            showRealPhoto ? "opacity-0 pointer-events-none" : "opacity-100"
           }`}
         >
-          <img
-            src={photo.url}
-            alt={`${livery.airlineName} ${spec.model}`}
-            loading="eager"
-            referrerPolicy="no-referrer"
-            onLoad={() => setImgLoaded(true)}
-            onError={() => {
-              setImgError(true);
-              setImgLoaded(false);
-            }}
-            className="w-full h-full object-cover object-center"
+          <AircraftSideProfile
+            aircraft={fallbackAircraft}
+            spec={spec}
+            livery={livery}
+            registration={registration}
+            elevationFt={elevationFt}
+            theme={theme}
+            embedded
+            isLoadingPhoto={isLoadingPhoto}
           />
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/80 via-black/35 to-transparent" />
-          <div className="absolute bottom-1.5 left-2 right-2 flex items-center justify-between gap-2 text-[9px] font-mono text-white/95">
-            <span
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/55 backdrop-blur-xs border border-white/15 truncate max-w-[75%]"
-              title={
-                photo.photographer
-                  ? `${photo.caption ?? spec.model} • Photo: ${photo.photographer} (${photo.source ?? "Wikimedia Commons"})`
-                  : photo.caption
-              }
-            >
-              <Camera className="w-2.5 h-2.5 text-sky-300 shrink-0" />
-              <span className="truncate">
-                {photo.matchedBy === "icao24_hex"
-                  ? `Tail ${registration || effectiveIcao24.toUpperCase()}`
-                  : photo.matchedBy === "registration"
-                  ? `Reg ${registration}`
-                  : photo.matchedBy === "airline_model"
-                  ? `${livery.iataCode} Livery`
-                  : spec.code}{" "}
-                • {photo.photographer ?? photo.source ?? "Wikimedia"}
-              </span>
-            </span>
-          </div>
         </div>
-      )}
 
-      {/* Mode Switcher Badge when real photo is loaded */}
-      {hasCandidatePhoto && imgLoaded && (
-        <button
-          type="button"
-          onClick={() => setViewMode((m) => (m === "PHOTO" ? "SVG" : "PHOTO"))}
-          title={
-            viewMode === "PHOTO"
-              ? "Switch to technical vector aircraft profile"
-              : "Switch back to real aircraft photograph"
-          }
-          className="absolute top-1.5 right-1.5 z-10 px-1.5 py-0.5 rounded text-[9px] font-mono font-bold inline-flex items-center gap-1 bg-black/65 hover:bg-black/85 text-white border border-white/20 backdrop-blur-xs transition-colors cursor-pointer"
-        >
-          {viewMode === "PHOTO" ? (
-            <>
-              <Layers className="w-2.5 h-2.5 text-amber-300" />
-              SVG
-            </>
-          ) : (
-            <>
-              <Camera className="w-2.5 h-2.5 text-sky-300" />
-              PHOTO
-            </>
+        {/* Real Aircraft Photograph Overlay */}
+        {hasCandidatePhoto && photo?.url && (
+          <div
+            className={`absolute inset-0 transition-opacity duration-300 ${
+              showRealPhoto ? "opacity-100" : "opacity-0 pointer-events-none"
+            }`}
+          >
+            <img
+              src={photo.url}
+              alt={`${livery.airlineName} ${spec.model}`}
+              loading="eager"
+              referrerPolicy="no-referrer"
+              onLoad={() => setImgLoaded(true)}
+              onError={() => {
+                setImgError(true);
+                setImgLoaded(false);
+              }}
+              className="w-full h-full object-cover object-center"
+            />
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/80 via-black/35 to-transparent" />
+            <div className="absolute bottom-1.5 left-2 right-2 flex items-center justify-between gap-2 text-[9px] font-mono text-white/95">
+              <span
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/55 backdrop-blur-xs border border-white/15 truncate max-w-[75%]"
+                title={
+                  photo.photographer
+                    ? `${photo.caption ?? spec.model} • Photo: ${photo.photographer} (${photo.source ?? "Wikimedia Commons"})`
+                    : photo.caption
+                }
+              >
+                <Camera className="w-2.5 h-2.5 text-sky-300 shrink-0" />
+                <span className="truncate">
+                  {photo.matchedBy === "icao24_hex"
+                    ? `Tail ${registration || effectiveIcao24.toUpperCase()}`
+                    : photo.matchedBy === "registration"
+                    ? `Reg ${registration}`
+                    : photo.matchedBy === "airline_model"
+                    ? `${livery.iataCode} Livery`
+                    : spec.code}{" "}
+                  • {photo.photographer ?? photo.source ?? "Wikimedia"}
+                </span>
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Controls Overlay in top right */}
+        <div className="absolute top-1.5 right-1.5 z-10 flex items-center gap-1">
+          {/* Details Expand Icon Button */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowDetailModal(true);
+            }}
+            title="Inspect full aircraft technical specifications and telemetry"
+            className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold inline-flex items-center gap-1 bg-black/65 hover:bg-black/90 text-white border border-white/20 backdrop-blur-xs transition-colors cursor-pointer shadow-sm"
+          >
+            <Maximize2 className="w-2.5 h-2.5 text-emerald-400" />
+            <span className="hidden sm:inline">DETAILS</span>
+          </button>
+
+          {/* SVG / PHOTO Switcher Button */}
+          {hasCandidatePhoto && imgLoaded && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setViewMode((m) => (m === "PHOTO" ? "SVG" : "PHOTO"));
+              }}
+              title={
+                viewMode === "PHOTO"
+                  ? "Switch to technical vector blueprint"
+                  : "Switch back to real aircraft photograph"
+              }
+              className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold inline-flex items-center gap-1 bg-black/65 hover:bg-black/90 text-white border border-white/20 backdrop-blur-xs transition-colors cursor-pointer shadow-sm"
+            >
+              {viewMode === "PHOTO" ? (
+                <>
+                  <Layers className="w-2.5 h-2.5 text-amber-300" />
+                  <span>SVG</span>
+                </>
+              ) : (
+                <>
+                  <Camera className="w-2.5 h-2.5 text-sky-300" />
+                  <span>PHOTO</span>
+                </>
+              )}
+            </button>
           )}
-        </button>
-      )}
-    </div>
+        </div>
+
+        {/* Subtle Hover Cue Banner */}
+        <div className="absolute inset-x-0 bottom-0 py-0.5 bg-[var(--atc-accent)]/90 text-stone-950 text-[9px] font-mono font-bold text-center tracking-wider opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+          CLICK TO OPEN FULL AIRCRAFT SPECIFICATIONS & TELEMETRY ↗
+        </div>
+      </div>
+
+      {/* Comprehensive Aircraft Details Modal */}
+      <AircraftDetailModal
+        isOpen={showDetailModal}
+        onClose={() => setShowDetailModal(false)}
+        aircraft={aircraft}
+        spec={spec}
+        livery={livery}
+        registration={registration}
+        elevationFt={elevationFt}
+        photo={photo}
+        theme={theme}
+      />
+    </>
   );
 };
