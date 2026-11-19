@@ -325,19 +325,19 @@ export const IfrFlightPlanModal: React.FC<IfrFlightPlanModalProps> = ({
           <div
             className={`p-3 rounded-lg border ${
               isCleared
-                ? "bg-emerald-950/40 border-emerald-800/60 text-emerald-300"
-                : "bg-amber-950/40 border-amber-800/60 text-amber-300"
+                ? "bg-[var(--atc-emerald-bg)] border-[var(--atc-emerald-border)] text-[var(--atc-emerald)]"
+                : "bg-[var(--atc-amber-bg)] border-[var(--atc-amber-border)] text-[var(--atc-amber)]"
             }`}
           >
             <div className="flex items-center gap-1.5 font-bold text-xs mb-1">
               {isCleared ? (
-                <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+                <CheckCircle className="w-3.5 h-3.5 text-[var(--atc-emerald)]" />
               ) : (
-                <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
+                <AlertCircle className="w-3.5 h-3.5 text-[var(--atc-amber)]" />
               )}
               {isCleared ? "IFR Clearance Issued & Acknowledged" : "Clearance Pending"}
             </div>
-            <p className="text-[11px] leading-relaxed opacity-90">
+            <p className="text-[11px] leading-relaxed text-[var(--atc-text)]">
               {isCleared
                 ? `Cleared to ${formatSpokenDestination(fp?.destinationName ?? aircraft.destinationName ?? fp?.destinationIcao ?? aircraft.destinationIcao ?? "destination")} via ${fp?.sidFix ?? "SID"}, climb and maintain ${fp?.assignedAltitude ?? "5,000 ft"}, departure ${fp?.departureFrequency ?? "124.70"}, squawk ${fp?.assignedBeacon ?? aircraft.squawk}. Ready for pushback with Ground.`
                 : "Aircraft is at gate awaiting IFR route clearance copy from Clearance Delivery controller."}
