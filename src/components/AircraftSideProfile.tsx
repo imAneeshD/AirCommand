@@ -27,20 +27,50 @@ type AirframeCategory =
   | "WIDEBODY_TWIN"
   | "NARROWBODY_TWIN";
 
-function detectAirframeCategory(spec: AircraftTypeSpec): AirframeCategory {
+function detectAirframeCategory(spec: AircraftTypeSpec, aircraft?: Aircraft): AirframeCategory {
   const code = (spec.code || "").toUpperCase();
-  if (code === "A388") return "A380_DOUBLE_DECK";
-  if (code === "B744" || code === "B748") return "B747_HUMP";
-  if (code === "C17" || code === "C130" || code === "A400" || code === "K35R") {
+  const modelLower = (spec.model || "").toLowerCase();
+  if (code === "A388" || code.startsWith("A38") || modelLower.includes("a380")) return "A380_DOUBLE_DECK";
+  if (code === "B744" || code === "B748" || code.startsWith("B74") || modelLower.includes("747")) return "B747_HUMP";
+  if (
+    code === "C17" ||
+    code === "C130" ||
+    code === "A400" ||
+    code === "K35R" ||
+    aircraft?.isMilitary ||
+    modelLower.includes("hercules") ||
+    modelLower.includes("globemaster")
+  ) {
     return "MILITARY_HIGH_WING";
   }
-  if (spec.airframeStyle === "TURBOPROP_REGIONAL" || code === "AT76" || code === "DH8D") {
+  if (
+    spec.airframeStyle === "TURBOPROP_REGIONAL" ||
+    code.startsWith("AT") ||
+    code.startsWith("DH8") ||
+    code.startsWith("Q4") ||
+    modelLower.includes("atr") ||
+    modelLower.includes("dash 8") ||
+    modelLower.includes("q400") ||
+    modelLower.includes("turboprop")
+  ) {
     return "TURBOPROP_HIGH_WING";
   }
-  if (spec.airframeStyle === "TRIJET_MD11" || code === "MD11") {
+  if (spec.airframeStyle === "TRIJET_MD11" || code === "MD11" || code === "DC10" || modelLower.includes("md-11")) {
     return "TRIJET_MD11";
   }
-  if (spec.airframeStyle === "WIDE_BOEING" || spec.airframeStyle === "WIDE_AIRBUS") {
+  if (
+    spec.airframeStyle === "WIDE_BOEING" ||
+    spec.airframeStyle === "WIDE_AIRBUS" ||
+    code.startsWith("B77") ||
+    code.startsWith("B78") ||
+    code.startsWith("A35") ||
+    code.startsWith("A33") ||
+    code.startsWith("A34") ||
+    modelLower.includes("777") ||
+    modelLower.includes("787") ||
+    modelLower.includes("a350") ||
+    modelLower.includes("a330")
+  ) {
     return "WIDEBODY_TWIN";
   }
   return "NARROWBODY_TWIN";
@@ -73,7 +103,7 @@ export const AircraftSideProfile: React.FC<AircraftSideProfileProps> = ({
     aircraft.operationMode === "EMERGENCY_OPERATION" ||
     aircraft.state === "STOPPED_ON_RUNWAY";
 
-  const category = detectAirframeCategory(spec);
+  const category = detectAirframeCategory(spec, aircraft);
   const safeId = aircraft.id.replace(/[^a-zA-Z0-9]/g, "");
   const gradId = `hull_${safeId}`;
   const gradHighlightId = `hull_hi_${safeId}`;

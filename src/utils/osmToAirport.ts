@@ -1022,14 +1022,14 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
       const frontDist = Math.min(0.035, Math.max(0.015, vlen * 0.4));
       const frontX = tcx + dirX * frontDist;
       const frontY = tcy + dirY * frontDist;
-      const gatesToCreate = 4;
+      const gatesToCreate = Math.min(8, Math.max(4, Math.floor(twPool.length / 2)));
 
       for (let gIdx = 0; gIdx < gatesToCreate; gIdx++) {
         let gid = `${prefix}_${gIdx + 1}`;
         if (usedGateNames.has(gid)) gid = `G${gateSeq++}`;
         usedGateNames.add(gid);
 
-        const spread = (gIdx - (gatesToCreate - 1) / 2) * 0.022;
+        const spread = (gIdx - (gatesToCreate - 1) / 2) * 0.024;
         const gx = frontX + perpX * spread;
         const gy = frontY + perpY * spread;
         const px = gx + dirX * 0.02;
@@ -1059,9 +1059,9 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
         const vdy = tw.y - acy;
         const vlen = Math.hypot(vdx, vdy) || 1;
 
-        for (let gIdx = 0; gIdx < 3; gIdx++) {
+        for (let gIdx = 0; gIdx < 6; gIdx++) {
           const gid = `G${gateSeq++}`;
-          const spread = (gIdx - 1) * 0.022;
+          const spread = (gIdx - 2.5) * 0.024;
           const gx = acx + (-vdy / vlen) * spread;
           const gy = acy + (vdx / vlen) * spread;
           const px = gx + (vdx / vlen) * 0.02;
@@ -1079,13 +1079,13 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
       const offset = rampSide * Math.max(0.12, Math.min(0.20, Math.abs(avgCr) || 0.15));
       const pbOffset = offset * 0.65;
 
-      ["T1", "T2", "T3", "T4"].forEach((gid, i) => {
-        const along = primaryRwy.lengthNm * (0.28 + (i % 4) * 0.14);
+      ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8"].forEach((gid, i) => {
+        const along = primaryRwy.lengthNm * (0.20 + (i % 8) * 0.08);
         const gp = runwayPoint(primaryRwy, along, offset);
         const pb = runwayPoint(primaryRwy, along, pbOffset);
         attachGateToNearestTaxiway(gid, gp.x, gp.y, pb.x, pb.y, rampSide >= 0);
         const gn = nodes[`GATE_${gid}`];
-        if (gn) gn.label = i < 2 ? `${gid} (HEAVY)` : gid;
+        if (gn) gn.label = i < 4 ? `${gid} (HEAVY)` : gid;
       });
     }
   }

@@ -11,6 +11,7 @@ import { computeDepAppGuidance } from "../utils/depAppGuidance.ts";
 import { buildResolutionCommands, inspectGroundConflict } from "../utils/groundConflict.ts";
 import { getPendingReadbackClearances, nextId } from "./clearanceEngine.ts";
 import { addRadioMessage, controllerCallsign, submitClearanceDecision } from "./decisionEngine.ts";
+import { findAvailableGateForArrival } from "./simulation.ts";
 import { isRunwayOccupied } from "./validationEngine.ts";
 
 function isBusyWithReadback(ac: Aircraft): boolean {
@@ -1261,6 +1262,12 @@ function autoProcessPilotRequestsForAutonomousControllers(state: SimulationState
       const isArrival = ac.flightKind === "ARRIVAL" || ac.state === "STOPPED_ON_RUNWAY";
       const startNodeId = ac.currentNodeId ?? findNearestGroundNodeId(state.airport, ac.x, ac.y);
       if (startNodeId) {
+        if (isArrival) {
+          const safeGateId = findAvailableGateForArrival(state.airport, ac, state);
+          if (safeGateId && safeGateId !== ac.gateId) {
+            ac.gateId = safeGateId;
+          }
+        }
         const routes = getSuggestedTaxiRoutes(
           state.airport,
           startNodeId,

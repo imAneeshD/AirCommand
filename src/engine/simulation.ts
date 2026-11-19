@@ -194,11 +194,9 @@ export function findBestGateForAircraft(
       upper.includes("HEAVY") ||
       upper.startsWith("H") ||
       upper === "B14" ||
-      upper === "T1" ||
-      upper === "T2" ||
-      upper === "A1" ||
-      upper === "G1" ||
-      upper === "G2" ||
+      upper.startsWith("T") ||
+      upper.startsWith("A") ||
+      upper.startsWith("G") ||
       label.includes("HEAVY");
 
     let baseScore = 90;
@@ -233,7 +231,8 @@ export function findBestGateForAircraft(
     if (randomize) {
       return allGates[Math.floor(Math.random() * allGates.length)] ?? null;
     }
-    return allGates[0] ?? null;
+    const hash = Math.abs((ac.callsign ?? "").split("").reduce((acc, c) => acc + c.charCodeAt(0), 0));
+    return allGates[hash % allGates.length] ?? allGates[0] ?? null;
   }
 
   // 1. First priority: Gates that maintain safe separation (>= 0.035 NM ~65m) from all occupied aircraft
@@ -280,6 +279,75 @@ export function selectSpacedGates(
     occupiedSet.add(g);
   }
   return chosen;
+}
+
+/**
+ * Dynamically resolves an available, crash-free gate stand for an arriving aircraft upon landing.
+ * Ensures the assigned stand is not physically occupied by parked, taxiing, or crashed aircraft.
+ */
+export function findAvailableGateForArrival(
+  airport: AirportLayout,
+  ac: Aircraft,
+  state: SimulationState
+): string {
+  const physicallyOccupied = new Set<string>();
+  for (const id of state.aircraftOrder) {
+    if (id === ac.id) continue;
+    const other = state.aircraft[id];
+    if (
+      !other ||
+      other.state === "COMPLETED_ARRIVAL" ||
+      other.state === "COMPLETED_DEPARTURE"
+    ) {
+      continue;
+    }
+
+    if (other.gateId) {
+      if (
+        other.state === "AT_GATE" ||
+        other.state === "PUSHBACK_APPROVED" ||
+        other.state === "PUSHING_BACK" ||
+        other.state === "PUSHBACK_COMPLETE" ||
+        other.state === "CRASHED"
+      ) {
+        physicallyOccupied.add(other.gateId);
+      } else if (other.flightKind === "ARRIVAL") {
+        if (
+          other.state === "TAXIING" ||
+          other.state === "HOLDING_SHORT" ||
+          other.state === "VACATING_RUNWAY"
+        ) {
+          physicallyOccupied.add(other.gateId);
+        }
+      }
+    }
+  }
+
+  // If current assigned gate is completely free of any physical traffic, retain it
+  if (ac.gateId && !physicallyOccupied.has(ac.gateId)) {
+    return ac.gateId;
+  }
+
+  // Find a free gate maintaining safe stand separation
+  const freeGate = findBestGateForAircraft(
+    airport,
+    {
+      aircraftType: ac.aircraftType,
+      callsign: ac.callsign,
+      isCargo: ac.isCargo,
+      isMilitary: ac.isMilitary,
+      wakeCategory: ac.wakeCategory,
+    },
+    physicallyOccupied,
+    true
+  );
+
+  return (
+    freeGate ??
+    airport.gateIds.find((g) => !physicallyOccupied.has(g)) ??
+    ac.gateId ??
+    airport.gateIds[0]
+  );
 }
 
 export function pickRandomFleetPlane(

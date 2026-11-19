@@ -88,6 +88,11 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
 
   const [deckTab, setDeckTab] = useState<ControllerRole>(fallbackRole);
   const [selectedTaxiRunway, setSelectedTaxiRunway] = useState<RunwayId>("09L");
+  const [selectedArrivalGate, setSelectedArrivalGate] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSelectedArrivalGate(null);
+  }, [ac?.id]);
   const [selectedApproachRunway, setSelectedApproachRunway] = useState<RunwayId>("09L");
   const [turnDir, setTurnDir] = useState<"NEAREST" | "LEFT" | "RIGHT">("NEAREST");
   const [customHeading, setCustomHeading] = useState("090");
@@ -421,12 +426,41 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
     ac.flightKind === "ARRIVAL" ||
     (isDepartureAbortOnRunway && !selectedTaxiRunway);
 
+  const physicallyOccupiedGates = useMemo(() => {
+    const occ = new Set<string>();
+    for (const id of sim.aircraftOrder) {
+      if (id === ac?.id) continue;
+      const other = sim.aircraft[id];
+      if (!other || other.state === "COMPLETED_ARRIVAL" || other.state === "COMPLETED_DEPARTURE") continue;
+      if (other.gateId) {
+        if (
+          other.state === "AT_GATE" ||
+          other.state === "PUSHBACK_APPROVED" ||
+          other.state === "PUSHING_BACK" ||
+          other.state === "PUSHBACK_COMPLETE" ||
+          other.state === "CRASHED" ||
+          other.state === "TAXIING"
+        ) {
+          occ.add(other.gateId);
+        }
+      }
+    }
+    return occ;
+  }, [sim.aircraftOrder, sim.aircraft, ac?.id]);
+
+  const effectiveArrivalGate =
+    selectedArrivalGate ??
+    (ac?.gateId && !physicallyOccupiedGates.has(ac.gateId) ? ac.gateId : null) ??
+    sim.airport.gateIds.find((g) => !physicallyOccupiedGates.has(g)) ??
+    ac?.gateId ??
+    sim.airport.gateIds[0];
+
   const taxiRoutes = effectiveCurrentNodeId
     ? getSuggestedTaxiRoutes(
         sim.airport,
         effectiveCurrentNodeId,
         selectedTaxiRunway,
-        ac.gateId,
+        isArrivalToGate ? effectiveArrivalGate : ac.gateId,
         isArrivalToGate,
         sim,
         ac.id
@@ -652,16 +686,63 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
         <span className="text-[10px] font-mono font-bold text-[var(--atc-text-secondary)] uppercase whitespace-nowrap">
           {isArrivalToGate
             ? isStoppedOnRunway || isPhysicallyOnRunway
-              ? `Taxi to Gate ${ac.gateId ?? "Apron"}`
-              : `Taxi to Gate ${ac.gateId ?? ""}`
+              ? `Taxi to Gate ${effectiveArrivalGate}`
+              : `Taxi to Gate ${effectiveArrivalGate}`
             : `Taxi to Runway ${selectedTaxiRunway ?? ac.targetRunway}`}
         </span>
-        {!isArrivalToGate && (
+        {!isArrivalToGate ? (
           <span className="text-[10px] font-mono text-[var(--atc-muted)] whitespace-nowrap">
             Dest: <strong className="text-[var(--atc-accent-text)]">RWY {selectedTaxiRunway}</strong>
           </span>
+        ) : (
+          <span className="text-[10px] font-mono text-[var(--atc-muted)] whitespace-nowrap">
+            Stand: <strong className="text-[var(--atc-accent-text)]">{effectiveArrivalGate}</strong>
+          </span>
         )}
       </div>
+
+      {isArrivalToGate && sim.airport.gateIds.length > 0 && (
+        <div className="space-y-1 pt-0.5">
+          <div className="flex items-center justify-between text-[9px] font-mono uppercase text-[var(--atc-muted)]">
+            <span>Assign Gate / Stand:</span>
+            {physicallyOccupiedGates.has(effectiveArrivalGate) && (
+              <span className="text-red-400 font-bold flex items-center gap-1">
+                <AlertTriangle className="w-2.5 h-2.5" /> Stand Occupied
+              </span>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-1 max-h-24 overflow-y-auto">
+            {sim.airport.gateIds.map((gid) => {
+              const isOccupied = physicallyOccupiedGates.has(gid);
+              const isSelected = effectiveArrivalGate === gid;
+              return (
+                <button
+                  key={gid}
+                  type="button"
+                  onClick={() => setSelectedArrivalGate(gid)}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition-colors shrink-0 flex items-center gap-1 cursor-pointer ${
+                    isSelected
+                      ? isOccupied
+                        ? "bg-red-950/80 border-red-500 text-red-200 font-bold"
+                        : "bg-[var(--atc-accent-bg)] border-[var(--atc-accent-border)] text-[var(--atc-accent-text)] font-bold shadow-xs"
+                      : isOccupied
+                      ? "bg-[var(--atc-surface)] border-red-500/40 text-red-400 opacity-60 hover:opacity-100"
+                      : "bg-[var(--atc-surface)] border-[var(--atc-border)] text-[var(--atc-muted)] hover:text-[var(--atc-text)] hover:border-[var(--atc-border-hover)]"
+                  }`}
+                  title={isOccupied ? `Stand ${gid} is currently occupied by another aircraft` : `Stand ${gid} is free`}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                      isOccupied ? "bg-red-500 animate-pulse" : "bg-emerald-500"
+                    }`}
+                  />
+                  <span>{gid}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {!isArrivalToGate && sim.airport.runwayIds.length > 0 && (
         <div className="flex flex-wrap items-center gap-1 pt-0.5">
@@ -730,6 +811,7 @@ export const ClearanceControlDeck: React.FC<{ mobileMode?: boolean }> = ({
                             type: "TAXI",
                             parameters: {
                               runway: selectedTaxiRunway,
+                              gate: isArrivalToGate ? effectiveArrivalGate : undefined,
                               routeTaxiways: rt.taxiways,
                               destinationNodeId: rt.destinationNodeId,
                               routeNodeIds: rt.nodeIds,

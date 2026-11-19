@@ -10,6 +10,7 @@ import type { Aircraft, RunwayId, RunwaySpec, SimulationState, TaxiNode } from "
 import { formatGateIcao } from "../utils/natoPhonetics.ts";
 import { completeClearancesOfType, nextId } from "./clearanceEngine.ts";
 import { addRadioMessage, controllerCallsign, formatSpokenDestination } from "./decisionEngine.ts";
+import { findAvailableGateForArrival } from "./simulation.ts";
 import { canAircraftExecuteAction } from "./validationEngine.ts";
 
 export function resolveCrashLocation(
@@ -920,6 +921,10 @@ export function updateAircraftStates(state: SimulationState): void {
                 ac.targetRunway
               );
             } else {
+              const safeGate = findAvailableGateForArrival(state.airport, ac, state);
+              if (safeGate && safeGate !== ac.gateId) {
+                ac.gateId = safeGate;
+              }
               const spokenGate = ac.gateId ? formatGateIcao(ac.gateId) : "";
               issuePilotRequestIfNeeded(
                 state,
