@@ -1299,7 +1299,8 @@ function findShortestTaxiwayPath(
   startNodeId: string,
   destNodeId: string,
   avoidRunwayEntryIds?: Set<string>,
-  nodePenalties?: Map<string, number>
+  nodePenalties?: Map<string, number>,
+  disallowCrossingRunway?: RunwayId
 ): string[] | null {
   if (!airport.nodes[startNodeId] || !airport.nodes[destNodeId]) return null;
   if (startNodeId === destNodeId) return [startNodeId];
@@ -1340,6 +1341,12 @@ function findShortestTaxiwayPath(
     for (const e of adj.get(cur.nodeId) ?? []) {
       if (settled.has(e.to)) continue;
       if (avoidRunwayEntryIds?.has(e.to) && e.to !== destNodeId) continue;
+      if (disallowCrossingRunway && e.runwayCrossing) {
+        const opp = airport.runways[disallowCrossingRunway]?.oppositeId;
+        if (e.runwayCrossing === disallowCrossingRunway || (opp && e.runwayCrossing === opp)) {
+          continue;
+        }
+      }
       const pen = e.to === destNodeId ? 0 : nodePenalties?.get(e.to) ?? 0;
       const nextScore = (curCross + (e.runwayCrossing ? 1 : 0)) * 1_000_000 + (curHops + 1 + pen);
       const prevBest = bestScore.get(e.to);
@@ -1654,7 +1661,8 @@ export function getSuggestedTaxiRoutes(
   };
 
   const collectDiversifiedPaths = (basePrefix: string, dest: string, basePenalties?: Map<string, number>) => {
-    const p1 = findShortestTaxiwayPath(airport, aircraftNodeId, dest, undefined, basePenalties);
+    const disallowRwy = !isArrivalToGate ? targetRunway : undefined;
+    const p1 = findShortestTaxiwayPath(airport, aircraftNodeId, dest, undefined, basePenalties, disallowRwy);
     if (p1) {
       pushPathOption(basePrefix, extractTaxiwaySequence(airport, p1), dest, p1);
     }
@@ -1662,7 +1670,7 @@ export function getSuggestedTaxiRoutes(
     if (sim) {
       const trafficPenalties = buildTrafficPenaltyMap(airport, sim, excludeAircraftId);
       if (trafficPenalties.size > 0) {
-        const bypass = findShortestTaxiwayPath(airport, aircraftNodeId, dest, undefined, trafficPenalties);
+        const bypass = findShortestTaxiwayPath(airport, aircraftNodeId, dest, undefined, trafficPenalties, disallowRwy);
         if (bypass) {
           pushPathOption(basePrefix, extractTaxiwaySequence(airport, bypass), dest, bypass);
         }
@@ -1678,7 +1686,7 @@ export function getSuggestedTaxiRoutes(
       for (let i = startMargin; i < endMargin; i++) {
         divPenalties.set(prevPath[i], (divPenalties.get(prevPath[i]) ?? 0) + (pass === 0 ? 70 : 140));
       }
-      const altPath = findShortestTaxiwayPath(airport, aircraftNodeId, dest, undefined, divPenalties);
+      const altPath = findShortestTaxiwayPath(airport, aircraftNodeId, dest, undefined, divPenalties, disallowRwy);
       if (altPath) {
         pushPathOption(basePrefix, extractTaxiwaySequence(airport, altPath), dest, altPath);
         prevPath = altPath;
