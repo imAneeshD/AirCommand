@@ -406,10 +406,10 @@ export const TopBar: React.FC = () => {
         <button
           onClick={() => setShowEmailModal(true)}
           title={loadSavedUserEmail() ? `Controller Logbook: ${loadSavedUserEmail()}` : "Open Controller Logbook (Set Email)"}
-          className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-cyan-500/30 bg-cyan-950/20 hover:bg-cyan-900/30 text-cyan-400 font-mono text-xs transition-colors cursor-pointer shadow-sm"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-[var(--atc-cyan-border)] bg-[var(--atc-cyan-bg)] hover:bg-[var(--atc-surface-alt)] text-[var(--atc-cyan)] font-mono text-xs transition-colors cursor-pointer shadow-xs"
         >
-          <ShieldCheck className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-          <span className="hidden xl:inline max-w-[120px] truncate font-semibold">
+          <ShieldCheck className="w-3.5 h-3.5 text-[var(--atc-cyan)] shrink-0" />
+          <span className="hidden xl:inline max-w-[150px] truncate font-bold text-[var(--atc-cyan)]">
             {loadSavedUserEmail() || "Logbook"}
           </span>
         </button>
@@ -487,7 +487,7 @@ export const TopBar: React.FC = () => {
                     setSettingsOpen(false);
                     setShowEmailModal(true);
                   }}
-                  className="px-2 py-1 rounded text-[10px] font-bold bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-400 border border-cyan-500/30 transition-colors whitespace-nowrap cursor-pointer"
+                  className="px-2 py-1 rounded text-[10px] font-bold bg-[var(--atc-cyan-bg)] hover:bg-[var(--atc-surface-alt)] text-[var(--atc-cyan)] border border-[var(--atc-cyan-border)] transition-colors whitespace-nowrap cursor-pointer"
                 >
                   {loadSavedUserEmail() ? "Edit" : "Set Email"}
                 </button>
