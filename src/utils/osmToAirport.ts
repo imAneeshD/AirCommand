@@ -294,7 +294,11 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
 
   const features = record.geoJson?.features ?? [];
   const osmTaxiways = features.filter(
-    (f) => f.properties.aeroway === "taxiway" && f.geometry.type === "LineString"
+    (f) =>
+      (f.properties.aeroway === "taxiway" ||
+        f.properties.aeroway === "taxilane" ||
+        f.properties.aeroway === "link") &&
+      f.geometry.type === "LineString"
   );
   const osmGates = features.filter(
     (f) =>
@@ -505,9 +509,13 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
         n.isNorthSide = cr >= 0;
         if (!rwy.holdShortNodeIds.includes(n.id)) rwy.holdShortNodeIds.push(n.id);
 
+        const isNorth = cr >= 0;
         const rwyPt = runwayPoint(rwy, Math.max(0.03, Math.min(rwy.lengthNm - 0.03, al)), 0);
         let entryNode = Object.values(nodes).find(
-          (rn) => rn.runwayId === rwyId && Math.hypot(rn.x - rwyPt.x, rn.y - rwyPt.y) < 0.08
+          (rn) =>
+            rn.runwayId === rwyId &&
+            rn.isNorthSide === isNorth &&
+            Math.hypot(rn.x - rwyPt.x, rn.y - rwyPt.y) < 0.08
         );
         if (!entryNode) {
           nodeSeq += 1;
@@ -520,6 +528,7 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
             kind: isEntry ? "RUNWAY_ENTRY" : "RUNWAY_EXIT",
             label: `${rwyId}/${nodeSeq}`,
             runwayId: rwyId,
+            isNorthSide: isNorth,
           };
           addNode(entryNode);
           if (isEntry) rwy.entryNodeIds.push(eid);
@@ -530,50 +539,63 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
         addEdge(n.id, entryNode.id, twEdge, rwyId);
       }
 
-      // Guarantee every real runway links cleanly into nearest OSM taxiway node even if OSM hold lines omit junction nodes
-      if (rwy.entryNodeIds.length === 0 || rwy.holdShortNodeIds.length === 0) {
-        const twNodes = Object.values(nodes).filter((tn) => tn.kind === "TAXIWAY");
-        for (const frac of [0.08, 0.5, 0.92]) {
-          const rPt = runwayPoint(rwy, rwy.lengthNm * frac, 0);
-          let bestTw: TaxiNode | null = null;
-          let bestD = Infinity;
-          for (const tw of twNodes) {
-            const d = Math.hypot(tw.x - rPt.x, tw.y - rPt.y);
-            if (d < bestD) {
-              bestD = d;
-              bestTw = tw;
+      // Guarantee both sides of the runway (North/cr > 0 and South/cr < 0) have valid hold-shorts and entries
+      const hasNorthHs = rwy.holdShortNodeIds.some((id) => nodes[id]?.isNorthSide === true);
+      const hasSouthHs = rwy.holdShortNodeIds.some((id) => nodes[id]?.isNorthSide === false);
+
+      const twNodes = Object.values(nodes).filter((tn) => tn.kind === "TAXIWAY");
+      const hasNorthTw = twNodes.some((tn) => crossTrackRunwayNm(rwy, tn.x, tn.y) > 0.04);
+      const hasSouthTw = twNodes.some((tn) => crossTrackRunwayNm(rwy, tn.x, tn.y) < -0.04);
+
+      for (const side of [true, false] as const) {
+        const hasHs = side ? hasNorthHs : hasSouthHs;
+        const hasTwOnSide = side ? hasNorthTw : hasSouthTw;
+        if (!hasHs && hasTwOnSide) {
+          const sideTwNodes = twNodes.filter((tn) =>
+            side ? crossTrackRunwayNm(rwy, tn.x, tn.y) > 0.04 : crossTrackRunwayNm(rwy, tn.x, tn.y) < -0.04
+          );
+          for (const frac of [0.08, 0.5, 0.92]) {
+            const rPt = runwayPoint(rwy, rwy.lengthNm * frac, 0);
+            let bestTw: TaxiNode | null = null;
+            let bestD = Infinity;
+            for (const tw of sideTwNodes) {
+              const d = Math.hypot(tw.x - rPt.x, tw.y - rPt.y);
+              if (d < bestD) {
+                bestD = d;
+                bestTw = tw;
+              }
             }
+            if (!bestTw || bestD > 0.35) continue;
+            nodeSeq += 1;
+            const hsId = `OSM_HS_${rwyId}_${side ? "N" : "S"}_${nodeSeq}`;
+            const rNodeId = `OSM_RWY_${rwyId}_${side ? "N" : "S"}_${nodeSeq}`;
+            const hsPt = runwayPoint(rwy, rwy.lengthNm * frac, side ? 0.055 : -0.055);
+            addNode({
+              id: hsId,
+              x: hsPt.x,
+              y: hsPt.y,
+              kind: "HOLD_SHORT",
+              label: `HS ${rwyId}`,
+              holdShortForRunway: rwyId,
+              isNorthSide: side,
+            });
+            addNode({
+              id: rNodeId,
+              x: rPt.x,
+              y: rPt.y,
+              kind: frac < 0.35 ? "RUNWAY_ENTRY" : "RUNWAY_EXIT",
+              label: `${rwyId}/${nodeSeq}`,
+              runwayId: rwyId,
+              isNorthSide: side,
+            });
+            const edgeTw = edges.find((e) => e.from === bestTw!.id)?.taxiway ?? "A";
+            addEdge(bestTw.id, hsId, edgeTw);
+            addEdge(hsId, rNodeId, edgeTw, rwyId);
+            rwy.holdShortNodeIds.push(hsId);
+            rwy.crossingNodeIds.push(rNodeId);
+            if (frac < 0.35) rwy.entryNodeIds.push(rNodeId);
+            else rwy.exitNodeIds.push(rNodeId);
           }
-          if (!bestTw || bestD > 0.45) continue;
-          nodeSeq += 1;
-          const hsId = `OSM_HS_${rwyId}_${nodeSeq}`;
-          const rNodeId = `OSM_RWY_${rwyId}_${nodeSeq}`;
-          const cr = crossTrackRunwayNm(rwy, bestTw.x, bestTw.y);
-          const hsPt = runwayPoint(rwy, rwy.lengthNm * frac, cr >= 0 ? 0.055 : -0.055);
-          addNode({
-            id: hsId,
-            x: hsPt.x,
-            y: hsPt.y,
-            kind: "HOLD_SHORT",
-            label: `HS ${rwyId}`,
-            holdShortForRunway: rwyId,
-            isNorthSide: cr >= 0,
-          });
-          addNode({
-            id: rNodeId,
-            x: rPt.x,
-            y: rPt.y,
-            kind: frac < 0.35 ? "RUNWAY_ENTRY" : "RUNWAY_EXIT",
-            label: `${rwyId}/${nodeSeq}`,
-            runwayId: rwyId,
-          });
-          const edgeTw = edges.find((e) => e.from === bestTw!.id)?.taxiway ?? "A";
-          addEdge(bestTw.id, hsId, edgeTw);
-          addEdge(hsId, rNodeId, edgeTw, rwyId);
-          rwy.holdShortNodeIds.push(hsId);
-          rwy.crossingNodeIds.push(rNodeId);
-          if (frac < 0.35) rwy.entryNodeIds.push(rNodeId);
-          else rwy.exitNodeIds.push(rNodeId);
         }
       }
     }
@@ -637,7 +659,7 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
           let bestOtherRoot: string | null = null;
           let bestU: TaxiNode | null = null;
           let bestV: TaxiNode | null = null;
-          let bestDist = 0.45; // only bridge nearby real infrastructure gaps
+          let bestDist = 0.05; // strictly close taxiway gaps (< 90m), never spanning the airfield
 
           for (const [otherRoot, comp] of byRoot.entries()) {
             if (mergedRoots.has(otherRoot)) continue;
@@ -646,36 +668,42 @@ export function convertAirportBundleToLayout(record: AirportRecord): AirportLayo
               for (const v of mainNodes) {
                 if (v.kind !== "TAXIWAY" && v.kind !== "HOLD_SHORT") continue;
                 const d = Math.hypot(u.x - v.x, u.y - v.y);
-                if (d < bestDist) {
-                  bestDist = d;
-                  bestOtherRoot = otherRoot;
-                  bestU = u;
-                  bestV = v;
+                if (d >= bestDist) continue;
+
+                // CRITICAL SAFETY CHECK: NEVER bridge across an active runway surface!
+                let cutsRunway = false;
+                for (const rwyId of runwayIds) {
+                  const rwy = runways[rwyId];
+                  const cru = crossTrackRunwayNm(rwy, u.x, u.y);
+                  const crv = crossTrackRunwayNm(rwy, v.x, v.y);
+                  const alu = alongRunwayNm(rwy, u.x, u.y);
+                  const alv = alongRunwayNm(rwy, v.x, v.y);
+                  if (
+                    Math.min(alu, alv) <= rwy.lengthNm + 0.03 &&
+                    Math.max(alu, alv) >= -0.03 &&
+                    ((cru > 0.015 && crv < -0.015) || (cru < -0.015 && crv > 0.015))
+                  ) {
+                    cutsRunway = true;
+                    break;
+                  }
                 }
+                if (cutsRunway) continue;
+
+                bestDist = d;
+                bestOtherRoot = otherRoot;
+                bestU = u;
+                bestV = v;
               }
             }
           }
 
           if (!bestOtherRoot || !bestU || !bestV) break;
 
-          const mx = (bestU.x + bestV.x) / 2;
-          const my = (bestU.y + bestV.y) / 2;
-          let crossingRwy: RunwayId | undefined;
-          for (const rwyId of runwayIds) {
-            const rwy = runways[rwyId];
-            const al = alongRunwayNm(rwy, mx, my);
-            const cr = crossTrackRunwayNm(rwy, mx, my);
-            if (al >= -0.04 && al <= rwy.lengthNm + 0.04 && Math.abs(cr) <= rwy.widthNm * 1.15) {
-              crossingRwy = rwyId;
-              break;
-            }
-          }
-
           const neighborTw =
             bestDist <= 0.03
               ? edges.find((e) => e.from === bestU!.id || e.from === bestV!.id)?.taxiway ?? "APRON"
               : "APRON";
-          addEdge(bestU.id, bestV.id, neighborTw, crossingRwy);
+          addEdge(bestU.id, bestV.id, neighborTw);
           mergedRoots.add(bestOtherRoot);
         }
       }
