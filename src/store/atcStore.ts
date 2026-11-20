@@ -46,6 +46,13 @@ import { offlineDb } from "../utils/offlineDb.ts";
 import { convertAirportBundleToLayout } from "../utils/osmToAirport.ts";
 import { radioAudio } from "../utils/radioAudio.ts";
 import { speechPtt } from "../utils/speechRecognitionPtt.ts";
+import type { CockpitControls, PilotChecklistItem, PilotConfig } from "../types/pilot.ts";
+import {
+  DEFAULT_COCKPIT_CONTROLS,
+  INITIAL_CHECKLIST_ITEMS,
+  initializePilotSimulation,
+  stepPilotFlightDeck,
+} from "../engine/pilotEngine.ts";
 import {
   clearSavedAirportId,
   loadSavedAirportId,
@@ -71,7 +78,9 @@ export type AppMode =
   | "SIMULATION"
   | "LIVE_OBSERVATION"
   | "AIRPORT_EDITOR"
-  | "MULTIPLAYER_LOBBY";
+  | "MULTIPLAYER_LOBBY"
+  | "PILOT_SETUP"
+  | "PILOT_COCKPIT";
 
 export type MobileViewTab = "RADAR" | "STRIPS" | "CLEARANCE" | "COMMS";
 
@@ -278,6 +287,19 @@ interface AtcStore {
   toggleSfx: () => void;
   toggleVoice: () => void;
   setVoiceEnabled: (enabled: boolean) => void;
+
+  // Pilot Simulator State & Actions
+  pilotConfig: PilotConfig | null;
+  cockpitControls: CockpitControls;
+  cockpitChecklist: PilotChecklistItem[];
+  pilotAircraftId: string | null;
+  setPilotConfig: (config: PilotConfig | null) => void;
+  launchPilotFlight: (config: PilotConfig) => Promise<void>;
+  updateCockpitControls: (patch: Partial<CockpitControls>) => void;
+  toggleChecklistItem: (id: string) => void;
+  transmitPilotRadioRequest: (
+    requestType: "IFR_CLEARANCE" | "PUSHBACK" | "TAXI" | "TAKEOFF"
+  ) => void;
 }
 
 export function collectNewMessagesSince(
@@ -706,6 +728,14 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
         msg: "Connecting to ATC Relay Center",
         sub: "DISCOVERING MULTIPLAYER CONTROL TOWERS",
       },
+      PILOT_SETUP: {
+        msg: "Opening Flight Dispatch & Briefing",
+        sub: "SELECTING AIRFRAME, AIRLINE & DISPATCH ROUTE",
+      },
+      PILOT_COCKPIT: {
+        msg: "Powering Flight Deck Avionics",
+        sub: "CALIBRATING PFD, ND & VHF TRANSCEIVER",
+      },
     };
     const info = modeInfo[mode] || {
       msg: "Loading Airspace Data...",
@@ -751,6 +781,12 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
   mobileTab: "RADAR",
   setMobileTab: (tab) => set({ mobileTab: tab }),
   minimizedPanels: initialMinimizedPanels,
+
+  // Pilot Simulator Initial State
+  pilotConfig: null,
+  cockpitControls: DEFAULT_COCKPIT_CONTROLS,
+  cockpitChecklist: INITIAL_CHECKLIST_ITEMS,
+  pilotAircraftId: null,
 
   selectedAirportRecord: null,
   selectedAirportGeoJson: null,
@@ -1587,6 +1623,30 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
     const clamped = Math.min(0.1, Math.max(0, realDtSeconds));
     stepSimulation(sim, clamped * sim.timeScale);
 
+    // If active in pilot flight deck, step pilot flight systems, avionics & kinematics
+    if (get().appMode === "PILOT_COCKPIT" && get().pilotAircraftId) {
+      const pId = get().pilotAircraftId!;
+      const cfg = get().pilotConfig;
+      const v1 = cfg?.v1Speed || 135;
+      const vr = cfg?.vrSpeed || 142;
+      const v2 = cfg?.v2Speed || 148;
+      const res = stepPilotFlightDeck({
+        sim,
+        playerAircraftId: pId,
+        controls: get().cockpitControls,
+        checklist: get().cockpitChecklist,
+        v1Speed: v1,
+        vrSpeed: vr,
+        v2Speed: v2,
+        dt: clamped * sim.timeScale,
+        voiceEnabled: get().voiceEnabled,
+      });
+      set({
+        cockpitControls: res.controls,
+        cockpitChecklist: res.checklist,
+      });
+    }
+
     const newMessages = collectNewMessagesSince(sim.radioLog, prevLastMsg);
     dispatchRadioMessagesAudio(sim, newMessages);
 
@@ -2159,4 +2219,113 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
       }
       return { voiceEnabled: enabled, tickVersion: s.tickVersion + 1 };
     }),
+
+  // Pilot Simulator Actions
+  setPilotConfig: (config) => set({ pilotConfig: config }),
+
+  updateCockpitControls: (patch) =>
+    set((s) => ({
+      cockpitControls: { ...s.cockpitControls, ...patch },
+      tickVersion: s.tickVersion + 1,
+    })),
+
+  toggleChecklistItem: (id) =>
+    set((s) => ({
+      cockpitChecklist: s.cockpitChecklist.map((it) =>
+        it.id === id ? { ...it, completed: !it.completed } : it
+      ),
+      tickVersion: s.tickVersion + 1,
+    })),
+
+  launchPilotFlight: async (config: PilotConfig) => {
+    radioAudio.stopAllSpeech();
+    set({
+      globalLoading: {
+        active: true,
+        message: `Boarding ${config.callsign} at ${config.airportIcao}`,
+        submessage: "INITIALIZING FLIGHT DECK SYSTEMS & CLEARANCES",
+      },
+    });
+
+    const bundled = offlineDb.getBundledFallbackAirport(config.airportIcao);
+    let targetLayout: AirportLayout = get().sim.airport;
+    let targetRecord: AirportRecord | undefined = bundled ?? undefined;
+
+    if (bundled) {
+      targetLayout = convertAirportBundleToLayout(bundled);
+    } else {
+      try {
+        const cachedAll = await offlineDb.getAllCachedAirports();
+        const found = cachedAll.find(
+          (a) => a.icao.toUpperCase() === config.airportIcao.toUpperCase()
+        );
+        if (found) {
+          targetRecord = found;
+          targetLayout = convertAirportBundleToLayout(found);
+        }
+      } catch {
+        // Fall back cleanly to existing layout
+      }
+    }
+
+    const { sim: pilotSim, playerAircraftId } = initializePilotSimulation(
+      targetLayout,
+      targetRecord,
+      config
+    );
+
+    set({
+      appMode: "PILOT_COCKPIT",
+      sim: pilotSim,
+      pilotAircraftId: playerAircraftId,
+      pilotConfig: config,
+      cockpitControls: { ...DEFAULT_COCKPIT_CONTROLS },
+      cockpitChecklist: [...INITIAL_CHECKLIST_ITEMS],
+      tickVersion: 0,
+    });
+
+    setTimeout(() => {
+      set({ globalLoading: null });
+    }, 600);
+  },
+
+  transmitPilotRadioRequest: (requestType) => {
+    const { sim, pilotAircraftId, issueClearance } = get();
+    if (!pilotAircraftId) return;
+    const ac = sim.aircraft[pilotAircraftId];
+    if (!ac) return;
+
+    if (requestType === "IFR_CLEARANCE") {
+      issueClearance({
+        aircraftId: pilotAircraftId,
+        type: "IFR_CLEARANCE",
+        parameters: { altitude: 32000, assignedSquawk: "7321" },
+        controller: "DELIVERY",
+      });
+    } else if (requestType === "PUSHBACK") {
+      issueClearance({
+        aircraftId: pilotAircraftId,
+        type: "PUSHBACK",
+        parameters: { facing: ac.targetRunway },
+        controller: "GROUND",
+      });
+      // Release parking brake on pushback start
+      get().updateCockpitControls({ parkingBrake: false });
+    } else if (requestType === "TAXI") {
+      issueClearance({
+        aircraftId: pilotAircraftId,
+        type: "TAXI",
+        parameters: { runway: ac.targetRunway },
+        controller: "GROUND",
+      });
+      get().updateCockpitControls({ parkingBrake: false });
+    } else if (requestType === "TAKEOFF") {
+      issueClearance({
+        aircraftId: pilotAircraftId,
+        type: "TAKEOFF",
+        parameters: { runway: ac.targetRunway },
+        controller: "TOWER",
+      });
+    }
+  },
 }));

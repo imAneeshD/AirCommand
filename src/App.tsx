@@ -16,6 +16,8 @@ import { TopBar } from "./components/TopBar.tsx";
 import { VerificationModal } from "./components/VerificationModal.tsx";
 import { PlaneFlightLoader } from "./components/PlaneFlightLoader.tsx";
 import { UserEmailSessionModal } from "./components/UserEmailSessionModal.tsx";
+import { PilotDispatchScreen } from "./components/PilotDispatchScreen.tsx";
+import { CockpitFlightDeck } from "./components/CockpitFlightDeck.tsx";
 import { useAtcStore } from "./store/atcStore.ts";
 import { radioAudio } from "./utils/radioAudio.ts";
 import { speechPtt } from "./utils/speechRecognitionPtt.ts";
@@ -202,6 +204,8 @@ export function App() {
       {appMode === "LIVE_OBSERVATION" && <LiveTrafficView />}
       {appMode === "AIRPORT_EDITOR" && <AirportGeometryEditor />}
       {appMode === "MULTIPLAYER_LOBBY" && <MultiplayerLobby />}
+      {appMode === "PILOT_SETUP" && <PilotDispatchScreen />}
+      {appMode === "PILOT_COCKPIT" && <CockpitFlightDeck />}
 
       {appMode === "SIMULATION" && (
         <div className="h-screen w-screen flex flex-col overflow-hidden">

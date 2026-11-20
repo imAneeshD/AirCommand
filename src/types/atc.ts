@@ -199,6 +199,7 @@ export interface Aircraft {
   wakeCategory: "MEDIUM" | "HEAVY" | "SUPER";
   isCargo?: boolean;
   isMilitary?: boolean;
+  isPlayerPilot?: boolean;
   flightKind: FlightKind;
   squawk: string;
   flightPlan?: IfrFlightPlan;
