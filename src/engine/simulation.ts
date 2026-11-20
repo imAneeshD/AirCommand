@@ -616,7 +616,11 @@ export function createDepartureAircraft(
   }
 ): Aircraft {
   const gateNodeId = `GATE_${opts.gateId}`;
-  const gateNode = state.airport.nodes[gateNodeId];
+  const gateNode =
+    state.airport.nodes[gateNodeId] ||
+    state.airport.nodes[opts.gateId] ||
+    Object.values(state.airport.nodes).find((n) => n.kind === "GATE") ||
+    Object.values(state.airport.nodes)[0];
   const id = opts.id ?? opts.callsign;
   const acType = opts.aircraftType ?? "B738";
   const meta = deriveFlightMetadata(opts.callsign, "DEPARTURE", state.airport, acType, opts.bearingDeg);
@@ -625,13 +629,13 @@ export function createDepartureAircraft(
   if (opts.destinationIcao) meta.destinationIcao = opts.destinationIcao;
   if (opts.destinationName) meta.destinationName = opts.destinationName;
   const pbNode = state.airport.nodes[`PB_${opts.gateId}`];
-  const gateFacingHeading = pbNode
+  const gateFacingHeading = (pbNode && gateNode)
     ? (() => {
         const deg =
           ((Math.atan2(gateNode.x - pbNode.x, gateNode.y - pbNode.y) * 180) / Math.PI + 360) % 360;
         return deg === 0 ? 360 : Math.round(deg);
       })()
-    : gateNode.isNorthSide
+    : gateNode?.isNorthSide
     ? 0
     : 180;
 
@@ -653,8 +657,8 @@ export function createDepartureAircraft(
     emergencyType: "NONE",
     commStatus: "NORMAL",
     nordoMode: state.config.nordoMode,
-    x: gateNode.x,
-    y: gateNode.y,
+    x: gateNode?.x ?? 0,
+    y: gateNode?.y ?? 0,
     heading: gateFacingHeading,
     altitude: state.airport.elevationFt,
     speed: 0,

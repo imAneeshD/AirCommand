@@ -471,6 +471,14 @@ export const LandingPage: React.FC = () => {
             <Users className="w-3.5 h-3.5" />
             Multiplayer
           </button>
+          <button
+            onClick={() => setAppMode("PILOT_SETUP")}
+            className="px-3 py-1.5 rounded-lg text-[var(--atc-emerald)] bg-[var(--atc-emerald-bg)] hover:bg-[var(--atc-emerald-border)]/30 border border-[var(--atc-emerald-border)] flex items-center gap-1.5 font-bold transition-all shadow-sm"
+          >
+            <PlaneTakeoff className="w-3.5 h-3.5" />
+            <span>Pilot Simulator</span>
+            <span className="text-[9px] uppercase px-1 py-0.2 rounded bg-[var(--atc-emerald)] text-black font-extrabold tracking-wider">NEW</span>
+          </button>
         </nav>
 
         {/* Right Tools & Primary CTA */}
@@ -596,6 +604,15 @@ export const LandingPage: React.FC = () => {
               <Play className="w-4 h-4 fill-current" />
               <span>Launch {activeSelectedAirport.icao} ({selectedRole === "ALL" ? "ALL AUTO" : selectedRole})</span>
               <ArrowRight className="w-4 h-4" />
+            </button>
+
+            <button
+              onClick={() => setAppMode("PILOT_SETUP")}
+              className="px-5 py-3.5 rounded-xl bg-[var(--atc-emerald-bg)] hover:brightness-110 text-[var(--atc-emerald)] font-mono font-extrabold text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg border-2 border-[var(--atc-emerald-border)] transition-all cursor-pointer"
+            >
+              <PlaneTakeoff className="w-4 h-4 text-[var(--atc-emerald)]" />
+              <span>Pilot Simulator</span>
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--atc-emerald)] text-black font-extrabold">NEW</span>
             </button>
 
             <button
