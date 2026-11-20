@@ -9,7 +9,7 @@ import {
 } from "../src/engine/pilotEngine.ts";
 import { createAsteriaAirport } from "../src/data/asteriaAirport.ts";
 import { pilotVoiceCallouts } from "../src/utils/pilotVoiceCallouts.ts";
-import type { PilotConfig } from "../src/types/pilot.ts";
+import type { PilotConfig, CockpitControls } from "../src/types/pilot.ts";
 
 test("Pilot Simulator V-Speeds: accurately calculates V1, Vr, V2 for distinct airframe classes", () => {
   const turboprop = calculateAirframeVSpeeds("AT76");
@@ -196,7 +196,7 @@ test("Pilot Simulator Takeoff Roll & Voice Callouts: accelerates on TOGA and tri
   ac.state = "TAKEOFF_CLEARED";
   ac.speed = 70; // Pre-staged near takeoff speed
 
-  let controls = {
+  let controls: CockpitControls = {
     ...DEFAULT_COCKPIT_CONTROLS,
     battery1: true,
     battery2: true,
@@ -206,7 +206,7 @@ test("Pilot Simulator Takeoff Roll & Voice Callouts: accelerates on TOGA and tri
     engine1N1: 100,
     engine2N1: 100,
     parkingBrake: false,
-    throttle: "TOGA" as const,
+    throttle: "TOGA",
   };
   let checklist = [...INITIAL_CHECKLIST_ITEMS];
 
@@ -235,6 +235,6 @@ test("Pilot Simulator Takeoff Roll & Voice Callouts: accelerates on TOGA and tri
 
   // Verify acceleration occurred
   assert.ok(ac.speed > 135, `Aircraft speed should accelerate above V1 (current: ${ac.speed} kt)`);
-  assert.ok(ac.state === "ROTATE" || ac.state === "CLIMB", `Aircraft state should reach ROTATE or CLIMB (current: ${ac.state})`);
+  assert.ok((ac.state as string) === "ROTATE" || (ac.state as string) === "CLIMB", `Aircraft state should reach ROTATE or CLIMB (current: ${ac.state})`);
   assert.ok(calloutsCaptured.length >= 2, `Takeoff should generate automated voice callouts (captured: ${calloutsCaptured.join(", ")})`);
 });

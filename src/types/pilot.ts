@@ -20,6 +20,14 @@ export interface PilotConfig {
 
 export type ThrottleDetent = "IDLE" | "CLB" | "FLEX" | "TOGA";
 
+export type PilotRadioRequestType =
+  | "IFR_CLEARANCE"
+  | "PUSHBACK"
+  | "TAXI"
+  | "LINE_UP"
+  | "TAKEOFF"
+  | "CLIMB";
+
 export interface CockpitControls {
   battery1: boolean;
   battery2: boolean;
