@@ -46,7 +46,12 @@ import { offlineDb } from "../utils/offlineDb.ts";
 import { convertAirportBundleToLayout } from "../utils/osmToAirport.ts";
 import { radioAudio } from "../utils/radioAudio.ts";
 import { speechPtt } from "../utils/speechRecognitionPtt.ts";
-import type { CockpitControls, PilotChecklistItem, PilotConfig } from "../types/pilot.ts";
+import type {
+  CockpitControls,
+  PilotChecklistItem,
+  PilotConfig,
+  PilotRadioRequestType,
+} from "../types/pilot.ts";
 import {
   DEFAULT_COCKPIT_CONTROLS,
   INITIAL_CHECKLIST_ITEMS,
@@ -297,9 +302,7 @@ interface AtcStore {
   launchPilotFlight: (config: PilotConfig) => Promise<void>;
   updateCockpitControls: (patch: Partial<CockpitControls>) => void;
   toggleChecklistItem: (id: string) => void;
-  transmitPilotRadioRequest: (
-    requestType: "IFR_CLEARANCE" | "PUSHBACK" | "TAXI" | "TAKEOFF"
-  ) => void;
+  transmitPilotRadioRequest: (requestType: PilotRadioRequestType) => void;
 }
 
 export function collectNewMessagesSince(
@@ -2289,43 +2292,237 @@ export const useAtcStore = create<AtcStore>((set, get) => ({
     }, 600);
   },
 
-  transmitPilotRadioRequest: (requestType) => {
-    const { sim, pilotAircraftId, issueClearance } = get();
+  transmitPilotRadioRequest: (requestType: PilotRadioRequestType) => {
+    const { sim, pilotAircraftId, issueClearance, updateCockpitControls } = get();
     if (!pilotAircraftId) return;
     const ac = sim.aircraft[pilotAircraftId];
     if (!ac) return;
 
+    const rwySpec = sim.airport.runways[ac.targetRunway];
+    const rwyHeading = rwySpec ? rwySpec.heading : 90;
+    const dest = ac.destinationName || ac.destinationIcao || "destination";
+
     if (requestType === "IFR_CLEARANCE") {
-      issueClearance({
-        aircraftId: pilotAircraftId,
-        type: "IFR_CLEARANCE",
-        parameters: { altitude: 32000, assignedSquawk: "7321" },
+      // 1. Delivery CRAFT clearance
+      if (ac.flightPlan) {
+        ac.flightPlan.clearanceStatus = "CLEARED";
+      }
+      ac.controller = "GROUND";
+      ac.squawk = "7321";
+
+      addRadioMessage(sim, {
+        sender: ac.callsign,
+        recipient: "DELIVERY",
         controller: "DELIVERY",
+        aircraftId: ac.id,
+        category: "PILOT_REQUEST",
+        text: `Asteria Delivery, ${ac.spokenCallsign} at gate ${ac.gateId || "T1_1"}, request IFR clearance to ${dest}.`,
       });
+
+      const atcClearanceText = `${ac.spokenCallsign}, Delivery, cleared to ${dest} via flight planned route, maintain 5,000 ft, expect FL340 10 minutes after departure, departure frequency 119.50, squawk 7321.`;
+      addRadioMessage(sim, {
+        sender: "DELIVERY",
+        recipient: ac.callsign,
+        controller: "DELIVERY",
+        aircraftId: ac.id,
+        category: "ATC_CLEARANCE",
+        text: atcClearanceText,
+      });
+
+      radioAudio.speakRadio(atcClearanceText, "CONTROLLER", "DELIVERY", true);
+
+      set((s) => ({
+        cockpitChecklist: s.cockpitChecklist.map((it) =>
+          it.id === "ifr" ? { ...it, completed: true } : it
+        ),
+        tickVersion: s.tickVersion + 1,
+      }));
     } else if (requestType === "PUSHBACK") {
-      issueClearance({
-        aircraftId: pilotAircraftId,
-        type: "PUSHBACK",
-        parameters: { facing: ac.targetRunway },
+      // 2. Ground Pushback & Start
+      ac.state = "PUSHING_BACK";
+      ac.requiresPushback = false;
+      ac.controller = "GROUND";
+      updateCockpitControls({ parkingBrake: false });
+
+      addRadioMessage(sim, {
+        sender: ac.callsign,
+        recipient: "GROUND",
         controller: "GROUND",
+        aircraftId: ac.id,
+        category: "PILOT_REQUEST",
+        text: `Asteria Ground, ${ac.spokenCallsign} at gate ${ac.gateId || "T1_1"}, request pushback facing runway ${ac.targetRunway}.`,
       });
-      // Release parking brake on pushback start
-      get().updateCockpitControls({ parkingBrake: false });
+
+      const atcPbText = `${ac.spokenCallsign}, Ground, pushback approved facing runway ${ac.targetRunway}, tail south, report ready to taxi.`;
+      addRadioMessage(sim, {
+        sender: "GROUND",
+        recipient: ac.callsign,
+        controller: "GROUND",
+        aircraftId: ac.id,
+        category: "ATC_CLEARANCE",
+        text: atcPbText,
+      });
+
+      radioAudio.speakRadio(atcPbText, "CONTROLLER", "GROUND", true);
+
+      set((s) => ({
+        cockpitChecklist: s.cockpitChecklist.map((it) =>
+          it.id === "pb_clear" ? { ...it, completed: true } : it
+        ),
+        tickVersion: s.tickVersion + 1,
+      }));
     } else if (requestType === "TAXI") {
-      issueClearance({
-        aircraftId: pilotAircraftId,
-        type: "TAXI",
-        parameters: { runway: ac.targetRunway },
+      // 3. Ground Taxi to Runway
+      const wasAtGateOrPushback = ac.speed === 0 || ac.state === "PUSHBACK_COMPLETE" || ac.state === "AT_GATE";
+      ac.state = "TAXIING";
+      ac.controller = "GROUND";
+      updateCockpitControls({ parkingBrake: false });
+
+      // Align cleanly onto taxiway if still at gate
+      const taxiNode = Object.values(sim.airport.nodes).find(
+        (n) => n.kind === "TAXIWAY" || n.kind === "HOLD_SHORT"
+      );
+      if (taxiNode && wasAtGateOrPushback) {
+        ac.x = taxiNode.x;
+        ac.y = taxiNode.y;
+      }
+
+      addRadioMessage(sim, {
+        sender: ac.callsign,
+        recipient: "GROUND",
         controller: "GROUND",
+        aircraftId: ac.id,
+        category: "PILOT_REQUEST",
+        text: `Asteria Ground, ${ac.spokenCallsign}, request taxi to runway ${ac.targetRunway}.`,
       });
-      get().updateCockpitControls({ parkingBrake: false });
-    } else if (requestType === "TAKEOFF") {
-      issueClearance({
-        aircraftId: pilotAircraftId,
-        type: "TAKEOFF",
-        parameters: { runway: ac.targetRunway },
+
+      const atcTaxiText = `${ac.spokenCallsign}, Ground, taxi to runway ${ac.targetRunway} via taxiway LINK, hold short runway ${ac.targetRunway}.`;
+      addRadioMessage(sim, {
+        sender: "GROUND",
+        recipient: ac.callsign,
+        controller: "GROUND",
+        aircraftId: ac.id,
+        category: "ATC_CLEARANCE",
+        text: atcTaxiText,
+      });
+
+      radioAudio.speakRadio(atcTaxiText, "CONTROLLER", "GROUND", true);
+
+      set((s) => ({
+        cockpitChecklist: s.cockpitChecklist.map((it) =>
+          it.id === "taxi_clear" ? { ...it, completed: true } : it
+        ),
+        tickVersion: s.tickVersion + 1,
+      }));
+    } else if (requestType === "LINE_UP") {
+      // 4. Tower Line Up & Wait
+      ac.state = "LINE_UP_WAIT";
+      ac.controller = "TOWER";
+      ac.speed = 0;
+      updateCockpitControls({ parkingBrake: false });
+
+      if (rwySpec) {
+        ac.x = rwySpec.thresholdX;
+        ac.y = rwySpec.thresholdY;
+        ac.heading = rwyHeading;
+      }
+
+      addRadioMessage(sim, {
+        sender: ac.callsign,
+        recipient: "TOWER",
         controller: "TOWER",
+        aircraftId: ac.id,
+        category: "PILOT_REQUEST",
+        text: `Asteria Tower, ${ac.spokenCallsign}, holding short runway ${ac.targetRunway}, ready for departure.`,
       });
+
+      const atcLuText = `${ac.spokenCallsign}, Tower, runway ${ac.targetRunway}, line up and wait. Traffic on two-mile final.`;
+      addRadioMessage(sim, {
+        sender: "TOWER",
+        recipient: ac.callsign,
+        controller: "TOWER",
+        aircraftId: ac.id,
+        category: "ATC_CLEARANCE",
+        text: atcLuText,
+      });
+
+      radioAudio.speakRadio(atcLuText, "CONTROLLER", "TOWER", true);
+      set((s) => ({ tickVersion: s.tickVersion + 1 }));
+    } else if (requestType === "TAKEOFF") {
+      // 5. Tower Takeoff Clearance
+      ac.state = "TAKEOFF_CLEARED";
+      ac.controller = "TOWER";
+
+      if (rwySpec && ac.altitude <= sim.airport.elevationFt + 10) {
+        if (
+          Math.abs(ac.x - rwySpec.thresholdX) > 0.05 ||
+          Math.abs(ac.y - rwySpec.thresholdY) > 0.05
+        ) {
+          ac.x = rwySpec.thresholdX;
+          ac.y = rwySpec.thresholdY;
+          ac.heading = rwyHeading;
+        }
+      }
+
+      updateCockpitControls({ throttle: "TOGA", parkingBrake: false });
+
+      addRadioMessage(sim, {
+        sender: ac.callsign,
+        recipient: "TOWER",
+        controller: "TOWER",
+        aircraftId: ac.id,
+        category: "PILOT_REQUEST",
+        text: `Asteria Tower, ${ac.spokenCallsign}, runway ${ac.targetRunway}, ready for takeoff.`,
+      });
+
+      const atcToText = `${ac.spokenCallsign}, Tower, wind 270 at 10, runway ${ac.targetRunway}, cleared for takeoff.`;
+      addRadioMessage(sim, {
+        sender: "TOWER",
+        recipient: ac.callsign,
+        controller: "TOWER",
+        aircraftId: ac.id,
+        category: "ATC_CLEARANCE",
+        text: atcToText,
+      });
+
+      radioAudio.speakRadio(atcToText, "CONTROLLER", "TOWER", true);
+
+      set((s) => ({
+        cockpitChecklist: s.cockpitChecklist.map((it) =>
+          it.id === "to_clear" || it.id === "thrust" ? { ...it, completed: true } : it
+        ),
+        tickVersion: s.tickVersion + 1,
+      }));
+    } else if (requestType === "CLIMB") {
+      // 6. Departure Airborne & Fly
+      ac.state = "CLIMB";
+      ac.controller = "DEPARTURE";
+      ac.altitude = sim.airport.elevationFt + 2500;
+      ac.verticalSpeed = 2200;
+      ac.speed = 220;
+      updateCockpitControls({ pitchAngle: 12, throttle: "CLB", gearLever: "UP" });
+
+      addRadioMessage(sim, {
+        sender: ac.callsign,
+        recipient: "DEPARTURE",
+        controller: "DEPARTURE",
+        aircraftId: ac.id,
+        category: "PILOT_REQUEST",
+        text: `Asteria Departure, ${ac.spokenCallsign}, passing 2,500 ft climbing flight level three four zero.`,
+      });
+
+      const atcDepText = `${ac.spokenCallsign}, Departure, radar contact, climb and maintain flight level three four zero, resume own navigation.`;
+      addRadioMessage(sim, {
+        sender: "DEPARTURE",
+        recipient: ac.callsign,
+        controller: "DEPARTURE",
+        aircraftId: ac.id,
+        category: "ATC_CLEARANCE",
+        text: atcDepText,
+      });
+
+      radioAudio.speakRadio(atcDepText, "CONTROLLER", "DEPARTURE", true);
+      set((s) => ({ tickVersion: s.tickVersion + 1 }));
     }
   },
 }));
